@@ -33,7 +33,7 @@ const commands = ["patch", "minor", "major"];
 let [level, ...files] = args._;
 
 if (!commands.includes(level) || args.help) {
-  console.info(`usage: ver command [options] [files...]
+  console.info(`usage: ver [options] command [files...]
 
   Increment semantic versions across your project. Intended for projects with a package.json, but
   works with other files too. Will also create a git commit and tag by default.

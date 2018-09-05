@@ -12,7 +12,7 @@ npm i ver
 
 ## Usage
 ```
-usage: ver command [options] [files...]
+usage: ver [options] command [files...]
 
   Increment semantic versions across your project. Intended for projects with a package.json, but
   works with other files too. Will also create a git commit and tag by default.
