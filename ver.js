@@ -52,7 +52,7 @@ if (!commands.includes(level) || args.help) {
     -b, --base <version>    Base version to use. Default is from the nearest package.json
     -r, --replace <str>     Additional replacement in the format "s#regexp#replacement#flags"
     -g, --gitless           Do not create a git commit and tag
-    -p, --prefix            Prefix tags with a "v" character
+    -p, --no-prefix         Do not prefix tags with a "v" character
     -c, --color             Force-enable color output
     -n, --no-color          Disable color output
     -v, --version           Print the version
@@ -165,7 +165,7 @@ async function main() {
   }
 
   // create git commit and tag
-  const tagName = args.prefix ? `v${newVersion}` : newVersion;
+  const tagName = args["no-prefix"] ? newVersion : `v${newVersion}`;
   try {
     await run("git", ["commit", "-a", "-m", newVersion]);
     await run("git", ["tag", "-a", "-f", "-m", tagName, tagName]);
