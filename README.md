@@ -3,7 +3,7 @@
 
 > CLI to increment semantic versions in your project
 
-Works particularly well for projects with a package.json file, but does not require one as it can update a version string in any file. Will also create a git commit and tag by default.
+Intended for projects with a package.json, but works with any other text-based files too. Will also create a git commit and tag by default.
 
 ## Installation
 ```
@@ -15,7 +15,7 @@ npm i ver
 usage: ver [options] command [files...]
 
   Increment semantic versions across your project. Intended for projects with a package.json, but
-  works with other files too. Will also create a git commit and tag by default.
+  works with any other text-based files too. Will also create a git commit and tag by default.
 
   Commands:
     patch                   Increment patch 0.0.x version

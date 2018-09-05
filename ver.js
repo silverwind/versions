@@ -36,7 +36,7 @@ if (!commands.includes(level) || args.help) {
   console.info(`usage: ver [options] command [files...]
 
   Increment semantic versions across your project. Intended for projects with a package.json, but
-  works with other files too. Will also create a git commit and tag by default.
+  works with any other text-based files too. Will also create a git commit and tag by default.
 
   Commands:
     patch                   Increment patch 0.0.x version
