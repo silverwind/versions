@@ -62,6 +62,9 @@ if (!commands.includes(level) || args.help) {
   exit();
 }
 
+if (args["color"]) process.env.FORCE_COLOR = "1";
+if (args["no-color"]) process.env.FORCE_COLOR = "0";
+
 const replacements = [];
 if (args.replace) {
   args.replace = Array.isArray(args.replace) ? args.replace : [args.replace];
