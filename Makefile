@@ -10,17 +10,20 @@ update:
 	rm -rf node_modules
 	npm i
 
-npm-patch:
-	npm version patch
+patch:
+	$(MAKE) test
+	node ver.js patch
+	$(MAKE) publish
 
-npm-minor:
-	npm version minor
+minor:
+	$(MAKE) test
+	node ver.js minor
+	$(MAKE) publish
 
-npm-major:
-	npm version major
+major:
+	$(MAKE) test
+	node ver.js major
+	$(MAKE) publish
 
-patch: test npm-patch publish
-minor: test npm-minor publish
-major: test npm-major publish
 
-.PHONY: test publish update patch minor major npm-patch npm-minor npm-major
+.PHONY: test publish update patch minor major
