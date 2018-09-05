@@ -1,6 +1,6 @@
 {
   "name": "ver",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "CLI to increment semantic versions in your project",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/ver",
