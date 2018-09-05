@@ -4,9 +4,10 @@
 const args = require("minimist")(process.argv.slice(2), {
   boolean: [
     "c", "color",
+    "g", "gitless",
     "h", "help",
     "n", "no-color",
-    "g", "gitless",
+    "p", "prefix",
     "v", "version",
   ],
   string: [
@@ -16,9 +17,10 @@ const args = require("minimist")(process.argv.slice(2), {
   alias: {
     b: "base",
     c: "color",
-    h: "help",
     g: "gitless",
+    h: "help",
     n: "no-color",
+    p: "prefix",
     r: "replace",
     v: "version",
   }
@@ -48,8 +50,9 @@ if (!commands.includes(level) || args.help) {
 
   Options:
     -b, --base <version>    Base version to use. Default is from the nearest package.json
-    -r, --replace <str>     Additional replacement in the format s#regexp#replacement#flags
+    -r, --replace <str>     Additional replacement in the format "s#regexp#replacement#flags"
     -g, --gitless           Do not create a git commit and tag
+    -p, --prefix            Prefix tags with a "v" character
     -c, --color             Force-enable color output
     -n, --no-color          Disable color output
     -v, --version           Print the version
@@ -162,11 +165,11 @@ async function main() {
   }
 
   // create git commit and tag
+  const tagName = args.prefix ? `$v${newVersion}` : newVersion;
   try {
     await run("git", ["commit", "-a", "-m", newVersion]);
-    await run("git", ["tag", "-a", "-f", "-m", newVersion, newVersion]);
+    await run("git", ["tag", "-a", "-f", "-m", tagName, tagName]);
   } catch (err) {
-    // git errors are already logged on stdout and stderr
     return process.exit(1);
   }
 
@@ -174,8 +177,7 @@ async function main() {
 }
 
 async function run(cmd, args) {
-  const execa = require("execa");
-  const child = execa(cmd, args);
+  const child = require("execa")(cmd, args);
   child.stdout.pipe(process.stdout);
   child.stderr.pipe(process.stderr);
   await child;

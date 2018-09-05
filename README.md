@@ -27,8 +27,9 @@ usage: ver [options] command [files...]
 
   Options:
     -b, --base <version>    Base version to use. Default is from the nearest package.json
-    -r, --replace <str>     Additional replacement in the format s#regexp#replacement#flags
+    -r, --replace <str>     Additional replacement in the format "s#regexp#replacement#flags"
     -g, --gitless           Do not create a git commit and tag
+    -p, --prefix            Prefix tags with a "v" character
     -c, --color             Force-enable color output
     -n, --no-color          Disable color output
     -v, --version           Print the version
