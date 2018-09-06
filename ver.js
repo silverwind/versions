@@ -196,7 +196,8 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
     const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
     newData = pkgStr.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else {
-    newData = oldData.replace(new RegExp(`\b${esc(baseVersion)}\b`, "g"), newVersion);
+    const re = new RegExp(`\\b${esc(baseVersion)}\\b`, "g");
+    newData = oldData.replace(re, newVersion);
   }
 
   if (replacements.length) {
