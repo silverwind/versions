@@ -46,7 +46,7 @@ if (!commands.includes(level) || args.help) {
     -b, --base <version>    Base version to use. Default is from the nearest package.json
     -r, --replace <str>     Additional replacement in the format "s#regexp#replacement#flags"
     -g, --no-git            Do not create a git commit and tag
-    -p, --no-prefix         Do not prefix tags with a "v" character
+    -p, --no-prefix         Do not prefix git tags with a "v" character
     -v, --version           Print the version
     -h, --help              Print this help
 
