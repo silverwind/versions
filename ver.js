@@ -34,15 +34,13 @@ if (!commands.includes(level) || args.help) {
   console.info(`usage: ver [options] command [files...]
 
   Increment semantic versions across your project. Intended for projects with a package.json, but
-  works with any other text-based files too. Will also create a git commit and tag by default.
+  works with other files too. Will create a git commit and tag by default. By default, only the
+  nearest package.json file is modified.
 
   Commands:
     patch                   Increment patch 0.0.x version
     minor                   Increment minor 0.x.0 version
     major                   Increment major x.0.0 version
-
-  Arguments:
-    files                   Files to replace the version in. Default is the nearest package.json
 
   Options:
     -b, --base <version>    Base version to use. Default is from the nearest package.json
@@ -54,8 +52,7 @@ if (!commands.includes(level) || args.help) {
 
   Examples:
     $ ver patch
-    $ ver patch build.js
-    $ ver minor build.js -r "s#[0-9]{4}-[0-9]{2}-[0-9]{2}#$(date +%Y-%m-%d)#g"`);
+    $ ver patch build.js`);
   exit();
 }
 
