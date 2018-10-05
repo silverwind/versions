@@ -4,7 +4,7 @@
 const args = require("minimist")(process.argv.slice(2), {
   boolean: [
     "c", "color",
-    "g", "gitless",
+    "g", "no-git",
     "h", "help",
     "n", "no-color",
     "p", "no-prefix",
@@ -17,7 +17,7 @@ const args = require("minimist")(process.argv.slice(2), {
   alias: {
     b: "base",
     c: "color",
-    g: "gitless",
+    g: "no-git",
     h: "help",
     n: "no-color",
     p: "no-prefix",
@@ -51,7 +51,7 @@ if (!commands.includes(level) || args.help) {
   Options:
     -b, --base <version>    Base version to use. Default is from the nearest package.json
     -r, --replace <str>     Additional replacement in the format "s#regexp#replacement#flags"
-    -g, --gitless           Do not create a git commit and tag
+    -g, --no-git            Do not create a git commit and tag
     -p, --no-prefix         Do not prefix tags with a "v" character
     -c, --color             Force-enable color output
     -n, --no-color          Disable color output
@@ -160,17 +160,15 @@ async function main() {
     borderColor: "green",
   }));
 
-  if (args.gitless) {
-    return exit();
-  }
-
-  // create git commit and tag
-  const tagName = args["no-prefix"] ? newVersion : `v${newVersion}`;
-  try {
-    await run("git", ["commit", "-a", "-m", newVersion]);
-    await run("git", ["tag", "-a", "-f", "-m", tagName, tagName]);
-  } catch (err) {
-    return process.exit(1);
+  if (!args["no-git"]) {
+    // create git commit and tag
+    const tagName = args["no-prefix"] ? newVersion : `v${newVersion}`;
+    try {
+      await run("git", ["commit", "-a", "-m", newVersion]);
+      await run("git", ["tag", "-a", "-f", "-m", tagName, tagName]);
+    } catch (err) {
+      return process.exit(1);
+    }
   }
 
   exit();
