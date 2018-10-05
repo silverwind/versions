@@ -3,10 +3,8 @@
 
 const args = require("minimist")(process.argv.slice(2), {
   boolean: [
-    "c", "color",
     "g", "no-git",
     "h", "help",
-    "n", "no-color",
     "p", "no-prefix",
     "v", "version",
   ],
@@ -16,10 +14,8 @@ const args = require("minimist")(process.argv.slice(2), {
   ],
   alias: {
     b: "base",
-    c: "color",
     g: "no-git",
     h: "help",
-    n: "no-color",
     p: "no-prefix",
     r: "replace",
     v: "version",
@@ -53,8 +49,6 @@ if (!commands.includes(level) || args.help) {
     -r, --replace <str>     Additional replacement in the format "s#regexp#replacement#flags"
     -g, --no-git            Do not create a git commit and tag
     -p, --no-prefix         Do not prefix tags with a "v" character
-    -c, --color             Force-enable color output
-    -n, --no-color          Disable color output
     -v, --version           Print the version
     -h, --help              Print this help
 
@@ -64,9 +58,6 @@ if (!commands.includes(level) || args.help) {
     $ ver minor build.js -r "s#[0-9]{4}-[0-9]{2}-[0-9]{2}#$(date +%Y-%m-%d)#g"`);
   exit();
 }
-
-if (args["color"]) process.env.FORCE_COLOR = "1";
-if (args["no-color"]) process.env.FORCE_COLOR = "0";
 
 const replacements = [];
 if (args.replace) {
@@ -87,8 +78,6 @@ const fs = require("fs-extra");
 const esc = require("escape-string-regexp");
 const semver = require("semver");
 const basename = require("path").basename;
-const chalk = require("chalk");
-const boxen = require("boxen");
 
 async function main() {
   const packageFile = await require("find-up")("package.json");
@@ -152,14 +141,6 @@ async function main() {
     }
   }
 
-  const oldStr = highlightDiff(baseVersion, newVersion, false);
-  const newStr = highlightDiff(newVersion, baseVersion, true);
-
-  console.log(boxen(` Version updated from ${oldStr} to ${newStr} `, {
-    borderStyle: "round",
-    borderColor: "green",
-  }));
-
   if (!args["no-git"]) {
     // create git commit and tag
     const tagName = args["no-prefix"] ? newVersion : `v${newVersion}`;
@@ -209,31 +190,6 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
   } else {
     await fs.writeFile(file, newData);
   }
-}
-
-function highlightDiff(a, b, added) {
-  const aParts = a.split(/\./);
-  const bParts = b.split(/\./);
-  const color = chalk[added ? "green" : "red"];
-  const versionPartRe = /^[0-9a-zA-Z-.]+$/;
-  let res = "";
-
-  for (let i = 0; i < aParts.length; i++) {
-    if (aParts[i] !== bParts[i]) {
-      if (versionPartRe.test(aParts[i])) {
-        res += color(aParts.slice(i).join("."));
-      } else {
-        res += aParts[i].split("").map(char => {
-          return versionPartRe.test(char) ? color(char) : char;
-        }).join("") + color("." + aParts.slice(i + 1).join("."));
-      }
-      break;
-    } else {
-      res += aParts[i] + ".";
-    }
-  }
-
-  return res;
 }
 
 function exit(err) {
