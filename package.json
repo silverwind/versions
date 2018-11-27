@@ -28,13 +28,13 @@
     "escape-string-regexp": "^1.0.5",
     "execa": "^1.0.0",
     "find-up": "^3.0.0",
-    "fs-extra": "^7.0.0",
+    "fs-extra": "^7.0.1",
     "minimist": "^1.2.0",
-    "semver": "^5.5.1"
+    "semver": "^5.6.0"
   },
   "devDependencies": {
-    "eslint": "^5.6.1",
-    "eslint-config-silverwind": "^2.0.9",
-    "updates": "^4.5.0"
+    "eslint": "^5.9.0",
+    "eslint-config-silverwind": "^2.0.10",
+    "updates": "^5.4.0"
   }
 }
