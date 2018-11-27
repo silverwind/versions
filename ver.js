@@ -100,7 +100,7 @@ async function main() {
         throw new Error(`No "version" field found in ${packageFile}`);
       }
     } else {
-      throw new Error(`Unable to obtain base version, either create package,json or specify --base`);
+      throw new Error(`Unable to obtain base version, either create package.json or specify --base`);
     }
   } else {
     baseVersion = args.base;
