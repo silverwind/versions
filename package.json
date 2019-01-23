@@ -1,6 +1,6 @@
 {
   "name": "ver",
-  "version": "3.0.1",
+  "version": "4.0.0",
   "description": "CLI to semantically increment the version in given files and package.json",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/ver",
