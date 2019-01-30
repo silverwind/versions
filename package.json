@@ -35,6 +35,6 @@
   "devDependencies": {
     "eslint": "5.12.1",
     "eslint-config-silverwind": "2.0.14",
-    "updates": "6.2.1"
+    "updates": "6.2.2"
   }
 }
