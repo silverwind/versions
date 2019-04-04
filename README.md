@@ -33,4 +33,17 @@ usage: ver [options] command [files...]
     $ ver patch build.js
 ```
 
+## GPG-signing commits
+
+To automatically sign commits and tags created by `ver` add this to your `~/.gitconfig`:
+
+```
+[user]
+  signingkey = <keyid>
+[commit]
+  gpgsign = true
+[tag]
+  forceSignAnnotated = true
+```
+
 © [silverwind](https://github.com/silverwind), distributed under BSD licence
