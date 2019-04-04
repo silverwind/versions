@@ -37,7 +37,7 @@ usage: ver [options] command [files...]
 
 To automatically sign commits and tags created by `ver` add this to your `~/.gitconfig`:
 
-```
+``` ini
 [user]
   signingkey = <keyid>
 [commit]
