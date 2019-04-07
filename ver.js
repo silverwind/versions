@@ -139,7 +139,7 @@ async function main() {
 
   if (!args["no-git"]) {
     // create git commit and tag
-    const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
+    const tagName = args["prefix"] ? newVersion : `v${newVersion}`;
     try {
       await run("git", ["commit", "-a", "-m", newVersion]);
       await run("git", ["tag", "-f", "-m", tagName, tagName]);
