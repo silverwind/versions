@@ -1,5 +1,6 @@
 test:
 	npx eslint --color --quiet *.js
+	node --trace-deprecation --throw-deprecation test.js
 
 publish:
 	git push -u --tags origin master
