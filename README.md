@@ -1,11 +1,11 @@
 # ver
 [![](https://img.shields.io/npm/v/ver.svg?style=flat)](https://www.npmjs.org/package/ver) [![](https://img.shields.io/npm/dm/ver.svg)](https://www.npmjs.org/package/ver) [![](https://api.travis-ci.org/silverwind/ver.svg?style=flat)](https://travis-ci.org/silverwind/ver)
 
-> CLI to semantically increment the version in given files and package.json
+> Semantically increment a project's version in multiple files
 
 ## Installation
 ```
-npm i ver
+npm i -g ver
 ```
 
 ## Usage
