@@ -5,7 +5,7 @@ const args = require("minimist")(process.argv.slice(2), {
   boolean: [
     "g", "no-git",
     "h", "help",
-    "p", "no-prefix",
+    "p", "prefix",
     "v", "version",
   ],
   string: [
@@ -16,7 +16,7 @@ const args = require("minimist")(process.argv.slice(2), {
     b: "base",
     g: "no-git",
     h: "help",
-    p: "no-prefix",
+    p: "prefix",
     r: "replace",
     v: "version",
   }
