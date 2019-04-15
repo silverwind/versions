@@ -9,11 +9,13 @@ const args = require("minimist")(process.argv.slice(2), {
     "v", "version",
   ],
   string: [
+    "c", "command",
     "r", "replace",
     "_",
   ],
   alias: {
     b: "base",
+    c: "command",
     g: "no-git",
     h: "help",
     p: "prefix",
@@ -45,6 +47,7 @@ if (!commands.includes(level) || args.help) {
                             present, will always be included.
   Options:
     -b, --base <version>    Base version to use. Default is parsed from the nearest package.json
+    -c, --command command   Run a command after files are updated but before git commit and tag
     -r, --replace <str>     Additional replacement in the format "s#regexp#replacement#flags"
     -g, --no-git            Do not create a git commit and tag
     -p, --prefix            Prefix git tags with a "v" character
@@ -54,7 +57,8 @@ if (!commands.includes(level) || args.help) {
   Examples:
     $ ver patch
     $ ver -g minor build.js
-    $ ver -p major build.js`);
+    $ ver -p major build.js
+    $ ver patch -c 'npm run build'`);
   exit();
 }
 
@@ -140,6 +144,11 @@ async function main() {
     }
   }
 
+  if (args.command) {
+    const [cmd, ...cmdargs] = args.command.split(/\s/).filter(s => !!s);
+    await run(cmd, cmdargs);
+  }
+
   if (!args["no-git"]) {
     // create git commit and tag
     const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
@@ -155,6 +164,7 @@ async function main() {
 }
 
 async function run(cmd, args) {
+  console.info(`+ ${cmd}${args && args.length && " "}${(args || []).join(" ")}`);
   const child = require("execa")(cmd, args);
   child.stdout.pipe(process.stdout);
   child.stderr.pipe(process.stderr);

@@ -24,6 +24,7 @@ usage: ver [options] command [files...]
                             present, will always be included.
   Options:
     -b, --base <version>    Base version to use. Default is parsed from the nearest package.json
+    -c, --command command   Run a command after files are updated but before git commit and tag
     -r, --replace <str>     Additional replacement in the format "s#regexp#replacement#flags"
     -g, --no-git            Do not create a git commit and tag
     -p, --prefix            Prefix git tags with a "v" character
@@ -34,6 +35,7 @@ usage: ver [options] command [files...]
     $ ver patch
     $ ver -g minor build.js
     $ ver -p major build.js
+    $ ver patch -c 'npm run build'
 ```
 
 ## Signing commits and tags
