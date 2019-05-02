@@ -145,16 +145,15 @@ async function main() {
   }
 
   if (args.command) {
-    const [cmd, ...cmdargs] = args.command.split(/\s/).filter(s => !!s);
-    await run(cmd, cmdargs);
+    await run(args.command);
   }
 
   if (!args["no-git"]) {
     // create git commit and tag
     const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
     try {
-      await run("git", ["commit", "-a", "-m", newVersion]);
-      await run("git", ["tag", "-f", "-m", newVersion, tagName]);
+      await run(`git commit -a -m ${newVersion}`);
+      await run(`git tag -f -m ${newVersion} ${tagName}`);
     } catch (err) {
       return process.exit(1);
     }
@@ -163,9 +162,9 @@ async function main() {
   exit();
 }
 
-async function run(cmd, args) {
-  console.info(`+ ${cmd}${args && args.length && " "}${(args || []).join(" ")}`);
-  const child = require("execa")(cmd, args);
+async function run(cmd) {
+  console.info(`+ ${cmd}`);
+  const child = require("execa").shell(cmd);
   child.stdout.pipe(process.stdout);
   child.stderr.pipe(process.stderr);
   await child;
