@@ -9,7 +9,7 @@ publish:
 update:
 	npx updates -u
 	rm -rf node_modules
-	npm i --no-package-lock
+	npm i
 
 patch:
 	$(MAKE) test
