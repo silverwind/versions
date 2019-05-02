@@ -154,7 +154,7 @@ async function main() {
     const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
     try {
       await run("git", ["commit", "-a", "-m", newVersion]);
-      await run("git", ["tag", "-f", "-m", tagName, tagName]);
+      await run("git", ["tag", "-f", "-m", newVersion, tagName]);
     } catch (err) {
       return process.exit(1);
     }
