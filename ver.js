@@ -38,21 +38,21 @@ if (!commands.includes(level) || args.help) {
   Semantically increment a project's version in multiple files.
 
   Commands:
-    patch                   Increment patch 0.0.x version
-    minor                   Increment minor 0.x.0 version
-    major                   Increment major x.0.0 version
+    patch                    Increment patch 0.0.x version
+    minor                    Increment minor 0.x.0 version
+    major                    Increment major x.0.0 version
 
   Arguments:
-   files                    Files to handle. Default is the nearest package.json which if
-                            present, will always be included.
+   files                     Files to handle. Default is the nearest package.json which if
+                             present, will always be included.
   Options:
-    -b, --base <version>    Base version to use. Default is parsed from the nearest package.json
-    -c, --command command   Run a command after files are updated but before git commit and tag
-    -r, --replace <str>     Additional replacement in the format "s#regexp#replacement#flags"
-    -g, --no-git            Do not create a git commit and tag
-    -p, --prefix            Prefix git tags with a "v" character
-    -v, --version           Print the version
-    -h, --help              Print this help
+    -b, --base <version>     Base version to use. Default is parsed from the nearest package.json
+    -c, --command <command>  Run a command after files are updated but before git commit and tag
+    -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
+    -g, --no-git             Do not create a git commit and tag
+    -p, --prefix             Prefix git tags with a "v" character
+    -v, --version            Print the version
+    -h, --help               Print this help
 
   Examples:
     $ ver patch
