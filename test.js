@@ -20,34 +20,39 @@ async function exit(err) {
 }
 
 async function run(args) {
-  return await execa.stdout("./ver.js", args.split(/\s+/));
+  return await execa.shell(`node ver.js ${args}`);
 }
 
 async function read() {
   return await JSON.parse(await fs.readFile(pkgFile, "utf8")).version;
 }
 
+async function verify(version) {
+  assert.deepStrictEqual(await read(), version);
+  assert.deepStrictEqual(await fs.readFile(testFile, "utf8"), version);
+  return version;
+}
+
 async function main() {
   pkgStr = await fs.readFile(pkgFile);
 
-  const initialVersion = await read();
-  let version = initialVersion;
+  let version = await read();
   await fs.writeFile(testFile, version);
 
   await run(`patch -g testfile`);
-  version = semver.inc(version, "patch");
-  assert.deepStrictEqual(await read(), version);
-  assert.deepStrictEqual(await fs.readFile(testFile, "utf8"), version);
+  version = await verify(semver.inc(version, "patch"));
 
   await run(`minor -g testfile`);
-  version = semver.inc(version, "minor");
-  assert.deepStrictEqual(await read(), version);
-  assert.deepStrictEqual(await fs.readFile(testFile, "utf8"), version);
+  version = await verify(semver.inc(version, "minor"));
 
   await run(`major -g testfile`);
-  version = semver.inc(version, "major");
-  assert.deepStrictEqual(await read(), version);
-  assert.deepStrictEqual(await fs.readFile(testFile, "utf8"), version);
+  version = await verify(semver.inc(version, "major"));
+
+  await run(`major -g t*stf*le`);
+  version = await verify(semver.inc(version, "major"));
+
+  await run(`major -g testfile testfile`);
+  version = await verify(semver.inc(version, "major"));
 }
 
 main().then(exit).catch(exit);

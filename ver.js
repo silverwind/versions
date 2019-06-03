@@ -80,10 +80,10 @@ if (args.replace) {
 const fs = require("fs-extra");
 const esc = require("escape-string-regexp");
 const semver = require("semver");
-const basename = require("path").basename;
+const {basename, relative} = require("path");
 
 async function main() {
-  const packageFile = await require("find-up")("package.json");
+  const packageFile = relative(__dirname, await require("find-up")("package.json"));
 
   // try to open package.json if it exists
   let pkg, pkgStr;
@@ -117,8 +117,9 @@ async function main() {
     throw new Error(`Invalid base version: ${baseVersion}`);
   }
 
-  // create new version
-  const newVersion = semver.inc(baseVersion, level);
+  // de-glob files args which is needed for dumb shells like
+  // powershell that do not support globbing
+  files = await require("fast-glob")(files);
 
   // make sure package.json is included if present
   if (!files.length) {
@@ -136,6 +137,7 @@ async function main() {
   }
 
   // update files
+  const newVersion = semver.inc(baseVersion, level);
   for (const file of files) {
     if (basename(file) === "package.json") {
       await updateFile({file, baseVersion, newVersion, replacements, pkgStr});
