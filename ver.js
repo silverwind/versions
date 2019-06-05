@@ -80,10 +80,10 @@ if (args.replace) {
 const fs = require("fs-extra");
 const esc = require("escape-string-regexp");
 const semver = require("semver");
-const {basename, relative} = require("path");
+const {basename} = require("path");
 
 async function main() {
-  const packageFile = relative(__dirname, await require("find-up")("package.json"));
+  const packageFile = await require("find-up")("package.json");
 
   // try to open package.json if it exists
   let pkg, pkgStr;
@@ -120,6 +120,12 @@ async function main() {
   // de-glob files args which is needed for dumb shells like
   // powershell that do not support globbing
   files = await require("fast-glob")(files);
+
+  // convert paths to absolute
+  files = await Promise.all(files.map(file => fs.realpath(file)));
+
+  // remove duplicate paths
+  files = Array.from(new Set(files));
 
   // make sure package.json is included if present
   if (!files.length) {
