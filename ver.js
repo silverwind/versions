@@ -243,7 +243,7 @@ function parseMixedArg(arg) {
   } else if (Array.isArray(arg)) {
     return arg;
   } else {
-    return false;
+    return Boolean(arg);
   }
 }
 
