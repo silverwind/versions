@@ -10,6 +10,7 @@ const semver = require("semver");
 const pkgFile = path.join(__dirname, "package.json");
 const testFile = path.join(__dirname, "testfile");
 
+const prefix = "testfile v";
 let pkgStr;
 
 async function exit(err) {
@@ -29,7 +30,7 @@ async function read() {
 
 async function verify(version) {
   assert.deepStrictEqual(await read(), version);
-  assert.deepStrictEqual(await fs.readFile(testFile, "utf8"), version);
+  assert.deepStrictEqual(await fs.readFile(testFile, "utf8"), `${prefix}${version}`);
   return version;
 }
 
@@ -37,7 +38,7 @@ async function main() {
   pkgStr = await fs.readFile(pkgFile);
 
   let version = await read();
-  await fs.writeFile(testFile, version);
+  await fs.writeFile(testFile, `${prefix}${version}`);
 
   await run(`patch -g testfile`);
   version = await verify(semver.inc(version, "patch"));
