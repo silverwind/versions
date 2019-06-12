@@ -20,13 +20,14 @@ usage: ver [options] command [files...]
     major                    Increment major x.0.0 version
 
   Arguments:
-   files                     Files to handle. Default is the nearest package.json which if
-                             present, will always be included.
+   files                     Files to handle. The nearest package.json will always be included
+                             unless the -P argument is given.
   Options:
     -b, --base <version>     Base version to use. Default is parsed from the nearest package.json
     -c, --command <command>  Run a command after files are updated but before git commit and tag
     -d, --date [<date>]      Replace dates in format YYYY-MM-DD with current or given date
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
+    -P, --packageless        Do not include nearest package.json unless it's explicitely given
     -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
     -v, --version            Print the version

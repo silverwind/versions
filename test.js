@@ -42,20 +42,23 @@ async function main() {
   let version = await read();
   await fs.writeFile(testFile, `${prefix}${version}${fromSuffix}`);
 
-  await run(`patch -d -g testfile`);
+  await run(`-P patch -d -g testfile`);
   version = await verify(semver.inc(version, "patch"));
 
-  await run(`--date --gitless minor testfile`);
+  await run(`-P --date --gitless minor testfile`);
   version = await verify(semver.inc(version, "minor"));
 
-  await run(`--gitless --date major testfile`);
+  await run(`--packageless --gitless --date major testfile`);
   version = await verify(semver.inc(version, "major"));
 
-  await run(`-g -d major t*stf*le`);
+  await run(`-g -P -d major t*stf*le`);
   version = await verify(semver.inc(version, "major"));
 
-  await run(`-d -g major testfile testfile`);
+  await run(`-d -g -P major testfile testfile`);
   version = await verify(semver.inc(version, "major"));
+
+  await run(`-dgP minor testfile`);
+  version = await verify(semver.inc(version, "minor"));
 }
 
 main().then(exit).catch(exit);

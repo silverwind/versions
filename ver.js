@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 "use strict";
 
-let args = require("minimist")(process.argv.slice(2), {
+const minOpts = {
   boolean: [
     "g", "gitless",
     "h", "help",
+    "P", "packageless",
     "p", "prefix",
     "v", "version",
   ],
@@ -21,20 +22,22 @@ let args = require("minimist")(process.argv.slice(2), {
     d: "date",
     g: "gitless",
     h: "help",
+    P: "packageless",
     p: "prefix",
     r: "replace",
     v: "version",
   }
-});
+};
+
+const commands = ["patch", "minor", "major"];
+let args = require("minimist")(process.argv.slice(2), minOpts);
+args = fixArgs(commands, args, minOpts);
+let [level, ...files] = args._;
 
 if (args.version) {
   console.info(require(require("path").join(__dirname, "package.json")).version);
   process.exit(0);
 }
-
-const commands = ["patch", "minor", "major"];
-args = fixArgs(commands, args);
-let [level, ...files] = args._;
 
 if (!commands.includes(level) || args.help) {
   console.info(`usage: ver [options] command [files...]
@@ -47,13 +50,14 @@ if (!commands.includes(level) || args.help) {
     major                    Increment major x.0.0 version
 
   Arguments:
-   files                     Files to handle. Default is the nearest package.json which if
-                             present, will always be included.
+   files                     Files to handle. The nearest package.json will always be included
+                             unless the -P argument is given.
   Options:
     -b, --base <version>     Base version to use. Default is parsed from the nearest package.json
     -c, --command <command>  Run a command after files are updated but before git commit and tag
     -d, --date [<date>]      Replace dates in format YYYY-MM-DD with current or given date
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
+    -P, --packageless        Do not include nearest package.json unless it's explicitely given
     -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
     -v, --version            Print the version
@@ -82,11 +86,6 @@ if (args.replace) {
   }
 }
 
-const fs = require("fs-extra");
-const esc = require("escape-string-regexp");
-const semver = require("semver");
-const {basename} = require("path");
-
 let date = parseMixedArg(args.date);
 if (date) {
   if (date === true) {
@@ -99,6 +98,11 @@ if (date) {
     exit(`Invalid date argument: ${date}`);
   }
 }
+
+const fs = require("fs-extra");
+const esc = require("escape-string-regexp");
+const semver = require("semver");
+const {basename} = require("path");
 
 async function main() {
   const packageFile = await require("find-up")("package.json");
@@ -174,7 +178,7 @@ async function main() {
     await run(args.command);
   }
 
-  if (!args["no-git"]) {
+  if (!args["gitless"]) {
     // create git commit and tag
     const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
     try {
@@ -244,27 +248,32 @@ function parseMixedArg(arg) {
 }
 
 // handle minimist parsing error like '-d patch'
-function fixArgs(commands, args) {
+function fixArgs(commands, args, minOpts) {
+  for (const key of Object.keys(minOpts.alias)) {
+    delete args[key];
+  }
+
   if (commands.includes(args.date)) {
     args._ = [args.date, ...args._];
     args.date = true;
-    args.d = true;
   }
   if (commands.includes(args.base)) {
     args._ = [args.base, ...args._];
     args.base = true;
-    args.b = true;
   }
   if (commands.includes(args.command)) {
     args._ = [args.command, ...args._];
     args.command = "";
-    args.c = "";
   }
   if (commands.includes(args.replace)) {
     args._ = [args.replace, ...args._];
     args.replace = "";
-    args.r = "";
   }
+  if (commands.includes(args.packageless)) {
+    args._ = [args.packageless, ...args._];
+    args.packageless = true;
+  }
+
   return args;
 }
 
