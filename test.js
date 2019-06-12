@@ -10,7 +10,9 @@ const semver = require("semver");
 const pkgFile = path.join(__dirname, "package.json");
 const testFile = path.join(__dirname, "testfile");
 
-const prefix = "testfile v";
+const prefix = `testfile v`;
+const fromSuffix = ` (1999-01-01)`;
+const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;
 let pkgStr;
 
 async function exit(err) {
@@ -30,7 +32,7 @@ async function read() {
 
 async function verify(version) {
   assert.deepStrictEqual(await read(), version);
-  assert.deepStrictEqual(await fs.readFile(testFile, "utf8"), `${prefix}${version}`);
+  assert.deepStrictEqual(await fs.readFile(testFile, "utf8"), `${prefix}${version}${toSuffix}`);
   return version;
 }
 
@@ -38,21 +40,21 @@ async function main() {
   pkgStr = await fs.readFile(pkgFile);
 
   let version = await read();
-  await fs.writeFile(testFile, `${prefix}${version}`);
+  await fs.writeFile(testFile, `${prefix}${version}${fromSuffix}`);
 
-  await run(`patch -g testfile`);
+  await run(`patch -d -g testfile`);
   version = await verify(semver.inc(version, "patch"));
 
-  await run(`minor -g testfile`);
+  await run(`minor -d -g testfile`);
   version = await verify(semver.inc(version, "minor"));
 
-  await run(`major -g testfile`);
+  await run(`major -d -g testfile`);
   version = await verify(semver.inc(version, "major"));
 
-  await run(`major -g t*stf*le`);
+  await run(`major -d -g t*stf*le`);
   version = await verify(semver.inc(version, "major"));
 
-  await run(`major -g testfile testfile`);
+  await run(`major -d -g testfile testfile`);
   version = await verify(semver.inc(version, "major"));
 }
 

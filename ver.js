@@ -10,12 +10,14 @@ const args = require("minimist")(process.argv.slice(2), {
   ],
   string: [
     "c", "command",
+    "d", "date",
     "r", "replace",
     "_",
   ],
   alias: {
     b: "base",
     c: "command",
+    d: "date",
     g: "no-git",
     h: "help",
     p: "prefix",
@@ -48,6 +50,7 @@ if (!commands.includes(level) || args.help) {
   Options:
     -b, --base <version>     Base version to use. Default is parsed from the nearest package.json
     -c, --command <command>  Run a command after files are updated but before git commit and tag
+    -d, --date [<date>]      Replace dates in format YYYY-MM-DD with current or given date
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
     -g, --no-git             Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
@@ -81,6 +84,19 @@ const fs = require("fs-extra");
 const esc = require("escape-string-regexp");
 const semver = require("semver");
 const {basename} = require("path");
+
+let date = parseMixedArg(args.date);
+if (date) {
+  if (date === true) {
+    date = (new Date()).toISOString().substring(0, 10);
+  } else if (Array.isArray(date)) {
+    date = date[date.length - 1];
+  }
+
+  if (typeof date !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) {
+    exit(`Invalid date argument: ${date}`);
+  }
+}
 
 async function main() {
   const packageFile = await require("find-up")("package.json");
@@ -195,6 +211,11 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
     newData = oldData.replace(re, newVersion);
   }
 
+  if (date) {
+    const re = new RegExp(`([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)`, "g");
+    newData = newData.replace(re, (_, p1, p2) => `${p1}${date}${p2}`);
+  }
+
   if (replacements.length) {
     for (const replacement of replacements) {
       newData = newData.replace(replacement.re, replacement.replacement);
@@ -205,6 +226,18 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
     throw new Error(`No replacement made in ${file}`);
   } else {
     await fs.writeFile(file, newData);
+  }
+}
+
+function parseMixedArg(arg) {
+  if (arg === "") {
+    return true;
+  } else if (typeof arg === "string") {
+    return arg.includes(",") ? arg.split(",") : [arg];
+  } else if (Array.isArray(arg)) {
+    return arg;
+  } else {
+    return false;
   }
 }
 

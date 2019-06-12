@@ -25,6 +25,7 @@ usage: ver [options] command [files...]
   Options:
     -b, --base <version>     Base version to use. Default is parsed from the nearest package.json
     -c, --command <command>  Run a command after files are updated but before git commit and tag
+    -d, --date [<date>]      Replace dates in format YYYY-MM-DD with current or given date
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
     -g, --no-git             Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
