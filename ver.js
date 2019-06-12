@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 "use strict";
 
-const args = require("minimist")(process.argv.slice(2), {
+let args = require("minimist")(process.argv.slice(2), {
   boolean: [
-    "g", "no-git",
+    "g", "gitless",
     "h", "help",
     "p", "prefix",
     "v", "version",
   ],
   string: [
+    "b", "base",
     "c", "command",
     "d", "date",
     "r", "replace",
@@ -18,7 +19,7 @@ const args = require("minimist")(process.argv.slice(2), {
     b: "base",
     c: "command",
     d: "date",
-    g: "no-git",
+    g: "gitless",
     h: "help",
     p: "prefix",
     r: "replace",
@@ -32,6 +33,7 @@ if (args.version) {
 }
 
 const commands = ["patch", "minor", "major"];
+args = fixArgs(commands, args);
 let [level, ...files] = args._;
 
 if (!commands.includes(level) || args.help) {
@@ -52,7 +54,7 @@ if (!commands.includes(level) || args.help) {
     -c, --command <command>  Run a command after files are updated but before git commit and tag
     -d, --date [<date>]      Replace dates in format YYYY-MM-DD with current or given date
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
-    -g, --no-git             Do not create a git commit and tag
+    -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
     -v, --version            Print the version
     -h, --help               Print this help
@@ -239,6 +241,31 @@ function parseMixedArg(arg) {
   } else {
     return false;
   }
+}
+
+// handle minimist parsing error like '-d patch'
+function fixArgs(commands, args) {
+  if (commands.includes(args.date)) {
+    args._ = [args.date, ...args._];
+    args.date = true;
+    args.d = true;
+  }
+  if (commands.includes(args.base)) {
+    args._ = [args.base, ...args._];
+    args.base = true;
+    args.b = true;
+  }
+  if (commands.includes(args.command)) {
+    args._ = [args.command, ...args._];
+    args.command = "";
+    args.c = "";
+  }
+  if (commands.includes(args.replace)) {
+    args._ = [args.replace, ...args._];
+    args.replace = "";
+    args.r = "";
+  }
+  return args;
 }
 
 function exit(err) {
