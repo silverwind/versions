@@ -26,16 +26,16 @@
   ],
   "dependencies": {
     "escape-string-regexp": "2.0.0",
-    "execa": "1.0.0",
-    "fast-glob": "2.2.7",
-    "find-up": "4.0.0",
+    "execa": "2.0.1",
+    "fast-glob": "3.0.3",
+    "find-up": "4.1.0",
     "fs-extra": "8.0.1",
     "minimist": "1.2.0",
-    "semver": "6.1.1"
+    "semver": "6.1.2"
   },
   "devDependencies": {
-    "eslint": "5.16.0",
-    "eslint-config-silverwind": "3.0.3",
-    "updates": "8.1.0"
+    "eslint": "6.0.1",
+    "eslint-config-silverwind": "4.0.0",
+    "updates": "8.1.3"
   }
 }

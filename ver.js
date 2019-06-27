@@ -194,7 +194,7 @@ async function main() {
 
 async function run(cmd) {
   console.info(`+ ${cmd}`);
-  const child = require("execa").shell(cmd);
+  const child = require("execa")(cmd, {shell: true});
   child.stdout.pipe(process.stdout);
   child.stderr.pipe(process.stderr);
   await child;
