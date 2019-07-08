@@ -99,7 +99,11 @@ if (date) {
   }
 }
 
-const {readFile, writeFile, stat, realpath} = require("fs-extra");
+const {promisify} = require("util");
+const readFile = promisify(require("fs").readFile);
+const writeFile = promisify(require("fs").writeFile);
+const stat = promisify(require("fs").stat);
+const realpath = promisify(require("fs").realpath);
 const semver = require("semver");
 const {basename} = require("path");
 

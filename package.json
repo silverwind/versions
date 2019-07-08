@@ -28,7 +28,6 @@
     "execa": "2.0.1",
     "fast-glob": "3.0.3",
     "find-up": "4.1.0",
-    "fs-extra": "8.0.1",
     "minimist": "1.2.0",
     "semver": "6.1.2"
   },
