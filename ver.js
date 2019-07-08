@@ -50,14 +50,14 @@ if (!commands.includes(level) || args.help) {
     major                    Increment major x.0.0 version
 
   Arguments:
-   files                     Files to handle. The nearest package.json will always be included
-                             unless the -P argument is given.
+   files                     Files to do version replacement in. The nearest package.json and
+                             package-lock.json will always be included unless the -P argument is given.
   Options:
     -b, --base <version>     Base version to use. Default is parsed from the nearest package.json
     -c, --command <command>  Run a command after files are updated but before git commit and tag
     -d, --date [<date>]      Replace dates in format YYYY-MM-DD with current or given date
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
-    -P, --packageless        Do not include nearest package.json unless it's explicitely given
+    -P, --packageless        Do not include package.json and package-lock.json unless explicitely given
     -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
     -v, --version            Print the version
@@ -106,9 +106,10 @@ const stat = promisify(require("fs").stat);
 const realpath = promisify(require("fs").realpath);
 const semver = require("semver");
 const {basename} = require("path");
+const findUp = require("find-up");
 
 async function main() {
-  const packageFile = await require("find-up")("package.json");
+  const packageFile = await findUp("package.json");
 
   // try to open package.json if it exists
   let pkg, pkgStr;
@@ -152,11 +153,21 @@ async function main() {
   // remove duplicate paths
   files = Array.from(new Set(files));
 
-  // make sure package.json is included if present
+  if (!args.packageless) {
+    // include package.json if present
+    if (packageFile && !files.includes(packageFile)) {
+      files.push(packageFile);
+    }
+
+    // include package-lock.json if present
+    const packageLockFile = await findUp("package-lock.json");
+    if (packageLockFile && !files.includes(packageLockFile)) {
+      files.push(packageLockFile);
+    }
+  }
+
   if (!files.length) {
-    files = [packageFile];
-  } else if (packageFile && !files.includes(packageFile)) {
-    files.push(packageFile);
+    throw new Error(`Found no files to do replacements in`);
   }
 
   // verify files exist
@@ -215,6 +226,13 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
   if (pkgStr) {
     const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
     newData = pkgStr.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
+  } else if (basename(file) === "package-lock.json") {
+    // special case for package-lock.json which contains a lot of version
+    // strings which make regexp replacement risky. From a few tests on
+    // Node.js 12, key order seems to be preserved through parse and stringify.
+    newData = JSON.parse(oldData);
+    newData.version = newVersion;
+    newData = JSON.stringify(newData, null, 2);
   } else {
     const re = new RegExp(esc(baseVersion), "g");
     newData = oldData.replace(re, newVersion);
