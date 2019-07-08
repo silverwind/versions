@@ -3,7 +3,10 @@
 const assert = require("assert");
 const process = require("process");
 const execa = require("execa");
-const fs = require("fs-extra");
+const {promisify} = require("util");
+const readFile = promisify(require("fs").readFile);
+const writeFile = promisify(require("fs").writeFile);
+const unlink = promisify(require("fs").unlink);
 const path = require("path");
 const semver = require("semver");
 
@@ -16,8 +19,8 @@ const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;
 let pkgStr;
 
 async function exit(err) {
-  if (pkgStr) await fs.writeFile(pkgFile, pkgStr);
-  await fs.unlink(testFile);
+  if (pkgStr) await writeFile(pkgFile, pkgStr);
+  await unlink(testFile);
   if (err) console.info(err);
   process.exit(err ? 1 : 0);
 }
@@ -27,20 +30,20 @@ async function run(args) {
 }
 
 async function read() {
-  return await JSON.parse(await fs.readFile(pkgFile, "utf8")).version;
+  return await JSON.parse(await readFile(pkgFile, "utf8")).version;
 }
 
 async function verify(version) {
   assert.deepStrictEqual(await read(), version);
-  assert.deepStrictEqual(await fs.readFile(testFile, "utf8"), `${prefix}${version}${toSuffix}`);
+  assert.deepStrictEqual(await readFile(testFile, "utf8"), `${prefix}${version}${toSuffix}`);
   return version;
 }
 
 async function main() {
-  pkgStr = await fs.readFile(pkgFile);
+  pkgStr = await readFile(pkgFile);
 
   let version = await read();
-  await fs.writeFile(testFile, `${prefix}${version}${fromSuffix}`);
+  await writeFile(testFile, `${prefix}${version}${fromSuffix}`);
 
   await run(`-P patch -d -g testfile`);
   version = await verify(semver.inc(version, "patch"));
