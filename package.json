@@ -25,7 +25,6 @@
     "replace"
   ],
   "dependencies": {
-    "escape-string-regexp": "2.0.0",
     "execa": "2.0.1",
     "fast-glob": "3.0.3",
     "find-up": "4.1.0",

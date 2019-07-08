@@ -100,7 +100,6 @@ if (date) {
 }
 
 const {readFile, writeFile, stat, realpath} = require("fs-extra");
-const esc = require("escape-string-regexp");
 const semver = require("semver");
 const {basename} = require("path");
 
@@ -275,6 +274,10 @@ function fixArgs(commands, args, minOpts) {
   }
 
   return args;
+}
+
+function esc(str) {
+  return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 }
 
 function exit(err) {
