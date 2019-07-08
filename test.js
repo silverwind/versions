@@ -34,7 +34,6 @@ async function read() {
 }
 
 async function verify(version) {
-  assert.deepStrictEqual(await read(), version);
   assert.deepStrictEqual(await readFile(testFile, "utf8"), `${prefix}${version}${toSuffix}`);
   return version;
 }
@@ -48,19 +47,19 @@ async function main() {
   await run(`-P patch -d -g testfile`);
   version = await verify(semver.inc(version, "patch"));
 
-  await run(`-P --date --gitless minor testfile`);
+  await run(`-b ${version} -P --date --gitless minor testfile`);
   version = await verify(semver.inc(version, "minor"));
 
-  await run(`--packageless --gitless --date major testfile`);
+  await run(`-b ${version} --packageless --gitless --date major testfile`);
   version = await verify(semver.inc(version, "major"));
 
-  await run(`-g -P -d major t*stf*le`);
+  await run(`-b ${version} -g -P -d major t*stf*le`);
   version = await verify(semver.inc(version, "major"));
 
-  await run(`-d -g -P major testfile testfile`);
+  await run(`-b ${version} -d -g -P major testfile testfile`);
   version = await verify(semver.inc(version, "major"));
 
-  await run(`-dgP minor testfile`);
+  await run(`-b ${version} -dgP minor testfile`);
   version = await verify(semver.inc(version, "minor"));
 }
 
