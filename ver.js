@@ -99,7 +99,7 @@ if (date) {
   }
 }
 
-const fs = require("fs-extra");
+const {readFile, writeFile, stat, realpath} = require("fs-extra");
 const esc = require("escape-string-regexp");
 const semver = require("semver");
 const {basename} = require("path");
@@ -111,7 +111,7 @@ async function main() {
   let pkg, pkgStr;
   if (packageFile) {
     try {
-      pkgStr = await fs.readFile(packageFile, "utf8");
+      pkgStr = await readFile(packageFile, "utf8");
       pkg = JSON.parse(pkgStr);
     } catch (err) {
       throw new Error(`Error reading ${packageFile}: ${err.message}`);
@@ -144,7 +144,7 @@ async function main() {
   files = await require("fast-glob")(files);
 
   // convert paths to absolute
-  files = await Promise.all(files.map(file => fs.realpath(file)));
+  files = await Promise.all(files.map(file => realpath(file)));
 
   // remove duplicate paths
   files = Array.from(new Set(files));
@@ -158,8 +158,8 @@ async function main() {
 
   // verify files exist
   for (const file of files) {
-    const stat = await fs.stat(file);
-    if (!stat.isFile() && !stat.isSymbolicLink()) {
+    const stats = await stat(file);
+    if (!stats.isFile() && !stats.isSymbolicLink()) {
       throw new Error(`${file} is not a file`);
     }
   }
@@ -205,7 +205,7 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
   if (pkgStr) {
     oldData = pkgStr;
   } else {
-    oldData = await fs.readFile(file, "utf8");
+    oldData = await readFile(file, "utf8");
   }
 
   let newData;
@@ -231,7 +231,7 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
   if (oldData === newData) {
     throw new Error(`No replacement made in ${file}`);
   } else {
-    await fs.writeFile(file, newData);
+    await writeFile(file, newData);
   }
 }
 
