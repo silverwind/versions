@@ -109,7 +109,8 @@ const {basename} = require("path");
 const findUp = require("find-up");
 
 async function main() {
-  const packageFile = await realpath(await findUp("package.json"));
+  let packageFile = await findUp("package.json");
+  if (packageFile) packageFile = await realpath(packageFile);
 
   // try to open package.json if it exists
   let pkg, pkgStr;
@@ -160,7 +161,8 @@ async function main() {
     }
 
     // include package-lock.json if present
-    const packageLockFile = await realpath(await findUp("package-lock.json"));
+    let packageLockFile = await findUp("package-lock.json");
+    if (packageLockFile) packageLockFile = await realpath(packageLockFile);
     if (packageLockFile && !files.includes(packageLockFile)) {
       files.push(packageLockFile);
     }
