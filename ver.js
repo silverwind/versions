@@ -232,7 +232,7 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
     // Node.js 12, key order seems to be preserved through parse and stringify.
     newData = JSON.parse(oldData);
     newData.version = newVersion;
-    newData = JSON.stringify(newData, null, 2);
+    newData = JSON.stringify(newData, null, 2) + "\n";
   } else {
     const re = new RegExp(esc(baseVersion), "g");
     newData = oldData.replace(re, newVersion);
