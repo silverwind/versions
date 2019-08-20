@@ -102,6 +102,7 @@ if (date) {
 const {promisify} = require("util");
 const readFile = promisify(require("fs").readFile);
 const writeFile = promisify(require("fs").writeFile);
+const truncate = promisify(require("fs").truncate);
 const stat = promisify(require("fs").stat);
 const realpath = promisify(require("fs").realpath);
 const semver = require("semver");
@@ -254,7 +255,17 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
   if (oldData === newData) {
     throw new Error(`No replacement made in ${file}`);
   } else {
-    await writeFile(file, newData);
+    await write(file, newData);
+  }
+}
+
+async function write(file, content) {
+  if (require("os").platform() === "win32") {
+    // truncate and append on windows to preserve file metadata
+    await truncate(file, 0);
+    await writeFile(file, content, {encoding: "utf8", flag: "r+"});
+  } else {
+    await writeFile(file, content, {encoding: "utf8"});
   }
 }
 
