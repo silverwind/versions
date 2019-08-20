@@ -65,8 +65,8 @@ if (!commands.includes(level) || args.help) {
 
   Examples:
     $ ver patch
-    $ ver -g minor build.js
-    $ ver -p major build.js
+    $ ver minor build.js
+    $ ver major -p build.js
     $ ver patch -c 'npm run build'`);
   exit();
 }
