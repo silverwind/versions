@@ -9,7 +9,7 @@
     "ver": "ver.js"
   },
   "scripts": {
-    "test": "make test"
+    "test": "npx eslint *.js && node --trace-deprecation --throw-deprecation test.js"
   },
   "engines": {
     "node": ">=8"
