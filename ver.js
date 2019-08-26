@@ -242,7 +242,7 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
   }
 
   if (date) {
-    const re = new RegExp(`([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)`, "g");
+    const re = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
     newData = newData.replace(re, (_, p1, p2) => `${p1}${date}${p2}`);
   }
 
