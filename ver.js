@@ -225,9 +225,13 @@ async function main() {
     // create git commit and tag
     const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
 
-    let msgs = [];
+    const commitMsgs = [newVersion];
+    const tagMsgs = [];
+
     if (messages) {
-      msgs = messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`);
+      const msgs = messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`);
+      commitMsgs.push(msgs);
+      tagMsgs.push(msgs);
     }
 
     if (args.changelog) {
@@ -251,18 +255,22 @@ async function main() {
       }
 
       const {stdout} = await run(`git log ${range} --pretty=format:"* %s (%an)"`, {silent: true});
-      if (stdout && stdout.length) msgs.push(stdout);
+      if (stdout && stdout.length) {
+        commitMsgs.push(stdout);
+        tagMsgs.push(stdout);
+      }
     }
 
-    if (!msgs.length) {
-      msgs.push(newVersion);
+    if (!tagMsgs.length) {
+      tagMsgs.push(newVersion);
     }
 
-    const msgString = shellEscape(flat(msgs.map(msg => ["-m", msg])));
+    const commitMsgString = shellEscape(flat(commitMsgs.map(msg => ["-m", msg])));
+    const tagMsgString = shellEscape(flat(tagMsgs.map(msg => ["-m", msg])));
 
     try {
-      await run(`git commit -a ${msgString}`, {nocmd: true});
-      await run(`git tag -f ${msgString} '${tagName}'`, {nocmd: true});
+      await run(`git commit -a ${commitMsgString}`, {nocmd: true});
+      await run(`git tag -f ${tagMsgString} '${tagName}'`, {nocmd: true});
     } catch (err) {
       return process.exit(1);
     }
