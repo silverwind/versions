@@ -8,6 +8,7 @@ const minOpts = {
     "P", "packageless",
     "p", "prefix",
     "v", "version",
+    "C", "changelog",
   ],
   string: [
     "b", "base",
@@ -20,6 +21,7 @@ const minOpts = {
   alias: {
     b: "base",
     c: "command",
+    C: "changelog",
     d: "date",
     g: "gitless",
     h: "help",
@@ -62,8 +64,10 @@ if (!commands.includes(level) || args.help) {
     -P, --packageless        Do not include package.json and package-lock.json unless explicitely given
     -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
-    -m, --message <str>      Custom tag and commit message, can be given multiple times. The special
-                             token _VER_ is available inside these messages to fill in the new version
+    -m, --message <str>      Custom tag and commit message, can be given multiple times. The token
+                             _VER_ is available to fill in the new version
+    -C, --changelog          Generate a changelog since the base version tag or if absent, the latest
+                             tag, which will be appended to the tag and commit messages
     -v, --version            Print the version
     -h, --help               Print this help
 
@@ -72,7 +76,7 @@ if (!commands.includes(level) || args.help) {
     $ ver minor build.js
     $ ver major -p build.js
     $ ver patch -c 'npm run build'
-    $ ver patch -m 'Release _VER_' -m 'This is a great release'`);
+    $ ver patch -C -m '_VER_' -m 'This is a great release'`);
   exit();
 }
 
@@ -227,11 +231,36 @@ async function main() {
     } else {
       msgs = [`-m`, newVersion];
     }
+
+    if (args.changelog) {
+      const ref = args["prefix"] ? `v${baseVersion}` : baseVersion;
+      let range;
+
+      try { // check if base tag exists
+        await run(`git show ${ref} --`, {silent: true});
+        range = `${ref}..HEAD`;
+      } catch (err) {}
+
+      if (!range) { // check if we have any previous tag
+        try {
+          const {stdout} = await run(`git describe --abbrev=0`, {silent: true});
+          range = `${stdout}..HEAD`;
+        } catch (err) {}
+      }
+
+      if (!range) { // just use the whole log
+        range = "";
+      }
+
+      const {stdout} = await run(`git log ${range} --pretty=format:"* %s (%an)"`, {silent: true});
+      if (stdout && stdout.length) msgs.push(`-m`, stdout);
+    }
+
     const msgString = shellEscape(msgs);
 
     try {
-      await run(`git commit -a ${msgString}`);
-      await run(`git tag -f ${msgString} '${tagName}'`);
+      await run(`git commit -a ${msgString}`, {nocmd: true});
+      await run(`git tag -f ${msgString} '${tagName}'`, {nocmd: true});
     } catch (err) {
       return process.exit(1);
     }
@@ -240,12 +269,12 @@ async function main() {
   exit();
 }
 
-async function run(cmd) {
-  console.info(`+ ${cmd}`);
+async function run(cmd, {silent = false, nocmd = false} = {}) {
+  if (!silent && !nocmd) console.info(`+ ${cmd}`);
   const child = require("execa")(cmd, {shell: true});
-  child.stdout.pipe(process.stdout);
-  child.stderr.pipe(process.stderr);
-  await child;
+  if (!silent) child.stdout.pipe(process.stdout);
+  if (!silent) child.stderr.pipe(process.stderr);
+  return await child;
 }
 
 async function updateFile({file, baseVersion, newVersion, replacements, pkgStr}) {
