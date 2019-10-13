@@ -106,11 +106,25 @@ const truncate = promisify(require("fs").truncate);
 const stat = promisify(require("fs").stat);
 const realpath = promisify(require("fs").realpath);
 const semver = require("semver");
-const {basename} = require("path");
+const {basename, dirname, join} = require("path");
 const findUp = require("find-up");
 
+function find(name, base) {
+  if (!base) {
+    return findUp(name);
+  } else {
+    return findUp(directory => {
+      if (directory.length < base.length) {
+        return findUp.stop;
+      } else {
+        return findUp.exists(join(directory, name));
+      }
+    });
+  }
+}
+
 async function main() {
-  let packageFile = await findUp("package.json");
+  let packageFile = await find("package.json");
   if (packageFile) packageFile = await realpath(packageFile);
 
   // try to open package.json if it exists
@@ -162,7 +176,7 @@ async function main() {
     }
 
     // include package-lock.json if present
-    let packageLockFile = await findUp("package-lock.json");
+    let packageLockFile = await find("package-lock.json", dirname(packageFile));
     if (packageLockFile) packageLockFile = await realpath(packageLockFile);
     if (packageLockFile && !files.includes(packageLockFile)) {
       files.push(packageLockFile);
