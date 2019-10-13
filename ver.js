@@ -14,6 +14,7 @@ const minOpts = {
     "c", "command",
     "d", "date",
     "r", "replace",
+    "m", "message",
     "_",
   ],
   alias: {
@@ -22,6 +23,7 @@ const minOpts = {
     d: "date",
     g: "gitless",
     h: "help",
+    m: "message",
     P: "packageless",
     p: "prefix",
     r: "replace",
@@ -60,6 +62,8 @@ if (!commands.includes(level) || args.help) {
     -P, --packageless        Do not include package.json and package-lock.json unless explicitely given
     -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
+    -m, --message <str>      Custom tag and commit message, can be given multiple times. The token _VER_
+                             is available inside these messages to fill in the new version string.
     -v, --version            Print the version
     -h, --help               Print this help
 
@@ -67,7 +71,8 @@ if (!commands.includes(level) || args.help) {
     $ ver patch
     $ ver minor build.js
     $ ver major -p build.js
-    $ ver patch -c 'npm run build'`);
+    $ ver patch -c 'npm run build'
+    $ ver patch -m 'Release _VER_' -m 'This is a great release'`);
   exit();
 }
 
@@ -99,6 +104,8 @@ if (date) {
   }
 }
 
+const messages = parseMixedArg(args.message);
+
 const {promisify} = require("util");
 const readFile = promisify(require("fs").readFile);
 const writeFile = promisify(require("fs").writeFile);
@@ -108,6 +115,7 @@ const realpath = promisify(require("fs").realpath);
 const semver = require("semver");
 const {basename, dirname, join} = require("path");
 const findUp = require("find-up");
+const shellEscape = require("shell-escape");
 
 function find(name, base) {
   if (!base) {
@@ -212,9 +220,18 @@ async function main() {
   if (!args["gitless"]) {
     // create git commit and tag
     const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
+
+    let msgs;
+    if (messages) {
+      msgs = flat(messages.map(message => [`-m`, `${message.replace(/_VER_/gm, newVersion)}`]));
+    } else {
+      msgs = [`-m`, newVersion];
+    }
+    const msgString = shellEscape(msgs);
+
     try {
-      await run(`git commit -a -m ${newVersion}`);
-      await run(`git tag -f -m ${newVersion} ${tagName}`);
+      await run(`git commit -a ${msgString}`);
+      await run(`git tag -f ${msgString} '${tagName}'`);
     } catch (err) {
       return process.exit(1);
     }
@@ -327,6 +344,10 @@ function fixArgs(commands, args, minOpts) {
 
 function esc(str) {
   return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
+}
+
+function flat(arr) {
+  return [].concat(...arr);
 }
 
 function exit(err) {

@@ -29,7 +29,8 @@
     "fast-glob": "3.1.0",
     "find-up": "4.1.0",
     "minimist": "1.2.0",
-    "semver": "6.3.0"
+    "semver": "6.3.0",
+    "shell-escape": "0.2.0"
   },
   "devDependencies": {
     "eslint": "6.5.1",

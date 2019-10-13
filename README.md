@@ -30,14 +30,17 @@ usage: ver [options] command [files...]
     -P, --packageless        Do not include package.json and package-lock.json unless explicitely given
     -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
+    -m, --message <str>      Custom tag and commit message. Can be given multiple times. The token _VER_
+                             is available inside these messages to fill in the new version string.
     -v, --version            Print the version
     -h, --help               Print this help
 
   Examples:
     $ ver patch
-    $ ver -g minor build.js
-    $ ver -p major build.js
+    $ ver minor build.js
+    $ ver major -p build.js
     $ ver patch -c 'npm run build'
+    $ ver patch -m 'Release _VER_' -m 'This is a great release'
 ```
 
 ## Signing commits and tags
