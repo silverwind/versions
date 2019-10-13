@@ -225,11 +225,9 @@ async function main() {
     // create git commit and tag
     const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
 
-    let msgs;
+    let msgs = [];
     if (messages) {
-      msgs = flat(messages.map(message => [`-m`, `${message.replace(/_VER_/gm, newVersion)}`]));
-    } else {
-      msgs = [`-m`, newVersion];
+      msgs = messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`);
     }
 
     if (args.changelog) {
@@ -253,10 +251,14 @@ async function main() {
       }
 
       const {stdout} = await run(`git log ${range} --pretty=format:"* %s (%an)"`, {silent: true});
-      if (stdout && stdout.length) msgs.push(`-m`, stdout);
+      if (stdout && stdout.length) msgs.push(stdout);
     }
 
-    const msgString = shellEscape(msgs);
+    if (!msgs.length) {
+      msgs.push(newVersion);
+    }
+
+    const msgString = shellEscape(flat(msgs.map(msg => ["-m", msg])));
 
     try {
       await run(`git commit -a ${msgString}`, {nocmd: true});
