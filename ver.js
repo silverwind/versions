@@ -53,7 +53,7 @@ if (!commands.includes(level) || args.help) {
 
   Arguments:
    files                     Files to do version replacement in. The nearest package.json and
-                             package-lock.json will always be included unless the -P argument is given.
+                             package-lock.json will always be included unless the -P argument is given
   Options:
     -b, --base <version>     Base version to use. Default is parsed from the nearest package.json
     -c, --command <command>  Run a command after files are updated but before git commit and tag
@@ -62,8 +62,8 @@ if (!commands.includes(level) || args.help) {
     -P, --packageless        Do not include package.json and package-lock.json unless explicitely given
     -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
-    -m, --message <str>      Custom tag and commit message, can be given multiple times. The token _VER_
-                             is available inside these messages to fill in the new version string.
+    -m, --message <str>      Custom tag and commit message, can be given multiple times. The special
+                             token _VER_ is available inside these messages to fill in the new version
     -v, --version            Print the version
     -h, --help               Print this help
 
