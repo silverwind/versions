@@ -125,11 +125,12 @@ function find(name, base) {
   if (!base) {
     return findUp(name);
   } else {
-    return findUp(directory => {
+    return findUp(async directory => {
+      const path = join(directory, name);
       if (directory.length < base.length) {
         return findUp.stop;
-      } else {
-        return findUp.exists(join(directory, name));
+      } else if (await findUp.exists(path)) {
+        return path;
       }
     });
   }
