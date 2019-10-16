@@ -392,7 +392,7 @@ function flat(arr) {
 
 function exit(err) {
   if (err) {
-    console.info(String(err.message || err).trim());
+    console.info(String(err.stack || err.message || err).trim());
   }
   process.exit(err ? 1 : 0);
 }
