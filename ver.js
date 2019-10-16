@@ -136,6 +136,123 @@ function find(name, base) {
   }
 }
 
+async function run(cmd, {silent = false, nocmd = false} = {}) {
+  if (!silent && !nocmd) console.info(`+ ${cmd}`);
+  const child = require("execa")(cmd, {shell: true});
+  if (!silent) child.stdout.pipe(process.stdout);
+  if (!silent) child.stderr.pipe(process.stderr);
+  return await child;
+}
+
+async function updateFile({file, baseVersion, newVersion, replacements, pkgStr}) {
+  let oldData;
+  if (pkgStr) {
+    oldData = pkgStr;
+  } else {
+    oldData = await readFile(file, "utf8");
+  }
+
+  let newData;
+  if (pkgStr) {
+    const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
+    newData = pkgStr.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
+  } else if (basename(file) === "package-lock.json") {
+    // special case for package-lock.json which contains a lot of version
+    // strings which make regexp replacement risky. From a few tests on
+    // Node.js 12, key order seems to be preserved through parse and stringify.
+    newData = JSON.parse(oldData);
+    newData.version = newVersion;
+    newData = JSON.stringify(newData, null, 2) + "\n";
+  } else {
+    const re = new RegExp(esc(baseVersion), "g");
+    newData = oldData.replace(re, newVersion);
+  }
+
+  if (date) {
+    const re = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
+    newData = newData.replace(re, (_, p1, p2) => `${p1}${date}${p2}`);
+  }
+
+  if (replacements.length) {
+    for (const replacement of replacements) {
+      newData = newData.replace(replacement.re, replacement.replacement);
+    }
+  }
+
+  if (oldData === newData) {
+    throw new Error(`No replacement made in ${file}`);
+  } else {
+    await write(file, newData);
+  }
+}
+
+async function write(file, content) {
+  if (require("os").platform() === "win32") {
+    // truncate and append on windows to preserve file metadata
+    await truncate(file, 0);
+    await writeFile(file, content, {encoding: "utf8", flag: "r+"});
+  } else {
+    await writeFile(file, content, {encoding: "utf8"});
+  }
+}
+
+function parseMixedArg(arg) {
+  if (arg === "") {
+    return true;
+  } else if (typeof arg === "string") {
+    return arg.includes(",") ? arg.split(",") : [arg];
+  } else if (Array.isArray(arg)) {
+    return arg;
+  } else {
+    return Boolean(arg);
+  }
+}
+
+// handle minimist parsing error like '-d patch'
+function fixArgs(commands, args, minOpts) {
+  for (const key of Object.keys(minOpts.alias)) {
+    delete args[key];
+  }
+
+  if (commands.includes(args.date)) {
+    args._ = [args.date, ...args._];
+    args.date = true;
+  }
+  if (commands.includes(args.base)) {
+    args._ = [args.base, ...args._];
+    args.base = true;
+  }
+  if (commands.includes(args.command)) {
+    args._ = [args.command, ...args._];
+    args.command = "";
+  }
+  if (commands.includes(args.replace)) {
+    args._ = [args.replace, ...args._];
+    args.replace = "";
+  }
+  if (commands.includes(args.packageless)) {
+    args._ = [args.packageless, ...args._];
+    args.packageless = true;
+  }
+
+  return args;
+}
+
+function esc(str) {
+  return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
+}
+
+function flat(arr) {
+  return [].concat(...arr);
+}
+
+function exit(err) {
+  if (err) {
+    console.info(String(err.stack || err.message || err).trim());
+  }
+  process.exit(err ? 1 : 0);
+}
+
 async function main() {
   let packageFile = await find("package.json");
   if (packageFile) packageFile = await realpath(packageFile);
@@ -278,123 +395,6 @@ async function main() {
   }
 
   exit();
-}
-
-async function run(cmd, {silent = false, nocmd = false} = {}) {
-  if (!silent && !nocmd) console.info(`+ ${cmd}`);
-  const child = require("execa")(cmd, {shell: true});
-  if (!silent) child.stdout.pipe(process.stdout);
-  if (!silent) child.stderr.pipe(process.stderr);
-  return await child;
-}
-
-async function updateFile({file, baseVersion, newVersion, replacements, pkgStr}) {
-  let oldData;
-  if (pkgStr) {
-    oldData = pkgStr;
-  } else {
-    oldData = await readFile(file, "utf8");
-  }
-
-  let newData;
-  if (pkgStr) {
-    const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
-    newData = pkgStr.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
-  } else if (basename(file) === "package-lock.json") {
-    // special case for package-lock.json which contains a lot of version
-    // strings which make regexp replacement risky. From a few tests on
-    // Node.js 12, key order seems to be preserved through parse and stringify.
-    newData = JSON.parse(oldData);
-    newData.version = newVersion;
-    newData = JSON.stringify(newData, null, 2) + "\n";
-  } else {
-    const re = new RegExp(esc(baseVersion), "g");
-    newData = oldData.replace(re, newVersion);
-  }
-
-  if (date) {
-    const re = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
-    newData = newData.replace(re, (_, p1, p2) => `${p1}${date}${p2}`);
-  }
-
-  if (replacements.length) {
-    for (const replacement of replacements) {
-      newData = newData.replace(replacement.re, replacement.replacement);
-    }
-  }
-
-  if (oldData === newData) {
-    throw new Error(`No replacement made in ${file}`);
-  } else {
-    await write(file, newData);
-  }
-}
-
-async function write(file, content) {
-  if (require("os").platform() === "win32") {
-    // truncate and append on windows to preserve file metadata
-    await truncate(file, 0);
-    await writeFile(file, content, {encoding: "utf8", flag: "r+"});
-  } else {
-    await writeFile(file, content, {encoding: "utf8"});
-  }
-}
-
-function parseMixedArg(arg) {
-  if (arg === "") {
-    return true;
-  } else if (typeof arg === "string") {
-    return arg.includes(",") ? arg.split(",") : [arg];
-  } else if (Array.isArray(arg)) {
-    return arg;
-  } else {
-    return Boolean(arg);
-  }
-}
-
-// handle minimist parsing error like '-d patch'
-function fixArgs(commands, args, minOpts) {
-  for (const key of Object.keys(minOpts.alias)) {
-    delete args[key];
-  }
-
-  if (commands.includes(args.date)) {
-    args._ = [args.date, ...args._];
-    args.date = true;
-  }
-  if (commands.includes(args.base)) {
-    args._ = [args.base, ...args._];
-    args.base = true;
-  }
-  if (commands.includes(args.command)) {
-    args._ = [args.command, ...args._];
-    args.command = "";
-  }
-  if (commands.includes(args.replace)) {
-    args._ = [args.replace, ...args._];
-    args.replace = "";
-  }
-  if (commands.includes(args.packageless)) {
-    args._ = [args.packageless, ...args._];
-    args.packageless = true;
-  }
-
-  return args;
-}
-
-function esc(str) {
-  return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
-}
-
-function flat(arr) {
-  return [].concat(...arr);
-}
-
-function exit(err) {
-  if (err) {
-    console.info(String(err.stack || err.message || err).trim());
-  }
-  process.exit(err ? 1 : 0);
 }
 
 main().then(exit).catch(exit);
