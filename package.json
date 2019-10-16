@@ -1,6 +1,6 @@
 {
   "name": "ver",
-  "version": "5.4.3",
+  "version": "5.4.4",
   "description": "Semantically increment a project's version in multiple files",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/ver",
