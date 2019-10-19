@@ -31,7 +31,7 @@ usage: ver [options] command [files...]
     -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
     -m, --message <str>      Custom tag and commit message, can be given multiple times. The token
-                             _VER_ is available to fill in the new version
+                             _VER_ is available in these messages to fill in the new version
     -C, --changelog          Generate a changelog since the base version tag or if absent, the latest
                              tag, which will be appended to the tag and commit messages
     -v, --version            Print the version
