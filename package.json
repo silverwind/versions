@@ -25,7 +25,7 @@
     "replace"
   ],
   "dependencies": {
-    "execa": "3.1.0",
+    "execa": "3.2.0",
     "fast-glob": "3.1.0",
     "find-up": "4.1.0",
     "minimist": "1.2.0",
@@ -34,6 +34,6 @@
   "devDependencies": {
     "eslint": "6.5.1",
     "eslint-config-silverwind": "4.2.3",
-    "updates": "9.0.0"
+    "updates": "9.0.1"
   }
 }

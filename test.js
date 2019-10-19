@@ -47,19 +47,19 @@ async function main() {
   await run(`-P patch -d -g testfile`);
   version = await verify(semver.inc(version, "patch"));
 
-  await run(`-b ${version} -P --date --gitless minor testfile`);
+  await run(`-b ${version} -P -C --date --gitless minor testfile`);
   version = await verify(semver.inc(version, "minor"));
 
   await run(`-b ${version} --packageless --gitless --date major testfile`);
   version = await verify(semver.inc(version, "major"));
 
-  await run(`-b ${version} -g -P -d major t*stf*le`);
+  await run(`-b ${version} -g -C -P -d major t*stf*le`);
   version = await verify(semver.inc(version, "major"));
 
   await run(`-b ${version} -d -g -P major testfile testfile`);
   version = await verify(semver.inc(version, "major"));
 
-  await run(`-b ${version} -dgP minor testfile`);
+  await run(`-b ${version} -dgPC minor testfile`);
   version = await verify(semver.inc(version, "minor"));
 }
 
