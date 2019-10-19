@@ -365,7 +365,7 @@ async function main() {
         range = "";
       }
 
-      const {stdout} = await run(["git", "log", range, `--pretty=format:"* %s (%an)"`], {silent: true});
+      const {stdout} = await run(["git", "log", range, `--pretty=format:* %s (%an)`], {silent: true});
       if (stdout && stdout.length) {
         msgs.push(stdout.trim());
       }
