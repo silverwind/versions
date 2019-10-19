@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 
+const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
+const flat = arr => [].concat(...arr);
+
 const minOpts = {
   boolean: [
     "g", "gitless",
@@ -65,7 +68,7 @@ if (!commands.includes(level) || args.help) {
     -g, --gitless            Do not create a git commit and tag
     -p, --prefix             Prefix git tags with a "v" character
     -m, --message <str>      Custom tag and commit message, can be given multiple times. The token
-                             _VER_ is available to fill in the new version
+                             _VER_ is available in these messages to fill in the new version
     -C, --changelog          Generate a changelog since the base version tag or if absent, the latest
                              tag, which will be appended to the tag and commit messages
     -v, --version            Print the version
@@ -108,18 +111,11 @@ if (date) {
   }
 }
 
-const messages = parseMixedArg(args.message);
-
-const {promisify} = require("util");
-const readFile = promisify(require("fs").readFile);
-const writeFile = promisify(require("fs").writeFile);
-const truncate = promisify(require("fs").truncate);
-const stat = promisify(require("fs").stat);
-const realpath = promisify(require("fs").realpath);
-const semver = require("semver");
+const {readFile, writeFile, truncate, stat, realpath} = require("fs").promises;
 const {basename, dirname, join} = require("path");
+const semver = require("semver");
 const findUp = require("find-up");
-const shellEscape = require("shell-escape");
+const execa = require("execa");
 
 function find(name, base) {
   if (!base) {
@@ -136,9 +132,15 @@ function find(name, base) {
   }
 }
 
-async function run(cmd, {silent = false, nocmd = false} = {}) {
-  if (!silent && !nocmd) console.info(`+ ${cmd}`);
-  const child = require("execa")(cmd, {shell: true});
+async function run(cmd, {silent = false} = {}) {
+  let child;
+  if (Array.isArray(cmd)) {
+    if (!silent) console.info(`+ ${cmd.join(" ")}`);
+    child = execa(cmd.shift(), cmd);
+  } else {
+    if (!silent) console.info(`+ ${cmd}`);
+    child = execa(cmd, {shell: true});
+  }
   if (!silent) child.stdout.pipe(process.stdout);
   if (!silent) child.stderr.pipe(process.stderr);
   return await child;
@@ -208,7 +210,7 @@ function parseMixedArg(arg) {
   }
 }
 
-// handle minimist parsing error like '-d patch'
+// handle minimist parsing issues like '-d patch'
 function fixArgs(commands, args, minOpts) {
   for (const key of Object.keys(minOpts.alias)) {
     delete args[key];
@@ -236,14 +238,6 @@ function fixArgs(commands, args, minOpts) {
   }
 
   return args;
-}
-
-function esc(str) {
-  return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
-}
-
-function flat(arr) {
-  return [].concat(...arr);
 }
 
 function exit(err) {
@@ -340,58 +334,51 @@ async function main() {
   }
 
   if (!args["gitless"]) {
-    // create git commit and tag
+    const messages = parseMixedArg(args.message);
     const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
-
-    const commitMsgs = [newVersion];
-    const tagMsgs = [];
+    const msgs = [];
 
     if (messages) {
-      const msgs = messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`);
-      commitMsgs.push(msgs);
-      tagMsgs.push(msgs);
+      msgs.push(messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`));
     }
 
     if (args.changelog) {
-      const ref = args["prefix"] ? `v${baseVersion}` : baseVersion;
+      const ref = tagName;
       let range;
 
-      try { // check if base tag exists
-        await run(`git show ${ref} --`, {silent: true});
+      // check if base tag exists
+      try {
+        await run(["git", "show", ref, "--"], {silent: true});
         range = `${ref}..HEAD`;
       } catch (err) {}
 
-      if (!range) { // check if we have any previous tag
+      // check if we have any previous tag
+      if (!range) {
         try {
-          const {stdout} = await run(`git describe --abbrev=0`, {silent: true});
+          const {stdout} = await run(["git", "describe", "--abbrev=0"], {silent: true});
           range = `${stdout}..HEAD`;
         } catch (err) {}
       }
 
-      if (!range) { // just use the whole log
+      // use the whole log (for cases where it's the first release)
+      if (!range) {
         range = "";
       }
 
-      const {stdout} = await run(`git log ${range} --pretty=format:"* %s (%an)"`, {silent: true});
+      const {stdout} = await run(["git", "log", range, `--pretty=format:"* %s (%an)"`], {silent: true});
       if (stdout && stdout.length) {
-        commitMsgs.push(stdout);
-        tagMsgs.push(stdout);
+        msgs.push(stdout.trim());
       }
     }
 
-    if (!tagMsgs.length) {
-      tagMsgs.push(newVersion);
-    }
+    const tagMsgs = msgs.length ? msgs : [tagName];
+    const commitMsgs = [tagName, ...msgs];
 
-    const commitMsgString = shellEscape(flat(commitMsgs.map(msg => ["-m", msg])));
-    const tagMsgString = shellEscape(flat(tagMsgs.map(msg => ["-m", msg])));
+    const commitArgs = flat(commitMsgs.map(msg => ["-m", msg]));
+    const tagArgs = flat(tagMsgs.map(msg => ["-m", msg]));
 
-    try {
-      await run(`git commit -a ${commitMsgString}`, {nocmd: true});
-      await run(`git tag -f ${tagMsgString} '${tagName}'`, {nocmd: true});
-    } catch (err) {
-      return process.exit(1);
-    }
+    await run(["git", "commit", "-a", ...commitArgs]);
+    await run(["git", "tag", "-a", "-f", tagName, ...tagArgs]);
   }
 
   exit();
