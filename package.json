@@ -5,9 +5,8 @@
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/ver",
   "license": "BSD-2-Clause",
-  "bin": {
-    "ver": "ver.js"
-  },
+  "main": "ver.js",
+  "bin": "./ver.js",
   "scripts": {
     "test": "npx eslint *.js && node --trace-deprecation --throw-deprecation test.js"
   },
