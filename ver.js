@@ -2,7 +2,6 @@
 "use strict";
 
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
-const flat = arr => [].concat(...arr);
 
 const minOpts = {
   boolean: [
@@ -132,15 +131,21 @@ function find(name, base) {
   }
 }
 
-async function run(cmd, {silent = false} = {}) {
+function formatArgs(args) {
+  return args.map(arg => arg.includes(" ") ? `'${arg}'` : arg).join(" ");
+}
+
+async function run(cmd, {silent = false, input} = {}) {
   let child;
   if (Array.isArray(cmd)) {
-    if (!silent) console.info(`+ ${cmd.join(" ")}`);
-    child = execa(cmd.shift(), cmd);
+    if (!silent) console.info(`+ ${formatArgs(cmd)}`);
+    const [c, ...args] = cmd;
+    child = execa(c, args, {input});
   } else {
     if (!silent) console.info(`+ ${cmd}`);
-    child = execa(cmd, {shell: true});
+    child = execa(cmd, {shell: true, input});
   }
+
   if (!silent) child.stdout.pipe(process.stdout);
   if (!silent) child.stderr.pipe(process.stderr);
   return await child;
@@ -335,6 +340,7 @@ async function main() {
 
   if (!args["gitless"]) {
     const messages = parseMixedArg(args.message);
+
     const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
     const msgs = [];
 
@@ -342,6 +348,7 @@ async function main() {
       msgs.push(messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`));
     }
 
+    let changelog = "";
     if (args.changelog) {
       const ref = tagName;
       let range;
@@ -367,18 +374,17 @@ async function main() {
 
       const {stdout} = await run(["git", "log", range, `--pretty=format:* %s (%an)`], {silent: true});
       if (stdout && stdout.length) {
-        msgs.push(stdout.trim());
+        changelog = stdout.trim();
       }
     }
 
     const tagMsgs = msgs.length ? msgs : [tagName];
+    const tagMsg = tagMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
+    await run(["git", "tag", "-a", "-f", "-F", "-", tagName], {input: tagMsg});
+
     const commitMsgs = [tagName, ...msgs];
-
-    const commitArgs = flat(commitMsgs.map(msg => ["-m", msg]));
-    const tagArgs = flat(tagMsgs.map(msg => ["-m", msg]));
-
-    await run(["git", "commit", "-a", ...commitArgs]);
-    await run(["git", "tag", "-a", "-f", tagName, ...tagArgs]);
+    const commitMsg = commitMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
+    await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
   }
 
   exit();
