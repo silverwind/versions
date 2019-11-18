@@ -26,7 +26,7 @@ async function exit(err) {
 }
 
 async function run(args) {
-  return await execa(`node ver.js ${args}`, {shell: true});
+  return await execa(`node versions.js ${args}`, {shell: true});
 }
 
 async function read() {
