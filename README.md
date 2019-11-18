@@ -1,5 +1,5 @@
-# ver
-[![](https://img.shields.io/npm/v/ver.svg?style=flat)](https://www.npmjs.org/package/ver) [![](https://img.shields.io/npm/dm/ver.svg)](https://www.npmjs.org/package/ver) [![](https://api.travis-ci.org/silverwind/ver.svg?style=flat)](https://travis-ci.org/silverwind/ver)
+# versions
+[![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions) [![](https://api.travis-ci.org/silverwind/versions.svg?style=flat)](https://travis-ci.org/silverwind/versions)
 
 > Semantically increment a project's version in multiple files
 
@@ -10,7 +10,7 @@ npm i -g ver
 
 ## Usage
 ```
-usage: ver [options] command [files...]
+usage: versions [options] command [files...]
 
   Semantically increment a project's version in multiple files.
 
@@ -38,16 +38,16 @@ usage: ver [options] command [files...]
     -h, --help               Print this help
 
   Examples:
-    $ ver patch
-    $ ver minor build.js
-    $ ver major -p build.js
-    $ ver patch -c 'npm run build'
-    $ ver patch -C -m '_VER_' -m 'This is a great release'
+    $ versions patch
+    $ versions minor build.js
+    $ versions major -p build.js
+    $ versions patch -c 'npm run build'
+    $ versions patch -C -m '_VER_' -m 'This is a great release'
 ```
 
 ## Signing commits and tags
 
-To automatically sign commits and tags created by `ver` with GPG add this to your `~/.gitconfig`:
+To automatically sign commits and tags created by `versions` with GPG add this to your `~/.gitconfig`:
 
 ``` ini
 [user]

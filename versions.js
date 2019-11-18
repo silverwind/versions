@@ -46,7 +46,7 @@ if (args.version) {
 }
 
 if (!commands.includes(level) || args.help) {
-  console.info(`usage: ver [options] command [files...]
+  console.info(`usage: versions [options] command [files...]
 
   Semantically increment a project's version in multiple files.
 
@@ -74,11 +74,11 @@ if (!commands.includes(level) || args.help) {
     -h, --help               Print this help
 
   Examples:
-    $ ver patch
-    $ ver minor build.js
-    $ ver major -p build.js
-    $ ver patch -c 'npm run build'
-    $ ver patch -C -m '_VER_' -m 'This is a great release'`);
+    $ versions patch
+    $ versions minor build.js
+    $ versions major -p build.js
+    $ versions patch -c 'npm run build'
+    $ versions patch -C -m '_VER_' -m 'This is a great release'`);
   exit();
 }
 

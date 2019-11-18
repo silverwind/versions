@@ -1,12 +1,12 @@
 {
-  "name": "ver",
+  "name": "versions",
   "version": "6.0.2",
   "description": "Semantically increment a project's version in multiple files",
   "author": "silverwind <me@silverwind.io>",
-  "repository": "silverwind/ver",
+  "repository": "silverwind/versions",
   "license": "BSD-2-Clause",
-  "main": "ver.js",
-  "bin": "./ver.js",
+  "main": "versions.js",
+  "bin": "./versions.js",
   "scripts": {
     "test": "npx eslint *.js && node --trace-deprecation --throw-deprecation test.js"
   },
@@ -14,10 +14,14 @@
     "node": ">=10"
   },
   "files": [
-    "ver.js"
+    "versions.js"
   ],
   "keywords": [
+    "ver",
     "version",
+    "version bump",
+    "versions",
+    "versions bump",
     "bump",
     "git",
     "tag",

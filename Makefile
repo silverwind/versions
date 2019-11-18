@@ -13,17 +13,17 @@ update:
 
 patch:
 	$(MAKE) test
-	node ver.js -C patch
+	node versions.js -C patch
 	$(MAKE) publish
 
 minor:
 	$(MAKE) test
-	node ver.js -C minor
+	node versions.js -C minor
 	$(MAKE) publish
 
 major:
 	$(MAKE) test
-	node ver.js -C major
+	node versions.js -C major
 	$(MAKE) publish
 
 
