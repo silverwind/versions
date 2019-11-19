@@ -5,7 +5,7 @@
 
 ## Installation
 ```
-npm i -g ver
+$ npm i --save-dev versions
 ```
 
 ## Usage
