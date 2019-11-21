@@ -375,10 +375,6 @@ async function main() {
       const {stdout} = await run(["git", "log", range, `--pretty=format:* %s (%an)`], {silent: true});
       if (stdout && stdout.length) {
         changelog = stdout.trim();
-        if (range) {
-          // remove last line because that is the previous tag
-          changelog = changelog.replace(/\r?\n.*$/, "");
-        }
       }
     }
 
