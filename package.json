@@ -31,11 +31,11 @@
     "fast-glob": "^3.1.1",
     "find-up": "^4.1.0",
     "minimist": "^1.2.0",
-    "semver": "^6.3.0"
+    "semver": "^7.0.0"
   },
   "devDependencies": {
     "eslint": "6.7.2",
-    "eslint-config-silverwind": "5.0.2",
-    "updates": "9.3.0"
+    "eslint-config-silverwind": "5.0.3",
+    "updates": "9.3.2"
   }
 }
