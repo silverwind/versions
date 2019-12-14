@@ -372,10 +372,12 @@ async function main() {
         range = "";
       }
 
-      const {stdout} = await run(["git", "log", range, `--pretty=format:* %s (%an)`], {silent: true});
-      if (stdout && stdout.length) {
-        changelog = stdout.trim();
-      }
+      try {
+        const {stdout} = await run(["git", "log", range, `--pretty=format:* %s (%an)`], {silent: true});
+        if (stdout && stdout.length) {
+          changelog = stdout.trim();
+        }
+      } catch (err) {}
     }
 
     const commitMsgs = [tagName, ...msgs];
