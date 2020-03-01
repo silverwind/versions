@@ -18,7 +18,6 @@
   "dependencies": {
     "execa": "^4.0.0",
     "fast-glob": "^3.2.2",
-    "find-up": "^4.1.0",
     "minimist": "^1.2.0",
     "semver": "^7.1.3"
   },

@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 "use strict";
 
-const {readFile, writeFile, truncate, stat} = require("fs").promises;
+const {readFile, writeFile, truncate, stat, access} = require("fs").promises;
 const {basename, dirname, join, relative} = require("path");
 const {cwd: cwdFn} = require("process");
 const {platform} = require("os");
 const execa = require("execa");
 const fastGlob = require("fast-glob");
-const findUp = require("find-up");
 const minimist = require("minimist");
 const semver = require("semver");
 
@@ -122,20 +121,19 @@ if (date) {
   }
 }
 
-async function find(name, base) {
-  if (!base) {
-    const found = await findUp(name, {cwd});
-    return found ? relative(cwd, found) : null;
+async function find(filename, dir, stopDir) {
+  const path = join(dir, filename);
+
+  try {
+    await access(path);
+    return path;
+  } catch (err) {}
+
+  const parent = dirname(dir);
+  if ((stopDir && path === stopDir) || parent === dir) {
+    return null;
   } else {
-    return findUp(async directory => {
-      const path = join(directory, name);
-      if (directory.length < base.length) {
-        return findUp.stop;
-      } else {
-        const found = await findUp.exists(path, {cwd});
-        return found ? relative(cwd, found) : null;
-      }
-    }, {cwd});
+    return find(filename, parent, stopDir);
   }
 }
 
@@ -264,7 +262,11 @@ function exit(err) {
 }
 
 async function main() {
-  const packageFile = await find("package.json");
+  const gitDir = await find(".git", cwd);
+  let projectRoot = gitDir ? dirname(gitDir) : null;
+
+  const packageFile = await find("package.json", cwd, projectRoot);
+  if (!projectRoot) projectRoot = packageFile ? dirname(packageFile) : cwd;
 
   // try to open package.json if it exists
   let pkg, pkgStr;
@@ -312,7 +314,7 @@ async function main() {
     }
 
     // include package-lock.json if present
-    const packageLockFile = await find("package-lock.json", dirname(packageFile));
+    const packageLockFile = await find("package-lock.json", dirname(packageFile), projectRoot);
     if (packageLockFile && !files.includes(packageLockFile)) {
       files.push(packageLockFile);
     }
