@@ -23,20 +23,18 @@ usage: versions [options] command [files...]
    files                  Files to do version replacement in. The nearest package.json and package-lock.json
                           will always be included unless the -P argument is given
   Options:
+    -a, --all             Add all changed files to the commit instead of only the ones modified by this tool
     -b, --base <version>  Base version to use. Default is parsed from the nearest package.json
+    -C, --changelog       Generate a changelog since the base version tag or if absent, the latest tag
     -c, --command <cmd>   Run a command after files are updated but before git commit and tag
     -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
-    -r, --replace <str>   Additional replacement in the format "s#regexp#replacement#flags"
-    -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
-    -g, --gitless         Do not create a git commit and tag
-    -a, --all             Add all changed files to the commit instead of only the ones modified by this tool
-    -p, --prefix          Prefix git tags with a "v" character
-    -m, --message <str>   Custom tag and commit message, can be given multiple times. The token _VER_ is
-                          available in these messages to fill in the new version
-    -C, --changelog       Generate a changelog since the base version tag or if absent, the latest tag, which
-                          will be appended to the tag and commit messages
-    -v, --version         Print the version
+    -g, --gitless         Do not perform any git action like creating commit and tag
     -h, --help            Print this help
+    -m, --message <str>   Custom tag and commit message. The token _VER_ is available to fill the new version
+    -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
+    -p, --prefix          Prefix git tags with a "v" character
+    -r, --replace <str>   Additional replacement in the format "s#regexp#replacement#flags"
+    -v, --version         Print the version
 
   Examples:
     $ versions patch
