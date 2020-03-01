@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 
-const {basename, dirname, join} = require("path");
-const {platform} = require("os");
 const {readFile, writeFile, truncate, stat, realpath} = require("fs").promises;
+const {basename, dirname, join, relative} = require("path");
+const {platform} = require("os");
 const execa = require("execa");
 const fastGlob = require("fast-glob");
 const findUp = require("find-up");
@@ -395,7 +395,7 @@ async function main() {
     const commitMsg = commitMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
 
     if (args["explicit-add"]) {
-      await run(["git", "add", ...files]);
+      await run(["git", "add", ...files.map(file => relative(__dirname, file))]);
       await run(["git", "commit", "-F", "-"], {input: commitMsg});
     } else {
       await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
