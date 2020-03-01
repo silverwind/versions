@@ -3,7 +3,7 @@
 
 const {readFile, writeFile, truncate, stat} = require("fs").promises;
 const {basename, dirname, join, relative} = require("path");
-const {cwd} = require("process");
+const {cwd: cwdFn} = require("process");
 const {platform} = require("os");
 const execa = require("execa");
 const fastGlob = require("fast-glob");
@@ -12,7 +12,7 @@ const minimist = require("minimist");
 const semver = require("semver");
 
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
-const pwd = cwd();
+const cwd = cwdFn();
 
 const minOpts = {
   boolean: [
@@ -126,18 +126,18 @@ if (date) {
 
 async function find(name, base) {
   if (!base) {
-    const found = await findUp(name);
-    return found ? relative(pwd, found) : null;
+    const found = await findUp(name, {cwd});
+    return found ? relative(cwd, found) : null;
   } else {
     return findUp(async directory => {
       const path = join(directory, name);
       if (directory.length < base.length) {
         return findUp.stop;
       } else {
-        const found = await findUp.exists(path);
-        return found ? relative(pwd, found) : null;
+        const found = await findUp.exists(path, {cwd});
+        return found ? relative(cwd, found) : null;
       }
-    });
+    }, {cwd});
   }
 }
 
@@ -321,7 +321,7 @@ async function main() {
   }
 
   // convert paths to relative
-  files = await Promise.all(files.map(file => relative(pwd, file)));
+  files = await Promise.all(files.map(file => relative(cwd, file)));
 
   if (!files.length) {
     throw new Error(`Found no files to do replacements in`);
