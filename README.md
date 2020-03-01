@@ -20,8 +20,8 @@ usage: versions [options] command [files...]
     major                    Increment major x.0.0 version
 
   Arguments:
-   files                     Files to do version replacement in. The nearest package.json and
-                             package-lock.json will always be included unless the -P argument is given
+   files                     Files to do version replacement in. The nearest package.json and package-lock.json will
+                             always be included unless the -P argument is given
   Options:
     -b, --base <version>     Base version to use. Default is parsed from the nearest package.json
     -c, --command <command>  Run a command after files are updated but before git commit and tag
@@ -29,11 +29,12 @@ usage: versions [options] command [files...]
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
     -P, --packageless        Do not include package.json and package-lock.json unless explicitely given
     -g, --gitless            Do not create a git commit and tag
+    -e, --explicit-add       Do not add all modified files to the git commit, only the ones modified by this program
     -p, --prefix             Prefix git tags with a "v" character
-    -m, --message <str>      Custom tag and commit message, can be given multiple times. The token
-                             _VER_ is available in these messages to fill in the new version
-    -C, --changelog          Generate a changelog since the base version tag or if absent, the latest
-                             tag, which will be appended to the tag and commit messages
+    -m, --message <str>      Custom tag and commit message, can be given multiple times. The token _VER_ is available
+                             in these messages to fill in the new version
+    -C, --changelog          Generate a changelog since the base version tag or if absent, the latest tag, which will
+                             be appended to the tag and commit messages
     -v, --version            Print the version
     -h, --help               Print this help
 

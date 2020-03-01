@@ -5,6 +5,7 @@ const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 
 const minOpts = {
   boolean: [
+    "e", "explicit-add",
     "g", "gitless",
     "h", "help",
     "P", "packageless",
@@ -25,6 +26,7 @@ const minOpts = {
     c: "command",
     C: "changelog",
     d: "date",
+    e: "explicit-add",
     g: "gitless",
     h: "help",
     m: "message",
@@ -56,8 +58,8 @@ if (!commands.includes(level) || args.help) {
     major                    Increment major x.0.0 version
 
   Arguments:
-   files                     Files to do version replacement in. The nearest package.json and
-                             package-lock.json will always be included unless the -P argument is given
+   files                     Files to do version replacement in. The nearest package.json and package-lock.json will
+                             always be included unless the -P argument is given
   Options:
     -b, --base <version>     Base version to use. Default is parsed from the nearest package.json
     -c, --command <command>  Run a command after files are updated but before git commit and tag
@@ -65,11 +67,12 @@ if (!commands.includes(level) || args.help) {
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
     -P, --packageless        Do not include package.json and package-lock.json unless explicitely given
     -g, --gitless            Do not create a git commit and tag
+    -e, --explicit-add       Do not add all modified files to the git commit, only the ones modified by this program
     -p, --prefix             Prefix git tags with a "v" character
-    -m, --message <str>      Custom tag and commit message, can be given multiple times. The token
-                             _VER_ is available in these messages to fill in the new version
-    -C, --changelog          Generate a changelog since the base version tag or if absent, the latest
-                             tag, which will be appended to the tag and commit messages
+    -m, --message <str>      Custom tag and commit message, can be given multiple times. The token _VER_ is available
+                             in these messages to fill in the new version
+    -C, --changelog          Generate a changelog since the base version tag or if absent, the latest tag, which will
+                             be appended to the tag and commit messages
     -v, --version            Print the version
     -h, --help               Print this help
 
@@ -384,7 +387,13 @@ async function main() {
 
     const commitMsgs = [tagName, ...msgs];
     const commitMsg = commitMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
-    await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
+
+    if (args["explicit-add"]) {
+      await run(["git", "add", ...files]);
+      await run(["git", "commit", "-F", "-"], {input: commitMsg});
+    } else {
+      await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
+    }
 
     const tagMsgs = msgs.length ? msgs : [tagName];
     const tagMsg = tagMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
