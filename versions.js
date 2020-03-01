@@ -14,7 +14,7 @@ const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 
 const minOpts = {
   boolean: [
-    "e", "explicit-add",
+    "a", "all",
     "g", "gitless",
     "h", "help",
     "P", "packageless",
@@ -31,11 +31,11 @@ const minOpts = {
     "_",
   ],
   alias: {
+    a: "all",
     b: "base",
     c: "command",
     C: "changelog",
     d: "date",
-    e: "explicit-add",
     g: "gitless",
     h: "help",
     m: "message",
@@ -76,7 +76,7 @@ if (!commands.includes(level) || args.help) {
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
     -P, --packageless        Do not include package.json and package-lock.json unless explicitely given
     -g, --gitless            Do not create a git commit and tag
-    -e, --explicit-add       Do not add all modified files to the git commit, only the ones modified by this program
+    -a, --all                Add all modified files to the git commit instead of only the ones modified by this program
     -p, --prefix             Prefix git tags with a "v" character
     -m, --message <str>      Custom tag and commit message, can be given multiple times. The token _VER_ is available
                              in these messages to fill in the new version
@@ -89,7 +89,7 @@ if (!commands.includes(level) || args.help) {
     $ versions patch
     $ versions minor build.js
     $ versions major -p build.js
-    $ versions patch -c 'npm run build'
+    $ versions patch -c 'npm run build' -a
     $ versions patch -C -m '_VER_' -m 'This is a great release'`);
   exit();
 }
@@ -394,11 +394,11 @@ async function main() {
     const commitMsgs = [tagName, ...msgs];
     const commitMsg = commitMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
 
-    if (args["explicit-add"]) {
+    if (args.all) {
+      await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
+    } else {
       await run(["git", "add", ...files.map(file => relative(__dirname, file))]);
       await run(["git", "commit", "-F", "-"], {input: commitMsg});
-    } else {
-      await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
     }
 
     const tagMsgs = msgs.length ? msgs : [tagName];

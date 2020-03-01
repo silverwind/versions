@@ -29,7 +29,7 @@ usage: versions [options] command [files...]
     -r, --replace <str>      Additional replacement in the format "s#regexp#replacement#flags"
     -P, --packageless        Do not include package.json and package-lock.json unless explicitely given
     -g, --gitless            Do not create a git commit and tag
-    -e, --explicit-add       Do not add all modified files to the git commit, only the ones modified by this program
+    -a, --all                Add all modified files to the git commit instead of only the ones modified by this program
     -p, --prefix             Prefix git tags with a "v" character
     -m, --message <str>      Custom tag and commit message, can be given multiple times. The token _VER_ is available
                              in these messages to fill in the new version
@@ -42,7 +42,7 @@ usage: versions [options] command [files...]
     $ versions patch
     $ versions minor build.js
     $ versions major -p build.js
-    $ versions patch -c 'npm run build'
+    $ versions patch -c 'npm run build' -a
     $ versions patch -C -m '_VER_' -m 'This is a great release'
 ```
 
