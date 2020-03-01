@@ -115,6 +115,7 @@ if (date) {
 
 const {readFile, writeFile, truncate, stat, realpath} = require("fs").promises;
 const {basename, dirname, join} = require("path");
+const {platform} = require("os");
 const semver = require("semver");
 const findUp = require("find-up");
 const execa = require("execa");
@@ -197,12 +198,15 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
 }
 
 async function write(file, content) {
-  if (require("os").platform() === "win32") {
-    // truncate and append on windows to preserve file metadata
-    await truncate(file, 0);
-    await writeFile(file, content, {encoding: "utf8", flag: "r+"});
+  if (platform() === "win32") {
+    try {
+      await truncate(file);
+      await writeFile(file, content, {flag: "r+"});
+    } catch {
+      await writeFile(file, content);
+    }
   } else {
-    await writeFile(file, content, {encoding: "utf8"});
+    await writeFile(file, content);
   }
 }
 
