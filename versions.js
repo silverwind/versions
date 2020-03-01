@@ -3,6 +3,7 @@
 
 const {readFile, writeFile, truncate, stat, realpath} = require("fs").promises;
 const {basename, dirname, join, relative} = require("path");
+const {cwd} = require("process");
 const {platform} = require("os");
 const execa = require("execa");
 const fastGlob = require("fast-glob");
@@ -301,11 +302,11 @@ async function main() {
   // powershell that do not support globbing
   files = await fastGlob(files);
 
-  // convert paths to absolute
-  files = await Promise.all(files.map(file => realpath(file)));
-
   // remove duplicate paths
-  files = Array.from(new Set(files));
+  files = Array.from(new Set(files.map(file => realpath(file))));
+
+  // convert paths to relative
+  files = await Promise.all(files.map(file => relative(cwd(), file)));
 
   if (!args.packageless) {
     // include package.json if present
@@ -315,7 +316,7 @@ async function main() {
 
     // include package-lock.json if present
     let packageLockFile = await find("package-lock.json", dirname(packageFile));
-    if (packageLockFile) packageLockFile = await realpath(packageLockFile);
+    if (packageLockFile) packageLockFile = await relative(cwd(), packageLockFile);
     if (packageLockFile && !files.includes(packageLockFile)) {
       files.push(packageLockFile);
     }
@@ -397,7 +398,7 @@ async function main() {
     if (args.all) {
       await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
     } else {
-      await run(["git", "add", ...files.map(file => relative(__dirname, file))]);
+      await run(["git", "add", ...files]);
       await run(["git", "commit", "-F", "-"], {input: commitMsg});
     }
 
