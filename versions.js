@@ -314,8 +314,7 @@ async function main() {
     }
 
     // include package-lock.json if present
-    let packageLockFile = await find("package-lock.json", dirname(packageFile));
-    if (packageLockFile) packageLockFile = await relative(pwd, packageLockFile);
+    const packageLockFile = await find("package-lock.json", dirname(packageFile));
     if (packageLockFile && !files.includes(packageLockFile)) {
       files.push(packageLockFile);
     }
