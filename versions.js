@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 "use strict";
 
+const {basename, dirname, join} = require("path");
+const {platform} = require("os");
+const {readFile, writeFile, truncate, stat, realpath} = require("fs").promises;
+const execa = require("execa");
+const fastGlob = require("fast-glob");
+const findUp = require("find-up");
+const minimist = require("minimist");
+const semver = require("semver");
+
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 
 const minOpts = {
@@ -38,12 +47,12 @@ const minOpts = {
 };
 
 const commands = ["patch", "minor", "major"];
-let args = require("minimist")(process.argv.slice(2), minOpts);
+let args = minimist(process.argv.slice(2), minOpts);
 args = fixArgs(commands, args, minOpts);
 let [level, ...files] = args._;
 
 if (args.version) {
-  console.info(require(require("path").join(__dirname, "package.json")).version);
+  console.info(require(join(__dirname, "package.json")).version);
   process.exit(0);
 }
 
@@ -112,13 +121,6 @@ if (date) {
     exit(`Invalid date argument: ${date}`);
   }
 }
-
-const {readFile, writeFile, truncate, stat, realpath} = require("fs").promises;
-const {basename, dirname, join} = require("path");
-const {platform} = require("os");
-const semver = require("semver");
-const findUp = require("find-up");
-const execa = require("execa");
 
 function find(name, base) {
   if (!base) {
@@ -297,7 +299,7 @@ async function main() {
 
   // de-glob files args which is needed for dumb shells like
   // powershell that do not support globbing
-  files = await require("fast-glob")(files);
+  files = await fastGlob(files);
 
   // convert paths to absolute
   files = await Promise.all(files.map(file => realpath(file)));
