@@ -11,18 +11,15 @@ update:
 	rm -rf node_modules
 	npm i
 
-patch:
-	$(MAKE) test
+patch: test
 	node versions.js -C patch
 	$(MAKE) publish
 
-minor:
-	$(MAKE) test
+minor: test
 	node versions.js -C minor
 	$(MAKE) publish
 
-major:
-	$(MAKE) test
+major: test
 	node versions.js -C major
 	$(MAKE) publish
 

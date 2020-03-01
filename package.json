@@ -15,17 +15,6 @@
   "files": [
     "versions.js"
   ],
-  "keywords": [
-    "ver",
-    "version",
-    "version bump",
-    "versions",
-    "versions bump",
-    "bump",
-    "git",
-    "tag",
-    "replace"
-  ],
   "dependencies": {
     "execa": "^4.0.0",
     "fast-glob": "^3.2.2",
@@ -37,5 +26,16 @@
     "eslint": "6.8.0",
     "eslint-config-silverwind": "8.0.2",
     "updates": "9.3.3"
-  }
+  },
+  "keywords": [
+    "ver",
+    "version",
+    "version bump",
+    "versions",
+    "versions bump",
+    "bump",
+    "git",
+    "tag",
+    "replace"
+  ]
 }
