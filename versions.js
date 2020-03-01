@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
-const {readFile, writeFile, truncate, stat, realpath} = require("fs").promises;
+const {readFile, writeFile, truncate, stat} = require("fs").promises;
 const {basename, dirname, join, relative} = require("path");
 const {cwd} = require("process");
 const {platform} = require("os");
@@ -12,6 +12,7 @@ const minimist = require("minimist");
 const semver = require("semver");
 
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
+const pwd = cwd();
 
 const minOpts = {
   boolean: [
@@ -123,16 +124,18 @@ if (date) {
   }
 }
 
-function find(name, base) {
+async function find(name, base) {
   if (!base) {
-    return findUp(name);
+    const found = await findUp(name);
+    return found ? relative(pwd, found) : null;
   } else {
     return findUp(async directory => {
       const path = join(directory, name);
       if (directory.length < base.length) {
         return findUp.stop;
-      } else if (await findUp.exists(path)) {
-        return path;
+      } else {
+        const found = await findUp.exists(path);
+        return found ? relative(pwd, found) : null;
       }
     });
   }
@@ -263,8 +266,7 @@ function exit(err) {
 }
 
 async function main() {
-  let packageFile = await find("package.json");
-  if (packageFile) packageFile = await realpath(packageFile);
+  const packageFile = await find("package.json");
 
   // try to open package.json if it exists
   let pkg, pkgStr;
@@ -303,10 +305,7 @@ async function main() {
   files = await fastGlob(files);
 
   // remove duplicate paths
-  files = Array.from(new Set(files.map(file => realpath(file))));
-
-  // convert paths to relative
-  files = await Promise.all(files.map(file => relative(cwd(), file)));
+  files = Array.from(new Set(files));
 
   if (!args.packageless) {
     // include package.json if present
@@ -316,11 +315,14 @@ async function main() {
 
     // include package-lock.json if present
     let packageLockFile = await find("package-lock.json", dirname(packageFile));
-    if (packageLockFile) packageLockFile = await relative(cwd(), packageLockFile);
+    if (packageLockFile) packageLockFile = await relative(pwd, packageLockFile);
     if (packageLockFile && !files.includes(packageLockFile)) {
       files.push(packageLockFile);
     }
   }
+
+  // convert paths to relative
+  files = await Promise.all(files.map(file => relative(pwd, file)));
 
   if (!files.length) {
     throw new Error(`Found no files to do replacements in`);
