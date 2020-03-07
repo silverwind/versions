@@ -1,6 +1,6 @@
 test: rollup
 	yarn -s run eslint --color --quiet *.js
-	node --trace-deprecation --throw-deprecation test.js
+	yarn -s run jest --color
 
 rollup:
 	yarn -s run rollup --silent --compact -c rollup.config.js

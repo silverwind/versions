@@ -1,66 +1,73 @@
 "use strict";
 
-const assert = require("assert");
-const process = require("process");
 const execa = require("execa");
 const {promisify} = require("util");
 const readFile = promisify(require("fs").readFile);
 const writeFile = promisify(require("fs").writeFile);
 const unlink = promisify(require("fs").unlink);
 const path = require("path");
-const semver = require("semver");
+const {isSemver, incSemver} = require("./semver");
+
+const {test, expect, afterAll} = global;
+
+test("semver", async () => {
+  expect(isSemver("1.0.0")).toEqual(true);
+  expect(isSemver("1.0.0-pre-1.0.0")).toEqual(true);
+  expect(isSemver("1.2.3-0123")).toEqual(false);
+  expect(incSemver("1.0.0", "patch")).toEqual("1.0.1");
+  expect(incSemver("1.0.0", "minor")).toEqual("1.1.0");
+  expect(incSemver("1.0.0", "major")).toEqual("2.0.0");
+  expect(incSemver("1.0.0-pre-1.0.0", "patch")).toEqual("1.0.1-pre-1.0.0");
+  expect(incSemver("1.0.0-pre-1.0.0", "minor")).toEqual("1.1.0-pre-1.0.0");
+  expect(incSemver("1.0.0-pre-1.0.0", "major")).toEqual("2.0.0-pre-1.0.0");
+});
 
 const pkgFile = path.join(__dirname, "package.json");
 const testFile = path.join(__dirname, "testfile");
-
 const prefix = `testfile v`;
 const fromSuffix = ` (1999-01-01)`;
 const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;
 let pkgStr;
 
-async function exit(err) {
-  if (pkgStr) await writeFile(pkgFile, pkgStr);
-  await unlink(testFile);
-  if (err) console.info(err);
-  process.exit(err ? 1 : 0);
-}
+test("versions", async () => {
+  async function run(args) {
+    return await execa(`node versions ${args}`, {shell: true});
+  }
 
-async function run(args) {
-  return await execa(`node versions ${args}`, {shell: true});
-}
+  async function read() {
+    return await JSON.parse(await readFile(pkgFile, "utf8")).version;
+  }
 
-async function read() {
-  return await JSON.parse(await readFile(pkgFile, "utf8")).version;
-}
+  async function verify(version) {
+    expect(await readFile(testFile, "utf8")).toEqual(`${prefix}${version}${toSuffix}`);
+    return version;
+  }
 
-async function verify(version) {
-  assert.deepStrictEqual(await readFile(testFile, "utf8"), `${prefix}${version}${toSuffix}`);
-  return version;
-}
-
-async function main() {
   pkgStr = await readFile(pkgFile);
 
   let version = await read();
   await writeFile(testFile, `${prefix}${version}${fromSuffix}`);
 
   await run(`-P patch -d -g testfile`);
-  version = await verify(semver.inc(version, "patch"));
+  version = await verify(incSemver(version, "patch"));
 
   await run(`-b ${version} -P -C --date --gitless minor testfile`);
-  version = await verify(semver.inc(version, "minor"));
+  version = await verify(incSemver(version, "minor"));
 
   await run(`-b ${version} --packageless --gitless --date major testfile`);
-  version = await verify(semver.inc(version, "major"));
+  version = await verify(incSemver(version, "major"));
 
   await run(`-b ${version} -g -C -P -d major t*stf*le`);
-  version = await verify(semver.inc(version, "major"));
+  version = await verify(incSemver(version, "major"));
 
   await run(`-b ${version} -d -g -P major testfile testfile`);
-  version = await verify(semver.inc(version, "major"));
+  version = await verify(incSemver(version, "major"));
 
   await run(`-b ${version} -dgPC minor testfile`);
-  version = await verify(semver.inc(version, "minor"));
-}
+  version = await verify(incSemver(version, "minor"));
+});
 
-main().then(exit).catch(exit);
+afterAll(async () => {
+  if (pkgStr) await writeFile(pkgFile, pkgStr);
+  await unlink(testFile);
+});

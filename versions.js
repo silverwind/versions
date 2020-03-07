@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 "use strict";
 
-const {readFile, writeFile, truncate, stat, access} = require("fs").promises;
-const {basename, dirname, join, relative} = require("path");
-const {cwd: cwdFn} = require("process");
-const {platform} = require("os");
 const execa = require("execa");
 const fastGlob = require("fast-glob");
 const minimist = require("minimist");
-const semver = require("semver");
+const {basename, dirname, join, relative} = require("path");
+const {cwd: cwdFn} = require("process");
+const {platform} = require("os");
+const {readFile, writeFile, truncate, stat, access} = require("fs").promises;
+
+const {isSemver, incSemver} = require("./semver");
 const {version} = require("./package.json");
 
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
@@ -297,7 +298,7 @@ async function main() {
   }
 
   // validate old version
-  if (!semver.valid(baseVersion)) {
+  if (!isSemver(baseVersion)) {
     throw new Error(`Invalid base version: ${baseVersion}`);
   }
 
@@ -337,7 +338,7 @@ async function main() {
   }
 
   // update files
-  const newVersion = semver.inc(baseVersion, level);
+  const newVersion = incSemver(baseVersion, level);
   for (const file of files) {
     if (basename(file) === "package.json") {
       await updateFile({file, baseVersion, newVersion, replacements, pkgStr});
