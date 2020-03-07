@@ -5,7 +5,7 @@ test: rollup
 rollup:
 	yarn -s run rollup --silent --compact -c rollup.config.js
 
-publish: rollup
+publish:
 	git push -u --tags origin master
 	npm publish
 
