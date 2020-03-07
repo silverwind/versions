@@ -6,7 +6,7 @@ module.exports.isSemver = (str) => {
 
 module.exports.incSemver = (str, level) => {
   if (!module.exports.isSemver(str)) throw new Error(`Invalid semver: ${str}`);
-  if (level === "major") return str.replace(/([0-9]+)(\.[0-9]+\.[0-9+])(.*)/, (_, m1, m2, m3) => `${Number(m1) + 1}${m2}${m3}`);
-  if (level === "minor") return str.replace(/([0-9]+\.)([0-9]+)(\.[0-9+].*)/, (_, m1, m2, m3) => `${m1}${Number(m2) + 1}${m3}`);
-  return str.replace(/([0-9]+\.[0-9]+\.)([0-9+])(.*)/, (_, m1, m2, m3) => `${m1}${Number(m2) + 1}${m3}`);
+  if (level === "major") return str.replace(/([0-9]+)(\.[0-9]+\.[0-9]+)(.*)/, (_, m1, m2, m3) => `${Number(m1) + 1}${m2}${m3}`);
+  if (level === "minor") return str.replace(/([0-9]+\.)([0-9]+)(\.[0-9]+.*)/, (_, m1, m2, m3) => `${m1}${Number(m2) + 1}${m3}`);
+  return str.replace(/([0-9]+\.[0-9]+\.)([0-9]+)(.*)/, (_, m1, m2, m3) => `${m1}${Number(m2) + 1}${m3}`);
 };

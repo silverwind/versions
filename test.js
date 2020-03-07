@@ -13,6 +13,9 @@ test("semver", async () => {
   expect(incSemver("1.0.0", "patch")).toEqual("1.0.1");
   expect(incSemver("1.0.0", "minor")).toEqual("1.1.0");
   expect(incSemver("1.0.0", "major")).toEqual("2.0.0");
+  expect(incSemver("10.10.10", "patch")).toEqual("10.10.11");
+  expect(incSemver("10.10.10", "minor")).toEqual("10.11.10");
+  expect(incSemver("10.10.10", "major")).toEqual("11.10.10");
   expect(incSemver("1.0.0-pre-1.0.0", "patch")).toEqual("1.0.1-pre-1.0.0");
   expect(incSemver("1.0.0-pre-1.0.0", "minor")).toEqual("1.1.0-pre-1.0.0");
   expect(incSemver("1.0.0-pre-1.0.0", "major")).toEqual("2.0.0-pre-1.0.0");
