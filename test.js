@@ -1,13 +1,9 @@
 "use strict";
 
 const execa = require("execa");
-const {promisify} = require("util");
-const readFile = promisify(require("fs").readFile);
-const writeFile = promisify(require("fs").writeFile);
-const unlink = promisify(require("fs").unlink);
-const path = require("path");
 const {isSemver, incSemver} = require("./semver");
-
+const {join} = require("path");
+const {readFile, writeFile, unlink} = require("fs").promises;
 const {test, expect, afterAll} = global;
 
 test("semver", async () => {
@@ -22,8 +18,8 @@ test("semver", async () => {
   expect(incSemver("1.0.0-pre-1.0.0", "major")).toEqual("2.0.0-pre-1.0.0");
 });
 
-const pkgFile = path.join(__dirname, "package.json");
-const testFile = path.join(__dirname, "testfile");
+const pkgFile = join(__dirname, "package.json");
+const testFile = join(__dirname, "testfile");
 const prefix = `testfile v`;
 const fromSuffix = ` (1999-01-01)`;
 const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;
