@@ -1,15 +1,18 @@
-test:
-	npx eslint --color --quiet *.js
+test: rollup
+	yarn -s run eslint --color --quiet *.js
 	node --trace-deprecation --throw-deprecation test.js
 
-publish:
+rollup:
+	yarn -s run rollup --silent --compact -c rollup.config.js
+
+publish: rollup
 	git push -u --tags origin master
 	npm publish
 
 update:
-	npx updates -u
+	yarn -s run updates -u
 	rm -rf node_modules
-	npm i
+	yarn
 
 patch: test
 	node versions.js -C patch
@@ -24,4 +27,4 @@ major: test
 	$(MAKE) publish
 
 
-.PHONY: test publish update patch minor major
+.PHONY: test rollup publish update patch minor major
