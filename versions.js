@@ -9,6 +9,7 @@ const execa = require("execa");
 const fastGlob = require("fast-glob");
 const minimist = require("minimist");
 const semver = require("semver");
+const {version} = require("./package.json");
 
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const cwd = cwdFn();
@@ -53,7 +54,7 @@ args = fixArgs(commands, args, minOpts);
 let [level, ...files] = args._;
 
 if (args.version) {
-  console.info(require(join(__dirname, "package.json")).version);
+  console.info(version);
   process.exit(0);
 }
 
