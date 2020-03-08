@@ -28,7 +28,7 @@
     "rollup": "2.0.2",
     "rollup-plugin-hashbang": "2.2.2",
     "rollup-plugin-terser": "5.2.0",
-    "updates": "10.0.0"
+    "updates": "10.0.1"
   },
   "keywords": [
     "ver",
