@@ -25,10 +25,10 @@
     "fast-glob": "3.2.2",
     "jest": "25.1.0",
     "minimist": "1.2.5",
-    "rollup": "2.0.6",
+    "rollup": "2.1.0",
     "rollup-plugin-hashbang": "2.2.2",
     "rollup-plugin-terser": "5.3.0",
-    "updates": "10.2.3",
+    "updates": "10.2.5",
     "versions": "file:."
   },
   "keywords": [
