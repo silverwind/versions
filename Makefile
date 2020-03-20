@@ -15,15 +15,15 @@ update:
 	yarn
 
 patch: test
-	node versions.js -C patch
+	yarn -s run versions -Cc 'make rollup' patch
 	$(MAKE) publish
 
 minor: test
-	node versions.js -C minor
+	yarn -s run versions -Cc 'make rollup' minor
 	$(MAKE) publish
 
 major: test
-	node versions.js -C major
+	yarn -s run versions -Cc 'make rollup' major
 	$(MAKE) publish
 
 
