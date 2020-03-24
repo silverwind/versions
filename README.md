@@ -1,5 +1,5 @@
 # versions
-[![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions) [![](https://api.travis-ci.org/silverwind/versions.svg?style=flat)](https://travis-ci.org/silverwind/versions)
+[![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions)
 
 > Semantically increment a project's version in multiple files
 
