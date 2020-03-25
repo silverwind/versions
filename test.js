@@ -31,20 +31,20 @@ const fromSuffix = ` (1999-01-01)`;
 const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;
 let pkgStr;
 
+async function run(args) {
+  return await execa(`node versions ${args}`, {shell: true});
+}
+
+async function read() {
+  return await JSON.parse(await readFile(pkgFile, "utf8")).version;
+}
+
+async function verify(version) {
+  expect(await readFile(testFile, "utf8")).toEqual(`${prefix}${version}${toSuffix}`);
+  return version;
+}
+
 test("versions", async () => {
-  async function run(args) {
-    return await execa(`node versions ${args}`, {shell: true});
-  }
-
-  async function read() {
-    return await JSON.parse(await readFile(pkgFile, "utf8")).version;
-  }
-
-  async function verify(version) {
-    expect(await readFile(testFile, "utf8")).toEqual(`${prefix}${version}${toSuffix}`);
-    return version;
-  }
-
   pkgStr = await readFile(pkgFile);
 
   let version = await read();

@@ -129,7 +129,7 @@ async function find(filename, dir, stopDir) {
   try {
     await access(path);
     return path;
-  } catch (err) {}
+  } catch {}
 
   const parent = dirname(dir);
   if ((stopDir && path === stopDir) || parent === dir) {
@@ -370,14 +370,14 @@ async function main() {
       try {
         await run(["git", "show", ref, "--"], {silent: true});
         range = `${ref}..HEAD`;
-      } catch (err) {}
+      } catch {}
 
       // check if we have any previous tag
       if (!range) {
         try {
           const {stdout} = await run(["git", "describe", "--abbrev=0"], {silent: true});
           range = `${stdout}..HEAD`;
-        } catch (err) {}
+        } catch {}
       }
 
       // use the whole log (for cases where it's the first release)
@@ -392,7 +392,7 @@ async function main() {
         if (stdout && stdout.length) {
           changelog = stdout.trim();
         }
-      } catch (err) {}
+      } catch {}
     }
 
     const commitMsgs = [tagName, ...msgs];
