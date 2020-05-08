@@ -1,7 +1,7 @@
 # versions
 [![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions)
 
-> Semantically increment a project's version in multiple files
+> CLI to flexibly increment a project's version
 
 ## Installation
 ```

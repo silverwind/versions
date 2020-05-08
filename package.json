@@ -1,7 +1,7 @@
 {
   "name": "versions",
   "version": "8.2.8",
-  "description": "Semantically increment a project's version in multiple files",
+  "description": "CLI to flexibly increment a project's version",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/versions",
   "license": "BSD-2-Clause",
