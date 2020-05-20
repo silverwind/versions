@@ -10,7 +10,7 @@ module.exports = {
   plugins: [
     require("rollup-plugin-hashbang")(),
     require("@rollup/plugin-json")(),
-    require("@rollup/plugin-node-resolve")(),
+    require("@rollup/plugin-node-resolve").default(),
     require("@rollup/plugin-commonjs")(),
     require("rollup-plugin-terser").terser({output: {comments: false}}),
   ],
