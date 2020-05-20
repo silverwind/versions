@@ -5,7 +5,8 @@
 
 ## Installation
 ```
-$ npm i --save-dev versions
+npm i -D versions
+npx versions --help
 ```
 
 ## Usage
@@ -48,13 +49,21 @@ usage: versions [options] command [files...]
 
 To automatically sign commits and tags created by `versions` with GPG add this to your `~/.gitconfig`:
 
-``` ini
+```ini
 [user]
   signingkey = <keyid>
 [commit]
   gpgsign = true
 [tag]
   forceSignAnnotated = true
+```
+
+## CI environments
+
+CI environments usually only do shallow git checkouts which are insuficient for the `--changelog` argument to work. To fix this, unshallow the repository first:
+
+```bash
+git fetch --unshallow --quiet --tags
 ```
 
 © [silverwind](https://github.com/silverwind), distributed under BSD licence
