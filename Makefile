@@ -19,16 +19,15 @@ update:
 	$(MAKE) deps
 
 patch: test
-	yarn -s run versions -Cc 'make rollup' patch
+	node versions -Cc 'make rollup' patch
 	$(MAKE) publish
 
 minor: test
-	yarn -s run versions -Cc 'make rollup' minor
+	node versions -Cc 'make rollup' minor
 	$(MAKE) publish
 
 major: test
-	yarn -s run versions -Cc 'make rollup' major
+	node versions -Cc 'make rollup' major
 	$(MAKE) publish
-
 
 .PHONY: deps test rollup publish update patch minor major
