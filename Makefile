@@ -1,3 +1,6 @@
+deps:
+	yarn
+
 test:
 	yarn -s run eslint --color --quiet *.js
 	$(MAKE) rollup
@@ -13,7 +16,7 @@ publish:
 update:
 	yarn -s run updates -u
 	rm -rf node_modules
-	yarn
+	$(MAKE) deps
 
 patch: test
 	yarn -s run versions -Cc 'make rollup' patch
@@ -28,4 +31,4 @@ major: test
 	$(MAKE) publish
 
 
-.PHONY: test rollup publish update patch minor major
+.PHONY: deps test rollup publish update patch minor major
