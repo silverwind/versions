@@ -159,6 +159,12 @@ async function run(cmd, {silent = false, input} = {}) {
   return await child;
 }
 
+async function removeIgnoredFiles(files) {
+  const {stdout} = await run(["git", "check-ignore", "--", ...files], {silent: true});
+  const ignoredFiles = new Set(stdout.trim().split(/\r?\n/));
+  return files.filter(file => !ignoredFiles.has(file));
+}
+
 async function updateFile({file, baseVersion, newVersion, replacements, pkgStr}) {
   let oldData;
   if (pkgStr) {
@@ -368,7 +374,7 @@ async function main() {
 
       // check if base tag exists
       try {
-        await run(["git", "show", ref, "--"], {silent: true});
+        await run(["git", "show", ref], {silent: true});
         range = `${ref}..HEAD`;
       } catch {}
 
@@ -401,8 +407,13 @@ async function main() {
     if (args.all) {
       await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
     } else {
-      await run(["git", "add", ...files]);
-      await run(["git", "commit", "-F", "-"], {input: commitMsg});
+      const filesToAdd = await removeIgnoredFiles(files);
+      if (filesToAdd.length) {
+        await run(["git", "add", ...filesToAdd]);
+        await run(["git", "commit", "-F", "-"], {input: commitMsg});
+      } else {
+        await run(["git", "commit", "--allow-empty", "-F", "-"], {input: commitMsg});
+      }
     }
 
     const tagMsgs = msgs.length ? msgs : [tagName];
