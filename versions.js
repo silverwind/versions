@@ -88,10 +88,7 @@ if (!commands.includes(level) || args.help) {
 
   Examples:
     $ versions patch
-    $ versions minor build.js
-    $ versions major -p build.js
-    $ versions patch -c 'npm run build' -a
-    $ versions patch -C -m '_VER_' -m 'This is a great release'`);
+    $ versions minor -Cc 'npm run build' -m 'Release _VER_' file.css`);
   exit();
 }
 
