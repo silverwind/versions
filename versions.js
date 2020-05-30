@@ -160,7 +160,12 @@ async function run(cmd, {silent = false, input} = {}) {
 }
 
 async function removeIgnoredFiles(files) {
-  const {stdout} = await run(["git", "check-ignore", "--", ...files], {silent: true});
+  let stdout;
+  try {
+    ({stdout} = await run(["git", "check-ignore", "--", ...files], {silent: true}));
+  } catch {
+    return files;
+  }
   const ignoredFiles = new Set(stdout.split(/\r?\n/));
   return files.filter(file => !ignoredFiles.has(file));
 }
