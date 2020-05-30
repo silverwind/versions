@@ -68,7 +68,7 @@ test("versions", async () => {
   await run(`-b ${version} -d -g -P major testfile testfile`);
   version = await verify(incSemver(version, "major"));
 
-  await run(`-b ${version} -dgPC minor testfile`);
+  await run(`-b ${version} -dgPGC minor testfile`);
   version = await verify(incSemver(version, "minor"));
 });
 

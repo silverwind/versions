@@ -19,6 +19,7 @@ const minOpts = {
   boolean: [
     "a", "all",
     "g", "gitless",
+    "G", "globless",
     "h", "help",
     "P", "packageless",
     "p", "prefix",
@@ -74,6 +75,7 @@ if (!commands.includes(level) || args.help) {
     -c, --command <cmd>   Run a command after files are updated but before git commit and tag
     -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
     -g, --gitless         Do not perform any git action like creating commit and tag
+    -G, --globless        Do not process globs in the file arguments
     -m, --message <str>   Custom tag and commit message. Token _VER_ is available to fill the new version
     -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
     -p, --prefix          Prefix git tags with a "v" character
@@ -176,8 +178,7 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
     newData = pkgStr.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (basename(file) === "package-lock.json") {
     // special case for package-lock.json which contains a lot of version
-    // strings which make regexp replacement risky. From a few tests on
-    // Node.js 12, key order seems to be preserved through parse and stringify.
+    // strings which make regexp replacement risky.
     newData = JSON.parse(oldData);
     newData.version = newVersion;
     newData = `${JSON.stringify(newData, null, 2)}\n`;
@@ -305,9 +306,10 @@ async function main() {
     throw new Error(`Invalid base version: ${baseVersion}`);
   }
 
-  // de-glob files args which is needed for dumb shells like
-  // powershell that do not support globbing
-  files = await fastGlob(files);
+  // de-glob files args which is useful when not spawned via a shell
+  if (!args.globless) {
+    files = await fastGlob(files);
+  }
 
   // remove duplicate paths
   files = Array.from(new Set(files));
