@@ -11,14 +11,9 @@ npx versions --help
 
 ## Usage
 ```
-usage: versions [options] command [files...]
+usage: versions [options] patch|minor|major [files...]
 
   Semantically increment a project's version in multiple files.
-
-  Commands:
-    patch                 Increment patch 0.0.x version
-    minor                 Increment minor 0.x.0 version
-    major                 Increment major x.0.0 version
 
   Arguments:
    files                  Files to do version replacement in. The nearest package.json and
