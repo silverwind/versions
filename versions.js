@@ -161,7 +161,7 @@ async function run(cmd, {silent = false, input} = {}) {
 
 async function removeIgnoredFiles(files) {
   const {stdout} = await run(["git", "check-ignore", "--", ...files], {silent: true});
-  const ignoredFiles = new Set(stdout.trim().split(/\r?\n/));
+  const ignoredFiles = new Set(stdout.split(/\r?\n/));
   return files.filter(file => !ignoredFiles.has(file));
 }
 
@@ -396,7 +396,7 @@ async function main() {
         if (range) args.push(range);
         const {stdout} = await run([...args, `--pretty=format:* %s (%an)`], {silent: true});
         if (stdout && stdout.length) {
-          changelog = stdout.trim();
+          changelog = stdout;
         }
       } catch {}
     }
