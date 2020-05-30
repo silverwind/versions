@@ -21,21 +21,21 @@ usage: versions [options] command [files...]
     major                 Increment major x.0.0 version
 
   Arguments:
-   files                  Files to do version replacement in. The nearest package.json and package-lock.json
-                          will always be included unless the -P argument is given
+   files                  Files to do version replacement in. The nearest package.json and
+                          package-lock.json will always be included unless the -P argument is given
   Options:
-    -a, --all             Add all changed files to the commit instead of only the ones modified by this tool
+    -a, --all             Add all changed files to the commit instead of only the ones currently modified
     -b, --base <version>  Base version to use. Default is parsed from the nearest package.json
     -C, --changelog       Generate a changelog since the base version tag or if absent, the latest tag
     -c, --command <cmd>   Run a command after files are updated but before git commit and tag
     -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
     -g, --gitless         Do not perform any git action like creating commit and tag
-    -h, --help            Print this help
-    -m, --message <str>   Custom tag and commit message. The token _VER_ is available to fill the new version
+    -m, --message <str>   Custom tag and commit message. Token _VER_ is available to fill the new version
     -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
     -p, --prefix          Prefix git tags with a "v" character
     -r, --replace <str>   Additional replacement in the format "s#regexp#replacement#flags"
     -v, --version         Print the version
+    -h, --help            Print this help
 
   Examples:
     $ versions patch
