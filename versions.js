@@ -83,7 +83,7 @@ if (!commands.includes(level) || args.help) {
 
   Examples:
     $ versions patch
-    $ versions minor -Cc 'npm run build' -m 'Release _VER_' file.css`);
+    $ versions -Cc 'npm run build' -m 'Release _VER_' minor file.css`);
   exit();
 }
 

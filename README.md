@@ -34,7 +34,7 @@ usage: versions [options] patch|minor|major [files...]
 
   Examples:
     $ versions patch
-    $ versions minor -Cc 'npm run build' -m 'Release _VER_' file.css
+    $ versions -Cc 'npm run build' -m 'Release _VER_' minor file.css
 ```
 
 ## Signing commits and tags
