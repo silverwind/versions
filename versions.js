@@ -74,12 +74,12 @@ if (!commands.includes(level) || args.help) {
     -C, --changelog       Generate a changelog since the base version tag or if absent, the latest tag
     -c, --command <cmd>   Run a command after files are updated but before git commit and tag
     -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
-    -g, --gitless         Do not perform any git action like creating commit and tag
-    -G, --globless        Do not process globs in the file arguments
     -m, --message <str>   Custom tag and commit message. Token _VER_ is available to fill the new version
-    -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
     -p, --prefix          Prefix git tags with a "v" character
     -r, --replace <str>   Additional replacement in the format "s#regexp#replacement#flags"
+    -g, --gitless         Do not perform any git action like creating commit and tag
+    -G, --globless        Do not process globs in the file arguments
+    -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
     -v, --version         Print the version
     -h, --help            Print this help
 
