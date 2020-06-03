@@ -1,9 +1,10 @@
 deps:
 	yarn
 
-test:
+lint:
 	yarn -s run eslint --color --quiet *.js
-	$(MAKE) rollup
+
+test: lint rollup
 	yarn -s run jest --color
 
 rollup:
@@ -30,4 +31,4 @@ major: test
 	node versions -Cc 'make rollup' major
 	$(MAKE) publish
 
-.PHONY: deps test rollup publish update patch minor major
+.PHONY: deps lint test rollup publish update patch minor major
