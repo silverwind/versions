@@ -53,7 +53,7 @@ To automatically sign commits and tags created by `versions` with GPG add this t
 
 ## CI environments
 
-CI environments usually only do shallow git checkouts which are insuficient for the `--changelog` argument to work. To fix this, unshallow the repository first:
+CI environments usually do shallow git checkout. To use `--changelog` unshallow the repository first:
 
 ```bash
 git fetch --unshallow --quiet --tags
