@@ -17,13 +17,13 @@
   ],
   "devDependencies": {
     "@vercel/ncc": "0.23.0",
-    "eslint": "7.3.1",
-    "eslint-config-silverwind": "13.4.6",
-    "execa": "4.0.2",
+    "eslint": "7.6.0",
+    "eslint-config-silverwind": "18.0.2",
+    "execa": "4.0.3",
     "fast-glob": "3.2.4",
-    "jest": "26.1.0",
+    "jest": "26.4.0",
     "minimist": "1.2.5",
-    "updates": "10.2.14"
+    "updates": "10.3.4"
   },
   "keywords": [
     "ver",
