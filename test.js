@@ -4,7 +4,6 @@ const execa = require("execa");
 const {isSemver, incSemver} = require("./semver");
 const {join} = require("path");
 const {readFile, writeFile, unlink} = require("fs").promises;
-const {test, expect, afterAll} = global;
 
 test("semver", async () => {
   expect(isSemver("1.0.0")).toEqual(true);

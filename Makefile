@@ -1,9 +1,10 @@
-test:
+lint:
 	yarn -s run eslint --color .
-	@$(MAKE) --no-print-directory bundle
+
+test: lint build
 	yarn -s run jest --color
 
-bundle:
+build:
 	yarn -s run ncc build versions.js -o . -q -m --no-source-map-register
 	@mv index.js versions
 
@@ -15,20 +16,20 @@ deps:
 	rm -rf node_modules
 	yarn
 
-update: bundle
+update: build
 	yarn -s run updates -cu
 	@$(MAKE) --no-print-directory deps
 
 patch: test
-	node versions -Cc 'make bundle' patch
+	node versions -Cc 'make build' patch
 	@$(MAKE) --no-print-directory publish
 
 minor: test
-	node versions -Cc 'make bundle' minor
+	node versions -Cc 'make build' minor
 	@$(MAKE) --no-print-directory publish
 
 major: test
-	node versions -Cc 'make bundle' major
+	node versions -Cc 'make build' major
 	@$(MAKE) --no-print-directory publish
 
-.PHONY: test bundle publish deps update patch minor major
+.PHONY: lint test build publish deps update patch minor major
