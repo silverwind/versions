@@ -16,9 +16,11 @@ deps:
 	rm -rf node_modules
 	yarn
 
-update: build
+update: node_modules
 	yarn -s run updates -cu
-	@$(MAKE) --no-print-directory deps
+	@rm yarn.lock
+	@yarn -s
+	@touch node_modules
 
 patch: test
 	node versions -Cc 'make build' patch
