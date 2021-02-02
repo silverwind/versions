@@ -49,6 +49,8 @@ To automatically sign commits and tags created by `versions` with GPG add this t
   gpgsign = true
 [tag]
   forceSignAnnotated = true
+[push]
+  gpgSign = if-asked
 ```
 
 ## CI environments
