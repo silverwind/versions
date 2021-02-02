@@ -46,7 +46,7 @@ To automatically sign commits and tags created by `versions` with GPG add this t
 [user]
   signingkey = <keyid>
 [commit]
-  gpgsign = true
+  gpgSign = true
 [tag]
   forceSignAnnotated = true
 [push]
