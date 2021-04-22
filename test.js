@@ -1,9 +1,15 @@
-"use strict";
+import execa from "execa";
+import {isSemver, incSemver} from "./semver.js";
+import fs from "fs";
 
-const execa = require("execa");
-const {isSemver, incSemver} = require("./semver");
-const {join} = require("path");
-const {readFile, writeFile, unlink} = require("fs").promises;
+const {readFile, writeFile, unlink} = fs.promises;
+const pkgFile = new URL("./package.json", import.meta.url);
+const testFile = new URL("testfile", import.meta.url);
+const script = `versions.cjs`;
+const prefix = `testfile v`;
+const fromSuffix = ` (1999-01-01)`;
+const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;
+let pkgStr;
 
 test("semver", async () => {
   expect(isSemver("1.0.0")).toEqual(true);
@@ -26,15 +32,8 @@ test("semver", async () => {
   expect(incSemver("10.10.10-pre-1.0.0", "major")).toEqual("11.0.0-pre-1.0.0");
 });
 
-const pkgFile = join(__dirname, "package.json");
-const testFile = join(__dirname, "testfile");
-const prefix = `testfile v`;
-const fromSuffix = ` (1999-01-01)`;
-const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;
-let pkgStr;
-
 async function run(args) {
-  return await execa(`node versions ${args}`, {shell: true});
+  return await execa(`node ${script} ${args}`, {shell: true});
 }
 
 async function read() {

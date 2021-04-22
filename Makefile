@@ -2,11 +2,16 @@ lint:
 	yarn -s run eslint --color .
 
 test: lint build
-	yarn -s run jest --color
+	NODE_OPTIONS="--experimental-vm-modules --no-warnings" yarn -s run jest --color
+
+unittest: node_modules
+	NODE_OPTIONS="--experimental-vm-modules --no-warnings" yarn -s run jest --color --watchAll
 
 build:
-	yarn -s run ncc build versions.js -o . -q -m --no-source-map-register
-	@mv index.js versions
+	yarn -s run ncc build versions.js -q -m --no-source-map-register -o .
+	@mv index.js versions.cjs
+	@rm -rf versions
+	@chmod +x versions.cjs
 
 publish:
 	git push -u --tags origin master
@@ -34,4 +39,4 @@ major: test
 	node versions -Cc 'make build' major
 	@$(MAKE) --no-print-directory publish
 
-.PHONY: lint test build publish deps update patch minor major
+.PHONY: lint test unittest build publish deps update patch minor major

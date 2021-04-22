@@ -1,11 +1,11 @@
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
-module.exports.isSemver = (str) => {
+export const isSemver = (str) => {
   return semverRe.test(str.replace(/^v/, ""));
 };
 
-module.exports.incSemver = (str, level) => {
-  if (!module.exports.isSemver(str)) throw new Error(`Invalid semver: ${str}`);
+export const incSemver = (str, level) => {
+  if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
     return `${Number(m1) + 1}.0.0${m2}`;
   });

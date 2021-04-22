@@ -1,17 +1,15 @@
 #!/usr/bin/env node
-"use strict";
+import execa from "execa";
+import fastGlob from "fast-glob";
+import minimist from "minimist";
+import {basename, dirname, join, relative} from "path";
+import {cwd as cwdFn} from "process";
+import {platform} from "os";
+import fs from "fs";
+import {isSemver, incSemver} from "./semver.js";
 
-const execa = require("execa");
-const fastGlob = require("fast-glob");
-const minimist = require("minimist");
-const {basename, dirname, join, relative} = require("path");
-const {cwd: cwdFn} = require("process");
-const {platform} = require("os");
-const {readFile, writeFile, truncate, stat, access} = require("fs").promises;
-
-const {isSemver, incSemver} = require("./semver");
-const {version} = require("./package.json");
-
+const {readFile, writeFile, truncate, stat, access} = fs.promises;
+const {readFileSync} = fs;
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const cwd = cwdFn();
 
@@ -56,6 +54,8 @@ args = fixArgs(commands, args, minOpts);
 let [level, ...files] = args._;
 
 if (args.version) {
+  const path = new URL("./package.json", import.meta.url);
+  const {version} = JSON.parse(readFileSync(path, "utf8"));
   console.info(version);
   process.exit(0);
 }
