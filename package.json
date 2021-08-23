@@ -7,9 +7,6 @@
   "license": "BSD-2-Clause",
   "bin": "./versions.cjs",
   "type": "module",
-  "scripts": {
-    "test": "make test"
-  },
   "engines": {
     "node": ">=12"
   },
@@ -36,10 +33,5 @@
     "git",
     "tag",
     "replace"
-  ],
-  "jest": {
-    "testTimeout": 60000,
-    "transform": {},
-    "verbose": false
-  }
+  ]
 }

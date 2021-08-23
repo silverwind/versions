@@ -1,41 +1,43 @@
-lint:
-	yarn -s run eslint --color .
+node_modules: package-lock.json
+	npm install --no-save
+	@touch node_modules
 
-test: lint build
-	NODE_OPTIONS="--experimental-vm-modules --no-warnings" yarn -s run jest --color
+deps: node_modules
+
+lint: node_modules
+	npx eslint --color .
+
+test: node_modules lint build
+	NODE_OPTIONS="--experimental-vm-modules --no-warnings" npx jest --color
 
 unittest: node_modules
-	NODE_OPTIONS="--experimental-vm-modules --no-warnings" yarn -s run jest --color --watchAll
+	NODE_OPTIONS="--experimental-vm-modules --no-warnings" npx jest --color --watchAll
 
-build:
-	yarn -s run ncc build versions.js -q -m --no-source-map-register -o .
+build: node_modules
+	npx ncc build versions.js -q -m --no-source-map-register -o .
 	@mv index.js versions.cjs
 	@rm -rf versions
 	@chmod +x versions.cjs
 
-publish:
+publish: node_modules
 	git push -u --tags origin master
 	npm publish
 
-deps:
-	rm -rf node_modules
-	yarn
-
 update: node_modules
-	yarn -s run updates -cu
-	@rm yarn.lock
-	@yarn -s
+	npx updates -cu
+	rm package-lock.json
+	npm install
 	@touch node_modules
 
-patch: test
+patch: node_modules test
 	node versions -Cc 'make build' patch
 	@$(MAKE) --no-print-directory publish
 
-minor: test
+minor: node_modules test
 	node versions -Cc 'make build' minor
 	@$(MAKE) --no-print-directory publish
 
-major: test
+major: node_modules test
 	node versions -Cc 'make build' major
 	@$(MAKE) --no-print-directory publish
 
