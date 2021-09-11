@@ -180,7 +180,8 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
     // special case for package-lock.json which contains a lot of version
     // strings which make regexp replacement risky.
     newData = JSON.parse(oldData);
-    newData.version = newVersion;
+    if (newData.version) newData.version = newVersion; // v1
+    if (newData?.packages?.[""].version) newData.packages[""].version = newVersion; // v2
     newData = `${JSON.stringify(newData, null, 2)}\n`;
   } else {
     const re = new RegExp(esc(baseVersion), "g");
