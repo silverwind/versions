@@ -5,7 +5,7 @@ import fs from "fs";
 const {readFile, writeFile, unlink} = fs.promises;
 const pkgFile = new URL("./package.json", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
-const script = `versions.cjs`;
+const script = `bin/versions.js`;
 const prefix = `testfile v`;
 const fromSuffix = ` (1999-01-01)`;
 const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;

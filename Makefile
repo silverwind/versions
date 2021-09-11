@@ -14,10 +14,9 @@ unittest: node_modules
 	NODE_OPTIONS="--experimental-vm-modules --no-warnings" npx jest --color --watchAll
 
 build: node_modules
-	npx ncc build versions.js -q -m --no-source-map-register -o .
-	@mv index.js versions.cjs
-	@rm -rf versions
-	@chmod +x versions.cjs
+	npx ncc build versions.js -q -m --no-source-map-register -o bin
+	mv bin/index.js bin/versions.js
+	@chmod +x bin/versions.js
 
 publish: node_modules
 	git push -u --tags origin master
