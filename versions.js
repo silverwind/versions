@@ -173,17 +173,19 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
   }
 
   let newData;
+  const fileName = basename(file);
+
   if (pkgStr) {
     const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
     newData = pkgStr.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
-  } else if (basename(file) === "package-lock.json") {
+  } else if (fileName === "package-lock.json") {
     // special case for package-lock.json which contains a lot of version
     // strings which make regexp replacement risky.
     newData = JSON.parse(oldData);
     if (newData.version) newData.version = newVersion; // v1
     if (newData?.packages?.[""]?.version) newData.packages[""].version = newVersion; // v2
     newData = `${JSON.stringify(newData, null, 2)}\n`;
-  } else if (basename(file) === "pyproject.toml") {
+  } else if (fileName === "pyproject.toml") {
     const re = new RegExp(`(^version ?= ?["'])${esc(baseVersion)}(["'].*)`, "gm");
     newData = oldData.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else {
