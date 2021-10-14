@@ -90,4 +90,5 @@ test("pyproject.toml", async () => {
   expect(dataAfter.tool.poetry.version).toEqual(versionAfter);
   expect(dataAfter.tool.poetry.dependencies.flask).toEqual(versionBefore);
   expect(dataAfter["build-system"].requires[0]).toEqual(`poetry>=${versionBefore}`);
+  await unlink(tmpFile);
 });
