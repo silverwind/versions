@@ -183,6 +183,9 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
     if (newData.version) newData.version = newVersion; // v1
     if (newData?.packages?.[""]?.version) newData.packages[""].version = newVersion; // v2
     newData = `${JSON.stringify(newData, null, 2)}\n`;
+  } else if (basename(file) === "pyproject.toml") {
+    const re = new RegExp(`(^version ?= ?["'])${esc(baseVersion)}(["'].*)`, "gm");
+    newData = oldData.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else {
     const re = new RegExp(esc(baseVersion), "g");
     newData = oldData.replace(re, newVersion);

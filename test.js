@@ -1,15 +1,22 @@
 import execa from "execa";
 import {isSemver, incSemver} from "./semver.js";
 import fs from "fs";
+import toml from "toml";
 
 const {readFile, writeFile, unlink} = fs.promises;
 const pkgFile = new URL("./package.json", import.meta.url);
+const pyFile = new URL("./fixtures/pyproject.toml", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
 const script = `bin/versions.js`;
 const prefix = `testfile v`;
 const fromSuffix = ` (1999-01-01)`;
 const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;
 let pkgStr;
+
+afterAll(async () => {
+  if (pkgStr) await writeFile(pkgFile, pkgStr);
+  await unlink(testFile);
+});
 
 test("semver", async () => {
   expect(isSemver("1.0.0")).toEqual(true);
@@ -36,19 +43,15 @@ async function run(args) {
   return await execa(`node ${script} ${args}`, {shell: true});
 }
 
-async function read() {
-  return await JSON.parse(await readFile(pkgFile, "utf8")).version;
-}
-
 async function verify(version) {
   expect(await readFile(testFile, "utf8")).toEqual(`${prefix}${version}${toSuffix}`);
   return version;
 }
 
 test("versions", async () => {
-  pkgStr = await readFile(pkgFile);
+  pkgStr = await readFile(pkgFile, "utf8");
+  let {version} = await JSON.parse(pkgStr);
 
-  let version = await read();
   await writeFile(testFile, `${prefix}${version}${fromSuffix}`);
 
   await run(`-P patch -d -g testfile`);
@@ -70,7 +73,21 @@ test("versions", async () => {
   version = await verify(incSemver(version, "minor"));
 });
 
-afterAll(async () => {
-  if (pkgStr) await writeFile(pkgFile, pkgStr);
-  await unlink(testFile);
+test("pyproject.toml", async () => {
+  const str = await readFile(pyFile, "utf8");
+  const dataBefore = toml.parse(str);
+
+  const versionBefore = dataBefore.tool.poetry.version;
+  expect(dataBefore.tool.poetry.dependencies.flask).toEqual(versionBefore);
+  expect(dataBefore["build-system"].requires[0]).toEqual(`poetry>=${versionBefore}`);
+
+  const tmpFile = new URL("pyproject.toml", import.meta.url);
+  await writeFile(tmpFile, str);
+  await run(`-P minor -d -g pyproject.toml -b ${versionBefore}`);
+
+  const dataAfter = toml.parse(await readFile(tmpFile, "utf8"));
+  const versionAfter = incSemver(versionBefore, "minor");
+  expect(dataAfter.tool.poetry.version).toEqual(versionAfter);
+  expect(dataAfter.tool.poetry.dependencies.flask).toEqual(versionBefore);
+  expect(dataAfter["build-system"].requires[0]).toEqual(`poetry>=${versionBefore}`);
 });
