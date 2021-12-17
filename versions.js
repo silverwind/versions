@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import execa from "execa";
+import {execa} from "execa";
 import fastGlob from "fast-glob";
 import minimist from "minimist";
 import {basename, dirname, join, relative} from "path";
