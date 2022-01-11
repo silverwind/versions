@@ -299,13 +299,14 @@ async function main() {
     if (packageFile) {
       try {
         pkgStr = await readFile(packageFile, "utf8");
-        baseVersion = JSON.parse(pkgStr).version;
+        baseVersion = JSON.parse(pkgStr)?.version;
       } catch (err) {
         throw new Error(`Error reading ${packageFile}: ${err.message}`);
       }
-    } else if (pyprojectFile) {
+    }
+    if (!baseVersion && pyprojectFile) {
       try {
-        baseVersion = parseToml(await readFile(pyprojectFile, "utf8")).tool.poetry.version;
+        baseVersion = parseToml(await readFile(pyprojectFile, "utf8"))?.tool?.poetry?.version;
       } catch (err) {
         throw new Error(`Error reading ${pyprojectFile}: ${err.message}`);
       }
