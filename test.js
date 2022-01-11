@@ -83,6 +83,7 @@ test("pyproject.toml", async () => {
 
   const tmpFile = new URL("pyproject.toml", import.meta.url);
   await writeFile(tmpFile, str);
+  // todo: eliminate need for -b
   await run(`-P minor -d -g pyproject.toml -b ${versionBefore}`);
 
   const dataAfter = toml.parse(await readFile(tmpFile, "utf8"));

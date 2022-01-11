@@ -3,6 +3,8 @@
 
 > CLI to flexibly increment a project's version
 
+Supports projects with `package.json` and `pyproject.toml` (poetry).
+
 ## Installation
 ```
 npm i -D versions

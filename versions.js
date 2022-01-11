@@ -6,6 +6,7 @@ import {basename, dirname, join, relative} from "path";
 import {cwd as cwdFn} from "process";
 import {platform} from "os";
 import fs from "fs";
+import {parse as parseToml} from "toml";
 import {isSemver, incSemver} from "./semver.js";
 
 const {readFile, writeFile, truncate, stat, access} = fs.promises;
@@ -205,7 +206,7 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
   }
 
   if (oldData === newData) {
-    throw new Error(`No replacement made in ${file}`);
+    throw new Error(`No replacement made in ${file} for base version ${baseVersion}`);
   } else {
     await write(file, newData);
   }
@@ -277,31 +278,41 @@ async function main() {
   const gitDir = await find(".git", cwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
 
-  const packageFile = await find("package.json", cwd, projectRoot);
-  if (!projectRoot) projectRoot = packageFile ? dirname(packageFile) : cwd;
+  const [packageFile, pyprojectFile] = await Promise.all([
+    find("package.json", cwd, projectRoot),
+    find("pyproject.toml", cwd, projectRoot),
+  ]);
 
-  // try to open package.json if it exists
-  let pkg, pkgStr;
-  if (packageFile) {
-    try {
-      pkgStr = await readFile(packageFile, "utf8");
-      pkg = JSON.parse(pkgStr);
-    } catch (err) {
-      throw new Error(`Error reading ${packageFile}: ${err.message}`);
+  if (!projectRoot) {
+    if (packageFile) {
+      projectRoot = dirname(packageFile);
+    } else if (pyprojectFile) {
+      projectRoot = dirname(pyprojectFile);
+    } else {
+      projectRoot = cwd;
     }
   }
 
   // obtain old version
-  let baseVersion;
+  let baseVersion, pkgStr;
   if (!args.base) {
-    if (pkg) {
-      if (pkg.version) {
-        baseVersion = pkg.version;
-      } else {
-        throw new Error(`No "version" field found in ${packageFile}`);
+    if (packageFile) {
+      try {
+        pkgStr = await readFile(packageFile, "utf8");
+        baseVersion = JSON.parse(pkgStr).version;
+      } catch (err) {
+        throw new Error(`Error reading ${packageFile}: ${err.message}`);
       }
-    } else {
-      throw new Error(`Unable to obtain base version, either create package.json or specify --base`);
+    } else if (pyprojectFile) {
+      try {
+        baseVersion = parseToml(await readFile(pyprojectFile, "utf8")).tool.poetry.version;
+      } catch (err) {
+        throw new Error(`Error reading ${pyprojectFile}: ${err.message}`);
+      }
+    }
+
+    if (!baseVersion) {
+      throw new Error(`Unable to obtain base version from existing files`);
     }
   } else {
     baseVersion = args.base;
