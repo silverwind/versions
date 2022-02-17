@@ -16,6 +16,7 @@ unittest: node_modules
 build: node_modules
 	npx ncc build versions.js -q -m --no-source-map-register -o bin
 	mv bin/index.js bin/versions.js
+	perl -0777 -p -i -e 's#\n?\/\*![\s\S]*?\*\/\n?##g' bin/versions.js
 	@chmod +x bin/versions.js
 
 publish: node_modules
