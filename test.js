@@ -4,8 +4,8 @@ import fs from "fs";
 import toml from "toml";
 
 const {readFile, writeFile, unlink} = fs.promises;
-const pkgFile = new URL("./package.json", import.meta.url);
-const pyFile = new URL("./fixtures/pyproject.toml", import.meta.url);
+const pkgFile = new URL("package.json", import.meta.url);
+const pyFile = new URL("fixtures/pyproject.toml", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
 const script = `bin/versions.js`;
 const prefix = `testfile v`;

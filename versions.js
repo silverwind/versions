@@ -55,7 +55,7 @@ args = fixArgs(commands, args, minOpts);
 let [level, ...files] = args._;
 
 if (args.version) {
-  const path = new URL("./package.json", import.meta.url);
+  const path = new URL("package.json", import.meta.url);
   const {version} = JSON.parse(readFileSync(path, "utf8"));
   console.info(version);
   process.exit(0);
