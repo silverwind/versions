@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {execa} from "execa";
-import {sync as fastGlob} from "fast-glob";
+import fastGlob from "fast-glob";
 import minimist from "minimist";
 import {basename, dirname, join, relative} from "path";
 import {cwd, exit as doExit} from "process";
@@ -9,6 +9,7 @@ import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "f
 import {parse as parseToml} from "toml";
 import {isSemver, incSemver} from "./semver.js";
 
+const fastGlobSync = fastGlob.sync; // workaround for commonjs
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const pwd = cwd();
 
@@ -311,7 +312,7 @@ async function main() {
 
   // de-glob files args which is useful when not spawned via a shell
   if (!args.globless) {
-    files = fastGlob(files);
+    files = fastGlobSync(files);
   }
 
   // remove duplicate paths
