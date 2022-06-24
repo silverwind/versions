@@ -3,7 +3,7 @@ import {execa} from "execa";
 import {sync as fastGlob} from "fast-glob";
 import minimist from "minimist";
 import {basename, dirname, join, relative} from "path";
-import {cwd} from "process";
+import {cwd, exit as doExit} from "process";
 import {platform} from "os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "fs";
 import {parse as parseToml} from "toml";
@@ -52,10 +52,9 @@ const args = fixArgs(commands, minimist(process.argv.slice(2), minOpts), minOpts
 let [level, ...files] = args._;
 
 if (args.version) {
-  const path = new URL("package.json", import.meta.url);
-  const {version} = JSON.parse(readFileSync(path, "utf8"));
+  const {version} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
   console.info(version);
-  process.exit(0);
+  exit();
 }
 
 if (!commands.has(level) || args.help) {
@@ -259,10 +258,8 @@ function fixArgs(commands, args, minOpts) {
 }
 
 function exit(err) {
-  if (err) {
-    console.info(String(err.stack || err.message || err).trim());
-  }
-  process.exit(err ? 1 : 0);
+  if (err) console.info(String(err.stack || err.message || err).trim());
+  doExit(err ? 1 : 0);
 }
 
 async function main() {
