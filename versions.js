@@ -5,8 +5,7 @@ import minimist from "minimist";
 import {basename, dirname, join, relative} from "path";
 import {cwd} from "process";
 import {platform} from "os";
-import {readFile, writeFile, truncate, stat, access} from "fs/promises";
-import {readFileSync} from "fs";
+import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "fs";
 import {parse as parseToml} from "toml";
 import {isSemver, incSemver} from "./semver.js";
 
@@ -116,11 +115,11 @@ if (date) {
   }
 }
 
-async function find(filename, dir, stopDir) {
+function find(filename, dir, stopDir) {
   const path = join(dir, filename);
 
   try {
-    await access(path);
+    accessSync(path);
     return path;
   } catch {}
 
@@ -163,8 +162,8 @@ async function removeIgnoredFiles(files) {
   return files.filter(file => !ignoredFiles.has(file));
 }
 
-async function updateFile({file, baseVersion, newVersion, replacements, pkgStr}) {
-  const oldData = pkgStr || await readFile(file, "utf8");
+function updateFile({file, baseVersion, newVersion, replacements, pkgStr}) {
+  const oldData = pkgStr || readFileSync(file, "utf8");
   const fileName = basename(file);
 
   let newData;
@@ -200,20 +199,20 @@ async function updateFile({file, baseVersion, newVersion, replacements, pkgStr})
   if (oldData === newData) {
     throw new Error(`No replacement made in ${file} for base version ${baseVersion}`);
   } else {
-    await write(file, newData);
+    write(file, newData);
   }
 }
 
-async function write(file, content) {
+function write(file, content) {
   if (platform() === "win32") {
     try {
-      await truncate(file);
-      await writeFile(file, content, {flag: "r+"});
+      truncateSync(file);
+      writeFileSync(file, content, {flag: "r+"});
     } catch {
-      await writeFile(file, content);
+      writeFileSync(file, content);
     }
   } else {
-    await writeFile(file, content);
+    writeFileSync(file, content);
   }
 }
 
@@ -267,13 +266,10 @@ function exit(err) {
 }
 
 async function main() {
-  const gitDir = await find(".git", pwd);
+  const gitDir = find(".git", pwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
-
-  const [packageFile, pyprojectFile] = await Promise.all([
-    find("package.json", pwd, projectRoot),
-    find("pyproject.toml", pwd, projectRoot),
-  ]);
+  const packageFile = find("package.json", pwd, projectRoot);
+  const pyprojectFile = find("pyproject.toml", pwd, projectRoot);
 
   if (!projectRoot) {
     if (packageFile) {
@@ -290,7 +286,7 @@ async function main() {
   if (!args.base) {
     if (packageFile) {
       try {
-        pkgStr = await readFile(packageFile, "utf8");
+        pkgStr = readFileSync(packageFile, "utf8");
         baseVersion = JSON.parse(pkgStr)?.version;
       } catch (err) {
         throw new Error(`Error reading ${packageFile}: ${err.message}`);
@@ -298,7 +294,7 @@ async function main() {
     }
     if (!baseVersion && pyprojectFile) {
       try {
-        baseVersion = parseToml(await readFile(pyprojectFile, "utf8"))?.tool?.poetry?.version;
+        baseVersion = parseToml(readFileSync(pyprojectFile, "utf8"))?.tool?.poetry?.version;
       } catch (err) {
         throw new Error(`Error reading ${pyprojectFile}: ${err.message}`);
       }
@@ -346,7 +342,7 @@ async function main() {
 
   // verify files exist
   for (const file of files) {
-    const stats = await stat(file);
+    const stats = statSync(file);
     if (!stats.isFile() && !stats.isSymbolicLink()) {
       throw new Error(`${file} is not a file`);
     }
@@ -356,9 +352,9 @@ async function main() {
   const newVersion = incSemver(baseVersion, level);
   for (const file of files) {
     if (basename(file) === "package.json") {
-      await updateFile({file, baseVersion, newVersion, replacements, pkgStr});
+      updateFile({file, baseVersion, newVersion, replacements, pkgStr});
     } else {
-      await updateFile({file, baseVersion, newVersion, replacements});
+      updateFile({file, baseVersion, newVersion, replacements});
     }
   }
 
@@ -404,7 +400,7 @@ async function main() {
         const args = ["git", "log"];
         if (range) args.push(range);
         const {stdout} = await run([...args, `--pretty=format:* %s (%an)`], {silent: true});
-        if (stdout && stdout.length) {
+        if (stdout?.length) {
           changelog = stdout;
         }
       } catch {}
