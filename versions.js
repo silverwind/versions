@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 import {execa} from "execa";
-import fastGlob from "fast-glob";
+import {sync as fastGlob} from "fast-glob";
 import minimist from "minimist";
 import {basename, dirname, join, relative} from "path";
-import {cwd as cwdFn} from "process";
+import {cwd} from "process";
 import {platform} from "os";
-import fs from "fs";
+import {readFile, writeFile, truncate, stat, access} from "fs/promises";
+import {readFileSync} from "fs";
 import {parse as parseToml} from "toml";
 import {isSemver, incSemver} from "./semver.js";
 
-const {readFile, writeFile, truncate, stat, access} = fs.promises;
-const {readFileSync} = fs;
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
-const cwd = cwdFn();
+const pwd = cwd();
 
 const minOpts = {
   boolean: [
@@ -49,9 +48,8 @@ const minOpts = {
   }
 };
 
-const commands = ["patch", "minor", "major"];
-let args = minimist(process.argv.slice(2), minOpts);
-args = fixArgs(commands, args, minOpts);
+const commands = new Set(["patch", "minor", "major"]);
+const args = fixArgs(commands, minimist(process.argv.slice(2), minOpts), minOpts);
 let [level, ...files] = args._;
 
 if (args.version) {
@@ -61,7 +59,7 @@ if (args.version) {
   process.exit(0);
 }
 
-if (!commands.includes(level) || args.help) {
+if (!commands.has(level) || args.help) {
   console.info(`usage: versions [options] patch|minor|major [files...]
 
   Semantically increment a project's version in multiple files.
@@ -166,16 +164,10 @@ async function removeIgnoredFiles(files) {
 }
 
 async function updateFile({file, baseVersion, newVersion, replacements, pkgStr}) {
-  let oldData;
-  if (pkgStr) {
-    oldData = pkgStr;
-  } else {
-    oldData = await readFile(file, "utf8");
-  }
-
-  let newData;
+  const oldData = pkgStr || await readFile(file, "utf8");
   const fileName = basename(file);
 
+  let newData;
   if (pkgStr) {
     const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
     newData = pkgStr.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
@@ -243,23 +235,23 @@ function fixArgs(commands, args, minOpts) {
     delete args[key];
   }
 
-  if (commands.includes(args.date)) {
+  if (commands.has(args.date)) {
     args._ = [args.date, ...args._];
     args.date = true;
   }
-  if (commands.includes(args.base)) {
+  if (commands.has(args.base)) {
     args._ = [args.base, ...args._];
     args.base = true;
   }
-  if (commands.includes(args.command)) {
+  if (commands.has(args.command)) {
     args._ = [args.command, ...args._];
     args.command = "";
   }
-  if (commands.includes(args.replace)) {
+  if (commands.has(args.replace)) {
     args._ = [args.replace, ...args._];
     args.replace = "";
   }
-  if (commands.includes(args.packageless)) {
+  if (commands.has(args.packageless)) {
     args._ = [args.packageless, ...args._];
     args.packageless = true;
   }
@@ -275,12 +267,12 @@ function exit(err) {
 }
 
 async function main() {
-  const gitDir = await find(".git", cwd);
+  const gitDir = await find(".git", pwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
 
   const [packageFile, pyprojectFile] = await Promise.all([
-    find("package.json", cwd, projectRoot),
-    find("pyproject.toml", cwd, projectRoot),
+    find("package.json", pwd, projectRoot),
+    find("pyproject.toml", pwd, projectRoot),
   ]);
 
   if (!projectRoot) {
@@ -289,7 +281,7 @@ async function main() {
     } else if (pyprojectFile) {
       projectRoot = dirname(pyprojectFile);
     } else {
-      projectRoot = cwd;
+      projectRoot = pwd;
     }
   }
 
@@ -326,7 +318,7 @@ async function main() {
 
   // de-glob files args which is useful when not spawned via a shell
   if (!args.globless) {
-    files = await fastGlob(files);
+    files = fastGlob(files);
   }
 
   // remove duplicate paths
@@ -346,7 +338,7 @@ async function main() {
   }
 
   // convert paths to relative
-  files = await Promise.all(files.map(file => relative(cwd, file)));
+  files = await Promise.all(files.map(file => relative(pwd, file)));
 
   if (!files.length) {
     throw new Error(`Found no files to do replacements in`);
