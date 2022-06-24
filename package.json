@@ -15,15 +15,15 @@
     "bin/versions.js"
   ],
   "devDependencies": {
-    "@vercel/ncc": "0.33.3",
-    "eslint": "8.12.0",
-    "eslint-config-silverwind": "48.3.0",
+    "@vercel/ncc": "0.34.0",
+    "eslint": "8.18.0",
+    "eslint-config-silverwind": "49.1.0",
     "execa": "6.1.0",
     "fast-glob": "3.2.11",
-    "jest": "27.5.1",
+    "jest": "28.1.1",
     "minimist": "1.2.6",
     "toml": "3.0.0",
-    "updates": "13.0.5"
+    "updates": "13.1.0"
   },
   "keywords": [
     "version",
