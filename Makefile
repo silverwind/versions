@@ -13,11 +13,13 @@ test: node_modules lint build
 unittest: node_modules
 	NODE_OPTIONS="--experimental-vm-modules --no-warnings" npx jest --color --watchAll
 
+
+.PHONY: build
 build: node_modules
-	npx ncc build versions.js -q -m --no-source-map-register -o bin
-	mv bin/index.js bin/versions.js
-	perl -0777 -p -i -e 's#\n?\/\*![\s\S]*?\*\/\n?##g' bin/versions.js
-	@chmod +x bin/versions.js
+# workaround for https://github.com/evanw/esbuild/issues/1921
+	npx esbuild --log-level=warning --platform=node --format=esm --bundle --minify --outdir=bin --legal-comments=none --banner:js="import {createRequire} from 'module';const require = createRequire(import.meta.url);" ./versions.js
+	jq -r tostring package.json > bin/package.json
+	chmod +x bin/versions.js
 
 publish: node_modules
 	git push -u --tags origin master
