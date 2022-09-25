@@ -8,6 +8,7 @@ import {platform} from "os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "fs";
 import {parse as parseToml} from "toml";
 import {isSemver, incSemver} from "./semver.js";
+import {version} from "./package.json";
 
 const fastGlobSync = fastGlob.sync; // workaround for commonjs
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
@@ -53,7 +54,6 @@ const args = fixArgs(commands, minimist(process.argv.slice(2), minOpts), minOpts
 let [level, ...files] = args._;
 
 if (args.version) {
-  const {version} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
   console.info(version);
   exit();
 }

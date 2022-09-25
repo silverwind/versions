@@ -1,9 +1,9 @@
 import {execa} from "execa";
 import {isSemver, incSemver} from "./semver.js";
-import fs from "fs";
+import {readFileSync} from "fs";
+import {readFile, writeFile, unlink} from "fs/promises";
 import toml from "toml";
 
-const {readFile, writeFile, unlink} = fs.promises;
 const pkgFile = new URL("package.json", import.meta.url);
 const pyFile = new URL("fixtures/pyproject.toml", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
@@ -16,6 +16,13 @@ let pkgStr;
 afterAll(async () => {
   if (pkgStr) await writeFile(pkgFile, pkgStr);
   await unlink(testFile);
+});
+
+test("version", async () => {
+  const {version: expected} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
+  const {stdout, exitCode} = await execa("node", [script, "-v"]);
+  expect(stdout).toEqual(expected);
+  expect(exitCode).toEqual(0);
 });
 
 test("semver", async () => {
