@@ -31,15 +31,15 @@ update: node_modules
 	@touch node_modules
 
 patch: node_modules test
-	node versions -Cc 'make build' patch
+	node bin/versions.js -Cc 'make build' patch
 	@$(MAKE) --no-print-directory publish
 
 minor: node_modules test
-	node versions -Cc 'make build' minor
+	node bin/versions.js -Cc 'make build' minor
 	@$(MAKE) --no-print-directory publish
 
 major: node_modules test
-	node versions -Cc 'make build' major
+	node bin/versions.js -Cc 'make build' major
 	@$(MAKE) --no-print-directory publish
 
 .PHONY: lint test unittest build publish deps update patch minor major
