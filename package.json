@@ -19,10 +19,10 @@
     "eslint-config-silverwind": "59.0.0",
     "execa": "6.1.0",
     "fast-glob": "3.2.12",
-    "jest": "29.2.0",
     "minimist": "1.2.7",
     "toml": "3.0.0",
-    "updates": "13.1.9"
+    "updates": "13.1.9",
+    "vitest": "0.24.3"
   },
   "keywords": [
     "version",
