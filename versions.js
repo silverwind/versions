@@ -8,6 +8,7 @@ import {platform} from "os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "fs";
 import {parse as parseToml} from "toml";
 import {version} from "./package.json";
+import {pathToFileURL} from "url";
 
 const fastGlobSync = fastGlob.sync; // workaround for commonjs
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
@@ -441,4 +442,6 @@ async function main() {
   exit();
 }
 
-main().then(exit).catch(exit);
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().then(exit).catch(exit);
+}
