@@ -7,10 +7,6 @@ import toml from "toml";
 const pkgFile = new URL("package.json", import.meta.url);
 const pyFile = new URL("fixtures/pyproject.toml", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
-const script = `bin/versions.js`;
-const prefix = `testfile v`;
-const fromSuffix = ` (1999-01-01)`;
-const toSuffix = ` (${(new Date()).toISOString().substring(0, 10)})`;
 let pkgStr;
 
 afterAll(async () => {
@@ -20,7 +16,7 @@ afterAll(async () => {
 
 test("version", async () => {
   const {version: expected} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
-  const {stdout, exitCode} = await execa("node", [script, "-v"]);
+  const {stdout, exitCode} = await execa("node", ["bin/versions.js", "-v"]);
   expect(stdout).toEqual(expected);
   expect(exitCode).toEqual(0);
 });
@@ -47,11 +43,13 @@ test("semver", async () => {
 });
 
 async function run(args) {
-  return await execa(`node ${script} ${args}`, {shell: true});
+  return await execa(`node bin/versions.js ${args}`, {shell: true});
 }
 
 async function verify(version) {
-  expect(await readFile(testFile, "utf8")).toEqual(`${prefix}${version}${toSuffix}`);
+  expect(await readFile(testFile, "utf8")).toEqual(
+    `testfile v${version} (${(new Date()).toISOString().substring(0, 10)})`
+  );
   return version;
 }
 
@@ -59,24 +57,24 @@ test("versions", async () => {
   pkgStr = await readFile(pkgFile, "utf8");
   let {version} = await JSON.parse(pkgStr);
 
-  await writeFile(testFile, `${prefix}${version}${fromSuffix}`);
+  await writeFile(testFile, `testfile v${version} (1999-01-01)`);
 
-  await run(`-P patch -d -g testfile`);
+  await run(`--date --base ${version} --gitless patch testfile`);
   version = await verify(incrementSemver(version, "patch"));
 
-  await run(`-b ${version} -P -C --date --gitless minor testfile`);
+  await run(`--date --base ${version} --gitless minor testfile`);
   version = await verify(incrementSemver(version, "minor"));
 
-  await run(`-b ${version} --packageless --gitless --date major testfile`);
+  await run(`--date --base ${version} --gitless major testfile`);
   version = await verify(incrementSemver(version, "major"));
 
-  await run(`-b ${version} -g -C -P -d major t*stf*le`);
+  await run(`--date --base ${version} --gitless major t*stf*le`);
   version = await verify(incrementSemver(version, "major"));
 
-  await run(`-b ${version} -d -g -P major testfile testfile`);
+  await run(`--date --base ${version} --gitless major testfile testfile`);
   version = await verify(incrementSemver(version, "major"));
 
-  await run(`-b ${version} -dgPGC minor testfile`);
+  await run(`--date --base ${version} --gitless minor testfile`);
   version = await verify(incrementSemver(version, "minor"));
 });
 
@@ -91,7 +89,7 @@ test("pyproject.toml", async () => {
   const tmpFile = new URL("pyproject.toml", import.meta.url);
   await writeFile(tmpFile, str);
   // todo: eliminate need for -b
-  await run(`-P minor -d -g pyproject.toml -b ${versionBefore}`);
+  await run(`minor --gitless --date --base ${versionBefore} pyproject.toml`);
 
   const dataAfter = toml.parse(await readFile(tmpFile, "utf8"));
   const versionAfter = incrementSemver(versionBefore, "minor");

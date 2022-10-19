@@ -1,31 +1,27 @@
 #!/usr/bin/env node
 import {execa} from "execa";
-import fastGlob from "fast-glob";
 import minimist from "minimist";
 import {basename, dirname, join, relative} from "path";
 import {cwd, exit as doExit} from "process";
 import {platform} from "os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "fs";
-import {parse as parseToml} from "toml";
 import {version} from "./package.json";
 import {pathToFileURL} from "url";
 
-const fastGlobSync = fastGlob.sync; // workaround for commonjs
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 export const isSemver = str => semverRe.test(str.replace(/^v/, ""));
+const uniq = arr => Array.from(new Set(arr));
 const pwd = cwd();
 
 const minOpts = {
   boolean: [
     "a", "all",
     "g", "gitless",
-    "G", "globless",
     "h", "help",
     "P", "packageless",
     "p", "prefix",
     "v", "version",
-    "C", "changelog",
   ],
   string: [
     "b", "base",
@@ -39,12 +35,10 @@ const minOpts = {
     a: "all",
     b: "base",
     c: "command",
-    C: "changelog",
     d: "date",
     g: "gitless",
     h: "help",
     m: "message",
-    P: "packageless",
     p: "prefix",
     r: "replace",
     v: "version",
@@ -111,14 +105,14 @@ async function removeIgnoredFiles(files) {
   return files.filter(file => !ignoredFiles.has(file));
 }
 
-function updateFile({file, baseVersion, newVersion, replacements, pkgStr, date}) {
-  const oldData = pkgStr || readFileSync(file, "utf8");
+function updateFile({file, baseVersion, newVersion, replacements, date}) {
+  const oldData = readFileSync(file, "utf8");
   const fileName = basename(file);
 
   let newData;
-  if (pkgStr) {
+  if (fileName === "package.json") {
     const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
-    newData = pkgStr.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
+    newData = oldData.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (fileName === "package-lock.json") {
     // special case for package-lock.json which contains a lot of version
     // strings which make regexp replacement risky.
@@ -199,10 +193,6 @@ function fixArgs(commands, args, minOpts) {
     args._ = [args.replace, ...args._];
     args.replace = "";
   }
-  if (commands.has(args.packageless)) {
-    args._ = [args.packageless, ...args._];
-    args.packageless = true;
-  }
 
   return args;
 }
@@ -216,6 +206,7 @@ async function main() {
   const commands = new Set(["patch", "minor", "major"]);
   const args = fixArgs(commands, minimist(process.argv.slice(2), minOpts), minOpts);
   let [level, ...files] = args._;
+  files = uniq(files);
 
   if (args.version) {
     console.info(version);
@@ -225,29 +216,21 @@ async function main() {
   if (!commands.has(level) || args.help) {
     console.info(`usage: versions [options] patch|minor|major [files...]
 
-    Semantically increment a project's version in multiple files.
+  Options:
+    -a, --all             Add all changed files to the commit
+    -b, --base <version>  Base version. Default is from latest git tag or 0.1.0
+    -p, --prefix          Prefix git tags with a "v" character
+    -c, --command <cmd>   Run command after files are updated but before git commit and tag
+    -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
+    -m, --message <str>   Custom tag and commit message. Token _VER_ is available
+    -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
+    -g, --gitless         Do not perform any git action like creating commit and tag
+    -v, --version         Print the version
+    -h, --help            Print this help
 
-    Arguments:
-     files                  Files to do version replacement in. The nearest package.json and
-                            package-lock.json will always be included unless the -P argument is given
-    Options:
-      -a, --all             Add all changed files to the commit instead of only the ones currently modified
-      -b, --base <version>  Base version to use. Default is parsed from the nearest package.json
-      -C, --changelog       Generate a changelog since the base version tag or if absent, the latest tag
-      -c, --command <cmd>   Run a command after files are updated but before git commit and tag
-      -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
-      -m, --message <str>   Custom tag and commit message. Token _VER_ is available to fill the new version
-      -p, --prefix          Prefix git tags with a "v" character
-      -r, --replace <str>   Additional replacement in the format "s#regexp#replacement#flags"
-      -g, --gitless         Do not perform any git action like creating commit and tag
-      -G, --globless        Do not process globs in the file arguments
-      -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
-      -v, --version         Print the version
-      -h, --help            Print this help
-
-    Examples:
-      $ versions patch
-      $ versions -Cc 'npm run build' -m 'Release _VER_' minor file.css`);
+  Examples:
+    $ versions patch
+    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
     exit();
   }
 
@@ -281,40 +264,17 @@ async function main() {
 
   const gitDir = find(".git", pwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
-  const packageFile = find("package.json", pwd, projectRoot);
-  const pyprojectFile = find("pyproject.toml", pwd, projectRoot);
-
-  if (!projectRoot) {
-    if (packageFile) {
-      projectRoot = dirname(packageFile);
-    } else if (pyprojectFile) {
-      projectRoot = dirname(pyprojectFile);
-    } else {
-      projectRoot = pwd;
-    }
-  }
+  if (!projectRoot) projectRoot = pwd;
 
   // obtain old version
-  let baseVersion, pkgStr;
+  let baseVersion;
   if (!args.base) {
-    if (packageFile) {
-      try {
-        pkgStr = readFileSync(packageFile, "utf8");
-        baseVersion = JSON.parse(pkgStr)?.version;
-      } catch (err) {
-        throw new Error(`Error reading ${packageFile}: ${err.message}`);
-      }
-    }
-    if (!baseVersion && pyprojectFile) {
-      try {
-        baseVersion = parseToml(readFileSync(pyprojectFile, "utf8"))?.tool?.poetry?.version;
-      } catch (err) {
-        throw new Error(`Error reading ${pyprojectFile}: ${err.message}`);
-      }
-    }
-
-    if (!baseVersion) {
-      throw new Error(`Unable to obtain base version from existing files`);
+    if (args.gitless) return exit(new Error(`--gitless requires --base to be set`));
+    const {stdout, exitCode} = await run(["git", "describe", "--abbrev=0", "--tags"], {silent: true});
+    if (exitCode !== 0) {
+      baseVersion = "0.1.0";
+    } else {
+      baseVersion = stdout;
     }
   } else {
     baseVersion = args.base;
@@ -325,121 +285,80 @@ async function main() {
     throw new Error(`Invalid base version: ${baseVersion}`);
   }
 
-  // de-glob files args which is useful when not spawned via a shell
-  if (!args.globless) {
-    files = fastGlobSync(files);
-  }
-
-  // remove duplicate paths
-  files = Array.from(new Set(files));
-
-  if (!args.packageless) {
-    // include package.json if present
-    if (packageFile && !files.includes(packageFile)) {
-      files.push(packageFile);
-    }
-
-    // include package-lock.json if present
-    const packageLockFile = await find("package-lock.json", dirname(packageFile), projectRoot);
-    if (packageLockFile && !files.includes(packageLockFile)) {
-      files.push(packageLockFile);
-    }
-  }
-
   // convert paths to relative
   files = await Promise.all(files.map(file => relative(pwd, file)));
 
-  if (!files.length) {
-    throw new Error(`Found no files to do replacements in`);
-  }
-
-  // verify files exist
-  for (const file of files) {
-    const stats = statSync(file);
-    if (!stats.isFile() && !stats.isSymbolicLink()) {
-      throw new Error(`${file} is not a file`);
-    }
-  }
-
-  // update files
+  // set new version
   const newVersion = incrementSemver(baseVersion, level);
-  for (const file of files) {
-    if (basename(file) === "package.json") {
-      updateFile({file, baseVersion, newVersion, replacements, pkgStr, date});
-    } else {
+
+  if (files.length) {
+    // verify files exist
+    for (const file of files) {
+      const stats = statSync(file);
+      if (!stats.isFile() && !stats.isSymbolicLink()) {
+        throw new Error(`${file} is not a file`);
+      }
+    }
+
+    // update files
+    for (const file of files) {
       updateFile({file, baseVersion, newVersion, replacements, date});
     }
   }
 
-  if (args.command) {
-    await run(args.command);
+  if (args.command) await run(args.command);
+  if (args.gitless) return; // nothing else to do
+
+  const messages = parseMixedArg(args.message);
+  const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
+  const msgs = [];
+
+  if (messages) {
+    msgs.push(messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`));
   }
 
-  if (!args["gitless"]) {
-    const messages = parseMixedArg(args.message);
+  let changelog, range;
 
-    const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
-    const msgs = [];
+  // check if base tag exists
+  try {
+    await run(["git", "show", tagName], {silent: true});
+    range = `${tagName}..HEAD`;
+  } catch {}
 
-    if (messages) {
-      msgs.push(messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`));
-    }
+  // check if we have any previous tag
+  if (!range) {
+    try {
+      const {stdout} = await run(["git", "describe", "--abbrev=0"], {silent: true});
+      range = `${stdout}..HEAD`;
+    } catch {}
+  }
 
-    let changelog = "";
-    if (args.changelog) {
-      const ref = tagName;
-      let range;
+  // use the whole log (for cases where it's the first release)
+  if (!range) range = "";
 
-      // check if base tag exists
-      try {
-        await run(["git", "show", ref], {silent: true});
-        range = `${ref}..HEAD`;
-      } catch {}
+  try {
+    const args = ["git", "log"];
+    if (range) args.push(range);
+    const {stdout} = await run([...args, `--pretty=format:- %s (%an)`], {silent: true});
+    if (stdout?.length) changelog = stdout;
+  } catch {}
 
-      // check if we have any previous tag
-      if (!range) {
-        try {
-          const {stdout} = await run(["git", "describe", "--abbrev=0"], {silent: true});
-          range = `${stdout}..HEAD`;
-        } catch {}
-      }
-
-      // use the whole log (for cases where it's the first release)
-      if (!range) {
-        range = "";
-      }
-
-      try {
-        const args = ["git", "log"];
-        if (range) args.push(range);
-        const {stdout} = await run([...args, `--pretty=format:* %s (%an)`], {silent: true});
-        if (stdout?.length) {
-          changelog = stdout;
-        }
-      } catch {}
-    }
-
-    const commitMsgs = [tagName, ...msgs];
-    const commitMsg = commitMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
-
-    if (args.all) {
-      await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
+  const commitMsg = `${[tagName, ...msgs].join("\n\n")}${`\n\n${changelog}`}`;
+  if (args.all) {
+    await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
+  } else {
+    const filesToAdd = await removeIgnoredFiles(files);
+    if (filesToAdd.length) {
+      await run(["git", "add", ...filesToAdd]);
+      await run(["git", "commit", "-F", "-"], {input: commitMsg});
     } else {
-      const filesToAdd = await removeIgnoredFiles(files);
-      if (filesToAdd.length) {
-        await run(["git", "add", ...filesToAdd]);
-        await run(["git", "commit", "-F", "-"], {input: commitMsg});
-      } else {
-        await run(["git", "commit", "--allow-empty", "-F", "-"], {input: commitMsg});
-      }
+      await run(["git", "commit", "--allow-empty", "-F", "-"], {input: commitMsg});
     }
-
-    const tagMsgs = msgs.length ? msgs : [];
-    const tagMsg = tagMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
-    await run(["git", "tag", "-f", "-F", "-", tagName], {input: tagMsg});
   }
 
-  exit();
+  const tagMsgs = msgs.length ? msgs : [];
+  const tagMsg = tagMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
+  await run(["git", "tag", "-f", "-F", "-", tagName], {input: tagMsg});
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

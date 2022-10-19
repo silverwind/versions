@@ -18,7 +18,6 @@
     "eslint": "8.25.0",
     "eslint-config-silverwind": "59.0.0",
     "execa": "6.1.0",
-    "fast-glob": "3.2.12",
     "minimist": "1.2.7",
     "toml": "3.0.0",
     "updates": "13.1.9",

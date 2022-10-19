@@ -3,8 +3,6 @@
 
 > CLI to flexibly increment a project's version
 
-Supports projects with `package.json` and `pyproject.toml` (poetry).
-
 ## Installation
 ```
 npm i -D versions
@@ -15,29 +13,20 @@ npx versions --help
 ```
 usage: versions [options] patch|minor|major [files...]
 
-  Semantically increment a project's version in multiple files.
-
-  Arguments:
-   files                  Files to do version replacement in. The nearest package.json and
-                          package-lock.json will always be included unless the -P argument is given
   Options:
-    -a, --all             Add all changed files to the commit instead of only the ones currently modified
-    -b, --base <version>  Base version to use. Default is parsed from the nearest package.json
-    -C, --changelog       Generate a changelog since the base version tag or if absent, the latest tag
-    -c, --command <cmd>   Run a command after files are updated but before git commit and tag
-    -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
-    -m, --message <str>   Custom tag and commit message. Token _VER_ is available to fill the new version
+    -a, --all             Add all changed files to the commit
+    -b, --base <version>  Base version. Default is from latest git tag or 0.1.0
     -p, --prefix          Prefix git tags with a "v" character
-    -r, --replace <str>   Additional replacement in the format "s#regexp#replacement#flags"
-    -g, --gitless         Do not perform any git action like creating commit and tag
-    -G, --globless        Do not process globs in the file arguments
-    -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
+    -c, --command <cmd>   Run command after files are updated but before git commit and tag
+    -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
+    -m, --message <str>   Custom tag and commit message. Token _VER_ is available
+    -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -v, --version         Print the version
     -h, --help            Print this help
 
   Examples:
     $ versions patch
-    $ versions -Cc 'npm run build' -m 'Release _VER_' minor file.css
+    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
 ```
 
 ## Signing commits and tags
@@ -57,7 +46,7 @@ To automatically sign commits and tags created by `versions` with GPG add this t
 
 ## CI environments
 
-CI environments usually do shallow git checkout. To use `--changelog` unshallow the repository first:
+CI environments usually do shallow git checkout. Unshallow the repository first:
 
 ```bash
 git fetch --unshallow --quiet --tags
