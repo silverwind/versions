@@ -50,72 +50,6 @@ const minOpts = {
   }
 };
 
-const commands = new Set(["patch", "minor", "major"]);
-const args = fixArgs(commands, minimist(process.argv.slice(2), minOpts), minOpts);
-let [level, ...files] = args._;
-
-if (args.version) {
-  console.info(version);
-  exit();
-}
-
-if (!commands.has(level) || args.help) {
-  console.info(`usage: versions [options] patch|minor|major [files...]
-
-  Semantically increment a project's version in multiple files.
-
-  Arguments:
-   files                  Files to do version replacement in. The nearest package.json and
-                          package-lock.json will always be included unless the -P argument is given
-  Options:
-    -a, --all             Add all changed files to the commit instead of only the ones currently modified
-    -b, --base <version>  Base version to use. Default is parsed from the nearest package.json
-    -C, --changelog       Generate a changelog since the base version tag or if absent, the latest tag
-    -c, --command <cmd>   Run a command after files are updated but before git commit and tag
-    -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
-    -m, --message <str>   Custom tag and commit message. Token _VER_ is available to fill the new version
-    -p, --prefix          Prefix git tags with a "v" character
-    -r, --replace <str>   Additional replacement in the format "s#regexp#replacement#flags"
-    -g, --gitless         Do not perform any git action like creating commit and tag
-    -G, --globless        Do not process globs in the file arguments
-    -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
-    -v, --version         Print the version
-    -h, --help            Print this help
-
-  Examples:
-    $ versions patch
-    $ versions -Cc 'npm run build' -m 'Release _VER_' minor file.css`);
-  exit();
-}
-
-const replacements = [];
-if (args.replace) {
-  args.replace = Array.isArray(args.replace) ? args.replace : [args.replace];
-  for (const replaceStr of args.replace) {
-    let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*?)$/.exec(replaceStr) || []);
-
-    if (!re || !replacement) {
-      exit(new Error(`Invalid replace string: ${replaceStr}`));
-    }
-
-    re = new RegExp(re, flags || undefined);
-    replacements.push({re, replacement});
-  }
-}
-
-let date = parseMixedArg(args.date);
-if (date) {
-  if (date === true) {
-    date = (new Date()).toISOString().substring(0, 10);
-  } else if (Array.isArray(date)) {
-    date = date[date.length - 1];
-  }
-
-  if (typeof date !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) {
-    exit(`Invalid date argument: ${date}`);
-  }
-}
-
 export function incrementSemver(str, level) {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
@@ -176,7 +110,7 @@ async function removeIgnoredFiles(files) {
   return files.filter(file => !ignoredFiles.has(file));
 }
 
-function updateFile({file, baseVersion, newVersion, replacements, pkgStr}) {
+function updateFile({file, baseVersion, newVersion, replacements, pkgStr, date}) {
   const oldData = pkgStr || readFileSync(file, "utf8");
   const fileName = basename(file);
 
@@ -278,6 +212,72 @@ function exit(err) {
 }
 
 async function main() {
+  const commands = new Set(["patch", "minor", "major"]);
+  const args = fixArgs(commands, minimist(process.argv.slice(2), minOpts), minOpts);
+  let [level, ...files] = args._;
+
+  if (args.version) {
+    console.info(version);
+    exit();
+  }
+
+  if (!commands.has(level) || args.help) {
+    console.info(`usage: versions [options] patch|minor|major [files...]
+
+    Semantically increment a project's version in multiple files.
+
+    Arguments:
+     files                  Files to do version replacement in. The nearest package.json and
+                            package-lock.json will always be included unless the -P argument is given
+    Options:
+      -a, --all             Add all changed files to the commit instead of only the ones currently modified
+      -b, --base <version>  Base version to use. Default is parsed from the nearest package.json
+      -C, --changelog       Generate a changelog since the base version tag or if absent, the latest tag
+      -c, --command <cmd>   Run a command after files are updated but before git commit and tag
+      -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
+      -m, --message <str>   Custom tag and commit message. Token _VER_ is available to fill the new version
+      -p, --prefix          Prefix git tags with a "v" character
+      -r, --replace <str>   Additional replacement in the format "s#regexp#replacement#flags"
+      -g, --gitless         Do not perform any git action like creating commit and tag
+      -G, --globless        Do not process globs in the file arguments
+      -P, --packageless     Do not include package.json and package-lock.json unless explicitely given
+      -v, --version         Print the version
+      -h, --help            Print this help
+
+    Examples:
+      $ versions patch
+      $ versions -Cc 'npm run build' -m 'Release _VER_' minor file.css`);
+    exit();
+  }
+
+  const replacements = [];
+  if (args.replace) {
+    args.replace = Array.isArray(args.replace) ? args.replace : [args.replace];
+    for (const replaceStr of args.replace) {
+      let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*?)$/.exec(replaceStr) || []);
+
+      if (!re || !replacement) {
+        exit(new Error(`Invalid replace string: ${replaceStr}`));
+      }
+
+      re = new RegExp(re, flags || undefined);
+      replacements.push({re, replacement});
+    }
+  }
+
+  let date = parseMixedArg(args.date);
+  if (date) {
+    if (date === true) {
+      date = (new Date()).toISOString().substring(0, 10);
+    } else if (Array.isArray(date)) {
+      date = date[date.length - 1];
+    }
+
+    if (typeof date !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) {
+      exit(`Invalid date argument: ${date}`);
+    }
+  }
+
   const gitDir = find(".git", pwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
   const packageFile = find("package.json", pwd, projectRoot);
@@ -364,9 +364,9 @@ async function main() {
   const newVersion = incrementSemver(baseVersion, level);
   for (const file of files) {
     if (basename(file) === "package.json") {
-      updateFile({file, baseVersion, newVersion, replacements, pkgStr});
+      updateFile({file, baseVersion, newVersion, replacements, pkgStr, date});
     } else {
-      updateFile({file, baseVersion, newVersion, replacements});
+      updateFile({file, baseVersion, newVersion, replacements, date});
     }
   }
 
