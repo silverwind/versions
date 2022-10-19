@@ -1,5 +1,5 @@
 import {execa} from "execa";
-import {isSemver, incSemver} from "./semver.js";
+import {isSemver, incrementSemver} from "./versions.js";
 import {readFileSync} from "fs";
 import {readFile, writeFile, unlink} from "fs/promises";
 import toml from "toml";
@@ -29,21 +29,21 @@ test("semver", async () => {
   expect(isSemver("1.0.0")).toEqual(true);
   expect(isSemver("1.0.0-pre-1.0.0")).toEqual(true);
   expect(isSemver("1.2.3-0123")).toEqual(false);
-  expect(incSemver("1.0.0", "patch")).toEqual("1.0.1");
-  expect(incSemver("1.0.0", "minor")).toEqual("1.1.0");
-  expect(incSemver("1.0.0", "major")).toEqual("2.0.0");
-  expect(incSemver("2.0.0", "patch")).toEqual("2.0.1");
-  expect(incSemver("2.0.1", "minor")).toEqual("2.1.0");
-  expect(incSemver("2.1.1", "major")).toEqual("3.0.0");
-  expect(incSemver("10.10.10", "patch")).toEqual("10.10.11");
-  expect(incSemver("10.10.10", "minor")).toEqual("10.11.0");
-  expect(incSemver("10.10.10", "major")).toEqual("11.0.0");
-  expect(incSemver("1.0.0-pre-1.0.0", "patch")).toEqual("1.0.1-pre-1.0.0");
-  expect(incSemver("1.0.0-pre-1.0.0", "minor")).toEqual("1.1.0-pre-1.0.0");
-  expect(incSemver("1.0.0-pre-1.0.0", "major")).toEqual("2.0.0-pre-1.0.0");
-  expect(incSemver("10.10.10-pre-1.0.0", "patch")).toEqual("10.10.11-pre-1.0.0");
-  expect(incSemver("10.10.10-pre-1.0.0", "minor")).toEqual("10.11.0-pre-1.0.0");
-  expect(incSemver("10.10.10-pre-1.0.0", "major")).toEqual("11.0.0-pre-1.0.0");
+  expect(incrementSemver("1.0.0", "patch")).toEqual("1.0.1");
+  expect(incrementSemver("1.0.0", "minor")).toEqual("1.1.0");
+  expect(incrementSemver("1.0.0", "major")).toEqual("2.0.0");
+  expect(incrementSemver("2.0.0", "patch")).toEqual("2.0.1");
+  expect(incrementSemver("2.0.1", "minor")).toEqual("2.1.0");
+  expect(incrementSemver("2.1.1", "major")).toEqual("3.0.0");
+  expect(incrementSemver("10.10.10", "patch")).toEqual("10.10.11");
+  expect(incrementSemver("10.10.10", "minor")).toEqual("10.11.0");
+  expect(incrementSemver("10.10.10", "major")).toEqual("11.0.0");
+  expect(incrementSemver("1.0.0-pre-1.0.0", "patch")).toEqual("1.0.1-pre-1.0.0");
+  expect(incrementSemver("1.0.0-pre-1.0.0", "minor")).toEqual("1.1.0-pre-1.0.0");
+  expect(incrementSemver("1.0.0-pre-1.0.0", "major")).toEqual("2.0.0-pre-1.0.0");
+  expect(incrementSemver("10.10.10-pre-1.0.0", "patch")).toEqual("10.10.11-pre-1.0.0");
+  expect(incrementSemver("10.10.10-pre-1.0.0", "minor")).toEqual("10.11.0-pre-1.0.0");
+  expect(incrementSemver("10.10.10-pre-1.0.0", "major")).toEqual("11.0.0-pre-1.0.0");
 });
 
 async function run(args) {
@@ -62,22 +62,22 @@ test("versions", async () => {
   await writeFile(testFile, `${prefix}${version}${fromSuffix}`);
 
   await run(`-P patch -d -g testfile`);
-  version = await verify(incSemver(version, "patch"));
+  version = await verify(incrementSemver(version, "patch"));
 
   await run(`-b ${version} -P -C --date --gitless minor testfile`);
-  version = await verify(incSemver(version, "minor"));
+  version = await verify(incrementSemver(version, "minor"));
 
   await run(`-b ${version} --packageless --gitless --date major testfile`);
-  version = await verify(incSemver(version, "major"));
+  version = await verify(incrementSemver(version, "major"));
 
   await run(`-b ${version} -g -C -P -d major t*stf*le`);
-  version = await verify(incSemver(version, "major"));
+  version = await verify(incrementSemver(version, "major"));
 
   await run(`-b ${version} -d -g -P major testfile testfile`);
-  version = await verify(incSemver(version, "major"));
+  version = await verify(incrementSemver(version, "major"));
 
   await run(`-b ${version} -dgPGC minor testfile`);
-  version = await verify(incSemver(version, "minor"));
+  version = await verify(incrementSemver(version, "minor"));
 });
 
 test("pyproject.toml", async () => {
@@ -94,7 +94,7 @@ test("pyproject.toml", async () => {
   await run(`-P minor -d -g pyproject.toml -b ${versionBefore}`);
 
   const dataAfter = toml.parse(await readFile(tmpFile, "utf8"));
-  const versionAfter = incSemver(versionBefore, "minor");
+  const versionAfter = incrementSemver(versionBefore, "minor");
   expect(dataAfter.tool.poetry.version).toEqual(versionAfter);
   expect(dataAfter.tool.poetry.dependencies.flask).toEqual(versionBefore);
   expect(dataAfter["build-system"].requires[0]).toEqual(`poetry>=${versionBefore}`);

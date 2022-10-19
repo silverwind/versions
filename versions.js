@@ -7,11 +7,12 @@ import {cwd, exit as doExit} from "process";
 import {platform} from "os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "fs";
 import {parse as parseToml} from "toml";
-import {isSemver, incSemver} from "./semver.js";
 import {version} from "./package.json";
 
 const fastGlobSync = fastGlob.sync; // workaround for commonjs
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
+const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+export const isSemver = str => semverRe.test(str.replace(/^v/, ""));
 const pwd = cwd();
 
 const minOpts = {
@@ -113,6 +114,19 @@ if (date) {
   if (typeof date !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) {
     exit(`Invalid date argument: ${date}`);
   }
+}
+
+export function incrementSemver(str, level) {
+  if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
+  if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
+    return `${Number(m1) + 1}.0.0${m2}`;
+  });
+  if (level === "minor") return str.replace(/([0-9]+\.)([0-9]+)\.[0-9]+(.*)/, (_, m1, m2, m3) => {
+    return `${m1}${Number(m2) + 1}.0${m3}`;
+  });
+  return str.replace(/([0-9]+\.[0-9]+\.)([0-9]+)(.*)/, (_, m1, m2, m3) => {
+    return `${m1}${Number(m2) + 1}${m3}`;
+  });
 }
 
 function find(filename, dir, stopDir) {
@@ -347,7 +361,7 @@ async function main() {
   }
 
   // update files
-  const newVersion = incSemver(baseVersion, level);
+  const newVersion = incrementSemver(baseVersion, level);
   for (const file of files) {
     if (basename(file) === "package.json") {
       updateFile({file, baseVersion, newVersion, replacements, pkgStr});
