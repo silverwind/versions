@@ -81,11 +81,9 @@ function formatArgs(args) {
 async function run(cmd, {silent = false, input} = {}) {
   let child;
   if (Array.isArray(cmd)) {
-    if (!silent) console.info(`+ ${formatArgs(cmd)}`);
     const [c, ...args] = cmd;
     child = execa(c, args, {input});
   } else {
-    if (!silent) console.info(`+ ${cmd}`);
     child = execa(cmd, {shell: true, input});
   }
 
@@ -363,7 +361,7 @@ async function main() {
   }
 
   const tagMsgs = msgs.length ? msgs : [];
-  const tagMsg = tagMsgs.join("\n\n") + (changelog ? `\n\n${changelog}` : ``);
+  const tagMsg = `${tagMsgs.join("\n\n")}${changelog ? `\n\n${changelog}` : ``}`;
   await run(["git", "tag", "-f", "-F", "-", tagName], {input: tagMsg});
 }
 
