@@ -270,7 +270,10 @@ async function main() {
   let baseVersion;
   if (!args.base) {
     if (args.gitless) return exit(new Error(`--gitless requires --base to be set`));
-    const {stdout, exitCode} = await run(["git", "describe", "--abbrev=0", "--tags"], {silent: true});
+    let stdout, exitCode;
+    try {
+      ({stdout, exitCode} = await run(["git", "describe", "--abbrev=0", "--tags"], {silent: true}));
+    } catch {}
     if (exitCode !== 0) {
       baseVersion = "0.1.0";
     } else {
