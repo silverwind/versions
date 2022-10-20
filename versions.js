@@ -4,9 +4,9 @@ import minimist from "minimist";
 import {basename, dirname, join, relative} from "path";
 import {cwd, exit as doExit} from "process";
 import {platform} from "os";
-import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "fs";
+import {readFileSync, writeFileSync, accessSync, truncateSync, statSync, realpathSync} from "fs";
 import {version} from "./package.json";
-import {pathToFileURL} from "url";
+import {fileURLToPath} from "url";
 
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
@@ -361,6 +361,6 @@ async function main() {
   await run(["git", "tag", "-f", "-F", "-", tagName], {input: tagMsg});
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
   main().then(exit).catch(exit);
 }
