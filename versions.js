@@ -280,6 +280,9 @@ async function main() {
     baseVersion = args.base;
   }
 
+  // chop off "v"
+  if (baseVersion.startsWith("v")) baseVersion = baseVersion.substring(1);
+
   // validate old version
   if (!isSemver(baseVersion)) {
     throw new Error(`Invalid base version: ${baseVersion}`);
