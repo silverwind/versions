@@ -218,7 +218,7 @@ async function main() {
 
   Options:
     -a, --all             Add all changed files to the commit
-    -b, --base <version>  Base version. Default is from latest git tag or 0.1.0
+    -b, --base <version>  Base version. Default is from latest git tag or 0.0.0
     -p, --prefix          Prefix git tags with a "v" character
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
@@ -275,7 +275,7 @@ async function main() {
       ({stdout, exitCode} = await run(["git", "describe", "--abbrev=0", "--tags"], {silent: true}));
     } catch {}
     if (exitCode !== 0) {
-      baseVersion = "0.1.0";
+      baseVersion = "0.0.0";
     } else {
       baseVersion = stdout;
     }
