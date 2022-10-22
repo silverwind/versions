@@ -74,10 +74,6 @@ function find(filename, dir, stopDir) {
   }
 }
 
-function formatArgs(args) {
-  return args.map(arg => arg.includes(" ") ? `'${arg}'` : arg).join(" ");
-}
-
 async function run(cmd, {silent = false, input} = {}) {
   let child;
   if (Array.isArray(cmd)) {
