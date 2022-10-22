@@ -4,13 +4,12 @@ import minimist from "minimist";
 import {basename, dirname, join, relative} from "path";
 import {cwd, exit as doExit} from "process";
 import {platform} from "os";
-import {readFileSync, writeFileSync, accessSync, truncateSync, statSync, realpathSync} from "fs";
+import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "fs";
 import {version} from "./package.json";
-import {fileURLToPath} from "url";
 
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
-export const isSemver = str => semverRe.test(str.replace(/^v/, ""));
+const isSemver = str => semverRe.test(str.replace(/^v/, ""));
 const uniq = arr => Array.from(new Set(arr));
 const pwd = cwd();
 
@@ -45,7 +44,7 @@ const minOpts = {
   }
 };
 
-export function incrementSemver(str, level) {
+function incrementSemver(str, level) {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
     return `${Number(m1) + 1}.0.0${m2}`;
@@ -361,6 +360,4 @@ async function main() {
   await run(["git", "tag", "-f", "-F", "-", tagName], {input: tagMsg});
 }
 
-if (realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
-  main().then(exit).catch(exit);
-}
+main().then(exit).catch(exit);

@@ -1,5 +1,4 @@
 import {execa} from "execa";
-import {isSemver, incrementSemver} from "./versions.js";
 import {readFileSync} from "fs";
 import {readFile, writeFile, unlink} from "fs/promises";
 import toml from "toml";
@@ -7,7 +6,22 @@ import toml from "toml";
 const pkgFile = new URL("package.json", import.meta.url);
 const pyFile = new URL("fixtures/pyproject.toml", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
+const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+const isSemver = str => semverRe.test(str.replace(/^v/, ""));
 let pkgStr;
+
+function incrementSemver(str, level) {
+  if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
+  if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
+    return `${Number(m1) + 1}.0.0${m2}`;
+  });
+  if (level === "minor") return str.replace(/([0-9]+\.)([0-9]+)\.[0-9]+(.*)/, (_, m1, m2, m3) => {
+    return `${m1}${Number(m2) + 1}.0${m3}`;
+  });
+  return str.replace(/([0-9]+\.[0-9]+\.)([0-9]+)(.*)/, (_, m1, m2, m3) => {
+    return `${m1}${Number(m2) + 1}${m3}`;
+  });
+}
 
 afterAll(async () => {
   if (pkgStr) await writeFile(pkgFile, pkgStr);
