@@ -16,7 +16,7 @@
   "devDependencies": {
     "esbuild": "0.15.12",
     "eslint": "8.26.0",
-    "eslint-config-silverwind": "59.0.1",
+    "eslint-config-silverwind": "61.0.0",
     "execa": "6.1.0",
     "minimist": "1.2.7",
     "toml": "3.0.0",
