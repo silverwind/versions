@@ -1,3 +1,6 @@
+SRC := versions.js
+DST := bin/versions.js
+
 node_modules: package-lock.json
 	npm install --no-save
 	@touch node_modules
@@ -11,10 +14,12 @@ test: node_modules lint build
 	npx vitest
 
 .PHONY: build
-build: node_modules
+build: $(DST)
+
+$(DST): $(SRC) node_modules
 # workaround for https://github.com/evanw/esbuild/issues/1921
-	npx esbuild --log-level=warning --platform=node --target=node14 --format=esm --bundle --minify --outdir=bin --legal-comments=none --banner:js="import {createRequire} from 'module';const require = createRequire(import.meta.url);" ./versions.js
-	chmod +x bin/versions.js
+	npx esbuild --log-level=warning --platform=node --target=node14 --format=esm --bundle --minify --legal-comments=none --banner:js="import {createRequire} from 'module';const require = createRequire(import.meta.url);" --outfile=$(DST) $(SRC)
+	chmod +x $(DST)
 
 publish: node_modules
 	git push -u --tags origin master
@@ -27,15 +32,15 @@ update: node_modules
 	@touch node_modules
 
 patch: node_modules test
-	node bin/versions.js -c 'make build' patch package.json package-lock.json
+	node $(DST) -c 'make build' patch package.json package-lock.json
 	@$(MAKE) --no-print-directory publish
 
 minor: node_modules test
-	node bin/versions.js -c 'make build' minor package.json package-lock.json
+	node $(DST) -c 'make build' minor package.json package-lock.json
 	@$(MAKE) --no-print-directory publish
 
 major: node_modules test
-	node bin/versions.js -c 'make build' major package.json package-lock.json
+	node $(DST) -c 'make build' major package.json package-lock.json
 	@$(MAKE) --no-print-directory publish
 
 .PHONY: lint test unittest build publish deps update patch minor major
