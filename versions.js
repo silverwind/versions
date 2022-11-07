@@ -316,9 +316,8 @@ async function main() {
     msgs.push(messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`));
   }
 
-  let changelog, range;
-
   // check if base tag exists
+  let range;
   try {
     await run(["git", "show", tagName], {silent: true});
     range = `${tagName}..HEAD`;
@@ -335,6 +334,7 @@ async function main() {
   // use the whole log (for cases where it's the first release)
   if (!range) range = "";
 
+  let changelog;
   try {
     const args = ["git", "log"];
     if (range) args.push(range);
@@ -342,7 +342,9 @@ async function main() {
     if (stdout?.length) changelog = stdout;
   } catch {}
 
-  const commitMsg = `${[tagName, ...msgs].join("\n\n")}${`\n\n${changelog}`}`;
+  let commitMsg = `${[tagName, ...msgs].join("\n\n")}`;
+  if (changelog) commitMsg += `\n\n${changelog}`;
+
   if (args.all) {
     await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
   } else {
