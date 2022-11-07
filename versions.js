@@ -338,7 +338,8 @@ async function main() {
   try {
     const args = ["git", "log"];
     if (range) args.push(range);
-    const {stdout} = await run([...args, `--pretty=format:* %s (%an)`], {silent: true});
+    // https://git-scm.com/docs/pretty-formats
+    const {stdout} = await run([...args, `--pretty=format:* %s (%aN)`], {silent: true});
     if (stdout?.length) changelog = stdout;
   } catch {}
 
