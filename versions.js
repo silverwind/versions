@@ -360,7 +360,7 @@ async function main() {
 
   const tagMsgs = msgs.length ? msgs : [];
   const tagMsg = `${tagMsgs.join("\n\n")}${changelog ? `\n\n${changelog}` : ``}`;
-  await run(["git", "tag", "-f", "-F", "-", tagName], {input: tagMsg});
+  await run(["git", "tag", "-a", "-f", "-F", "-", tagName], {input: tagMsg});
 }
 
 main().then(exit).catch(exit);
