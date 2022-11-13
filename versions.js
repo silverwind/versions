@@ -190,6 +190,16 @@ function fixArgs(commands, args, minOpts) {
   return args;
 }
 
+// join strings, ignoring falsy values and trimming the result
+function joinStrings(strings, separator) {
+  const arr = [];
+  for (const string of strings) {
+    if (!string) continue;
+    arr.push(string);
+  }
+  return arr.join(separator).trim();
+}
+
 function exit(err) {
   if (err) console.info(String(err.stack || err.message || err).trim());
   doExit(err ? 1 : 0);
@@ -343,11 +353,9 @@ async function main() {
     if (stdout?.length) changelog = stdout;
   } catch {}
 
-  let commitMsg = `${[tagName, ...msgs].join("\n\n")}`;
-  if (changelog) commitMsg += `\n\n${changelog}`;
-
+  const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
   if (args.all) {
-    await run(["git", "commit", "-a", "-F", "-"], {input: commitMsg});
+    await run(["git", "commit", "-a", "--allow-empty", "-F", "-"], {input: commitMsg});
   } else {
     const filesToAdd = await removeIgnoredFiles(files);
     if (filesToAdd.length) {
@@ -358,8 +366,7 @@ async function main() {
     }
   }
 
-  const tagMsgs = msgs.length ? msgs : [];
-  const tagMsg = `${tagMsgs.join("\n\n")}${changelog ? `\n\n${changelog}` : ``}`;
+  const tagMsg = joinStrings([...msgs, changelog], "\n\n");
   await run(["git", "tag", "-a", "-f", "-F", "-", tagName], {input: tagMsg});
 }
 
