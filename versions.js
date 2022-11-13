@@ -367,7 +367,8 @@ async function main() {
   }
 
   const tagMsg = joinStrings([...msgs, changelog], "\n\n");
-  await run(["git", "tag", "-a", "-f", "-F", "-", tagName], {input: tagMsg});
+  // adding explicit -a here seems to make git no longer sign the tag
+  await run(["git", "tag", "-f", "-F", "-", tagName], {input: tagMsg});
 }
 
 main().then(exit).catch(exit);
