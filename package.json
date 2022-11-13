@@ -16,12 +16,12 @@
   "devDependencies": {
     "esbuild": "0.15.13",
     "eslint": "8.27.0",
-    "eslint-config-silverwind": "61.0.1",
+    "eslint-config-silverwind": "62.0.0",
     "execa": "6.1.0",
     "minimist": "1.2.7",
     "toml": "3.0.0",
-    "updates": "13.1.13",
-    "vitest": "0.25.0"
+    "updates": "13.2.1",
+    "vitest": "0.25.1"
   },
   "keywords": [
     "version",
