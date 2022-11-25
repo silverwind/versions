@@ -15,12 +15,13 @@ usage: versions [options] patch|minor|major [files...]
 
   Options:
     -a, --all             Add all changed files to the commit
-    -b, --base <version>  Base version. Default is from latest git tag or 0.1.0
-    -p, --prefix          Prefix git tags with a "v" character
+    -b, --base <version>  Base version. Default is from latest git tag or 0.0.0
+    -p, --prefix          Prefix version string with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
     -m, --message <str>   Custom tag and commit message. Token _VER_ is available
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
+    -g, --gitless         Do not perform any git action like creating commit and tag
     -v, --version         Print the version
     -h, --help            Print this help
 
