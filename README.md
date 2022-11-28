@@ -25,7 +25,7 @@ usage: versions [options] patch|minor|major [files...]
     -v, --version         Print the version
     -h, --help            Print this help
 
-  The message and replacement string accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
+  The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
   Examples:
     $ versions patch
