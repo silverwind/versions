@@ -44,6 +44,15 @@ const minOpts = {
   }
 };
 
+function replaceTokens(str, newVersion) {
+  const [major, minor, patch] = newVersion.split(".");
+  return str
+    .replace(/_VER_/gm, newVersion)
+    .replace(/_MAJOR_/gm, major)
+    .replace(/_MINOR_/gm, minor)
+    .replace(/_PATCH_/gm, patch);
+}
+
 function incrementSemver(str, level) {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
@@ -225,31 +234,18 @@ async function main() {
     -p, --prefix          Prefix version string with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
-    -m, --message <str>   Custom tag and commit message. Token _VER_ is available
+    -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -v, --version         Print the version
     -h, --help            Print this help
 
+  The message and replacement string accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
+
   Examples:
     $ versions patch
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
     exit();
-  }
-
-  const replacements = [];
-  if (args.replace) {
-    args.replace = Array.isArray(args.replace) ? args.replace : [args.replace];
-    for (const replaceStr of args.replace) {
-      let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*?)$/.exec(replaceStr) || []);
-
-      if (!re || !replacement) {
-        exit(new Error(`Invalid replace string: ${replaceStr}`));
-      }
-
-      re = new RegExp(re, flags || undefined);
-      replacements.push({re, replacement});
-    }
   }
 
   let date = parseMixedArg(args.date);
@@ -300,6 +296,23 @@ async function main() {
   // set new version
   const newVersion = incrementSemver(baseVersion, level);
 
+  const replacements = [];
+  if (args.replace) {
+    args.replace = Array.isArray(args.replace) ? args.replace : [args.replace];
+    for (const replaceStr of args.replace) {
+      let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*?)$/.exec(replaceStr) || []);
+
+      if (!re || !replacement) {
+        exit(new Error(`Invalid replace string: ${replaceStr}`));
+      }
+
+      replacement = replaceTokens(replacement, newVersion);
+
+      re = new RegExp(re, flags || undefined);
+      replacements.push({re, replacement});
+    }
+  }
+
   if (files.length) {
     // verify files exist
     for (const file of files) {
@@ -323,7 +336,7 @@ async function main() {
   const msgs = [];
 
   if (messages) {
-    msgs.push(messages.map(message => `${message.replace(/_VER_/gm, newVersion)}`));
+    msgs.push(messages.map(message => replaceTokens(message, newVersion)));
   }
 
   // check if base tag exists
