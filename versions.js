@@ -107,7 +107,7 @@ async function removeIgnoredFiles(files) {
   return files.filter(file => !ignoredFiles.has(file));
 }
 
-function updateFile({file, baseVersion, newVersion, replacements, date}) {
+function getFileChanges({file, baseVersion, newVersion, replacements, date}) {
   const oldData = readFileSync(file, "utf8");
   const fileName = basename(file);
 
@@ -144,7 +144,7 @@ function updateFile({file, baseVersion, newVersion, replacements, date}) {
   if (oldData === newData) {
     throw new Error(`No replacement made in ${file} for base version ${baseVersion}`);
   } else {
-    write(file, newData);
+    return {file, newData};
   }
 }
 
@@ -323,8 +323,13 @@ async function main() {
     }
 
     // update files
+    const todo = [];
     for (const file of files) {
-      updateFile({file, baseVersion, newVersion, replacements, date});
+      todo.push(getFileChanges({file, baseVersion, newVersion, replacements, date}));
+    }
+
+    for (const {file, newData} of todo) {
+      write(file, newData);
     }
   }
 
