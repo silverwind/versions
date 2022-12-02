@@ -144,7 +144,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}) {
   if (oldData === newData) {
     throw new Error(`No replacement made in ${file} for base version ${baseVersion}`);
   } else {
-    return {file, newData};
+    return [file, newData];
   }
 }
 
@@ -328,7 +328,7 @@ async function main() {
       todo.push(getFileChanges({file, baseVersion, newVersion, replacements, date}));
     }
 
-    for (const {file, newData} of todo) {
+    for (const [file, newData] of todo) {
       write(file, newData);
     }
   }
