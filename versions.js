@@ -119,8 +119,8 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}) {
     // special case for package-lock.json which contains a lot of version
     // strings which make regexp replacement risky.
     newData = JSON.parse(oldData);
-    if (newData.version) newData.version = newVersion; // v1
-    if (newData?.packages?.[""]?.version) newData.packages[""].version = newVersion; // v2
+    if (newData.version) newData.version = newVersion; // v1 and v2
+    if (newData?.packages?.[""]?.version) newData.packages[""].version = newVersion; // v2 and v3
     newData = `${JSON.stringify(newData, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
     const re = new RegExp(`(^version ?= ?["'])${esc(baseVersion)}(["'].*)`, "gm");
