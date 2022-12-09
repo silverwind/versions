@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import {execa} from "execa";
 import minimist from "minimist";
-import {basename, dirname, join, relative} from "path";
-import {cwd, exit as doExit} from "process";
-import {platform} from "os";
-import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "fs";
+import {basename, dirname, join, relative} from "node:path";
+import {cwd, exit as doExit} from "node:process";
+import {platform} from "node:os";
+import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
 import {version} from "./package.json";
 
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");

@@ -1,7 +1,7 @@
 import {execa} from "execa";
-import {readFileSync} from "fs";
-import {readFile, writeFile, unlink} from "fs/promises";
-import toml from "toml";
+import {readFileSync} from "node:fs";
+import {readFile, writeFile, unlink} from "node:fs/promises";
+import {parse as parseToml} from "toml";
 
 const pkgFile = new URL("package.json", import.meta.url);
 const pyFile = new URL("fixtures/pyproject.toml", import.meta.url);
@@ -94,7 +94,7 @@ test("versions", async () => {
 
 test("pyproject.toml", async () => {
   const str = await readFile(pyFile, "utf8");
-  const dataBefore = toml.parse(str);
+  const dataBefore = parseToml(str);
 
   const versionBefore = dataBefore.tool.poetry.version;
   expect(dataBefore.tool.poetry.dependencies.flask).toEqual(versionBefore);
@@ -105,7 +105,7 @@ test("pyproject.toml", async () => {
   // todo: eliminate need for -b
   await run(`minor --gitless --date --base ${versionBefore} pyproject.toml`);
 
-  const dataAfter = toml.parse(await readFile(tmpFile, "utf8"));
+  const dataAfter = parseToml(await readFile(tmpFile, "utf8"));
   const versionAfter = incrementSemver(versionBefore, "minor");
   expect(dataAfter.tool.poetry.version).toEqual(versionAfter);
   expect(dataAfter.tool.poetry.dependencies.flask).toEqual(versionBefore);
