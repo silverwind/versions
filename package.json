@@ -22,15 +22,5 @@
     "toml": "3.0.0",
     "updates": "13.2.2",
     "vitest": "0.25.3"
-  },
-  "keywords": [
-    "version",
-    "version bump",
-    "versions",
-    "versions bump",
-    "bump",
-    "git",
-    "tag",
-    "replace"
-  ]
+  }
 }
