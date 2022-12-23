@@ -1,5 +1,5 @@
 # versions
-[![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions) [![](https://packagephobia.com/badge?p=versions)](https://packagephobia.com/result?p=versions)
+[![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions) [![](https://packagephobia.com/badge?p=versions)](https://packagephobia.com/result?p=versions) [![](https://img.shields.io/badge/deno-experimental-yellow)](https://deno.land/)
 
 > CLI to flexibly increment a project's version
 
@@ -7,6 +7,14 @@
 ```
 npm i -D versions
 npx versions --help
+```
+
+## Deno
+
+There is experimental support for deno, run via:
+
+```bash
+deno run -A npm:versions
 ```
 
 ## Usage
