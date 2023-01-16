@@ -57,10 +57,10 @@ To automatically sign commits and tags created by `versions` with GPG add this t
 
 ## CI environments
 
-CI environments usually do shallow git checkout. Unshallow the repository first:
+CI environments usually do incomplete git checkouts without tags. Fetch tags first:
 
 ```bash
-git fetch --unshallow --quiet --tags
+git fetch --tags --force
 ```
 
 © [silverwind](https://github.com/silverwind), distributed under BSD licence
