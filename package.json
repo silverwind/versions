@@ -8,7 +8,7 @@
   "bin": "./bin/versions.js",
   "type": "module",
   "engines": {
-    "node": ">=14"
+    "node": ">=16"
   },
   "files": [
     "bin/versions.js"
@@ -20,7 +20,7 @@
     "execa": "7.1.1",
     "minimist": "1.2.8",
     "toml": "3.0.0",
-    "updates": "13.4.0",
+    "updates": "14.0.0",
     "vitest": "0.30.1"
   }
 }
