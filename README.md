@@ -1,23 +1,22 @@
 # versions
-[![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions) [![](https://packagephobia.com/badge?p=versions)](https://packagephobia.com/result?p=versions) [![](https://img.shields.io/badge/deno-experimental-yellow)](https://deno.land/)
+[![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions) [![](https://packagephobia.com/badge?p=versions)](https://packagephobia.com/result?p=versions)
 
 > CLI to flexibly increment a project's version
 
-## Installation
-```
-npm i -D versions
-npx versions --help
+## Usage
+```bash
+# increment patch version of current project
+npx versions patch
 ```
 
-## Deno
-
-There is experimental support for deno, run via:
+## Bun and Deno
 
 ```bash
+bunx versions
 deno run -A npm:versions
 ```
 
-## Usage
+## Options
 ```
 usage: versions [options] patch|minor|major [files...]
 
