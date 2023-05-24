@@ -1,6 +1,6 @@
 {
   "name": "versions",
-  "version": "11.0.0",
+  "version": "11.0.1",
   "description": "CLI to flexibly increment a project's version",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/versions",
