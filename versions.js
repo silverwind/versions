@@ -47,10 +47,10 @@ const minOpts = {
 function replaceTokens(str, newVersion) {
   const [major, minor, patch] = newVersion.split(".");
   return str
-    .replace(/_VER_/gm, newVersion)
-    .replace(/_MAJOR_/gm, major)
-    .replace(/_MINOR_/gm, minor)
-    .replace(/_PATCH_/gm, patch);
+    .replace(/_VER_/g, newVersion)
+    .replace(/_MAJOR_/g, major)
+    .replace(/_MINOR_/g, minor)
+    .replace(/_PATCH_/g, patch);
 }
 
 function incrementSemver(str, level) {
@@ -300,7 +300,7 @@ async function main() {
   if (args.replace) {
     args.replace = Array.isArray(args.replace) ? args.replace : [args.replace];
     for (const replaceStr of args.replace) {
-      let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*?)$/.exec(replaceStr) || []);
+      let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*)$/.exec(replaceStr) || []);
 
       if (!re || !replacement) {
         exit(new Error(`Invalid replace string: ${replaceStr}`));
