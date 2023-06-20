@@ -5,8 +5,8 @@ import {basename, dirname, join, relative} from "node:path";
 import {cwd, exit as doExit} from "node:process";
 import {platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
-import {version} from "./package.json";
 
+const packageVersion = import.meta.VERSION || "0.0.0";
 const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const isSemver = str => semverRe.test(str.replace(/^v/, ""));
@@ -221,7 +221,7 @@ async function main() {
   files = uniq(files);
 
   if (args.version) {
-    console.info(version);
+    console.info(packageVersion);
     exit();
   }
 
