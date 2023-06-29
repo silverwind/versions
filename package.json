@@ -22,6 +22,6 @@
     "toml": "3.0.0",
     "updates": "14.2.9",
     "vitest": "0.32.2",
-    "vitest-config-silverwind": "1.0.0"
+    "vitest-config-silverwind": "2.0.0"
   }
 }
