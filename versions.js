@@ -271,12 +271,19 @@ async function main() {
     if (args.gitless) return exit(new Error(`--gitless requires --base to be set`));
     let stdout, exitCode;
     try {
-      ({stdout, exitCode} = await run(["git", "describe", "--abbrev=0", "--tags"], {silent: true}));
+      ({stdout, exitCode} = await run(["git", "tag", "--list", "--sort=-creatordate"], {silent: true}));
     } catch {}
-    if (exitCode !== 0) {
+
+    if (exitCode === 0) {
+      for (const tag of stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
+        if (isSemver(tag)) {
+          baseVersion = tag.replace(/^v/, "");
+          break;
+        }
+      }
+    }
+    if (!baseVersion) {
       baseVersion = "0.0.0";
-    } else {
-      baseVersion = stdout;
     }
   } else {
     baseVersion = args.base;
