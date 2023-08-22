@@ -29,6 +29,7 @@ usage: versions [options] patch|minor|major [files...]
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
+    -D, --dry             Do not create a tag or commit, just print what would be done
     -v, --version         Print the version
     -h, --help            Print this help
 

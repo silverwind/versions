@@ -16,6 +16,7 @@ const pwd = cwd();
 const minOpts = {
   boolean: [
     "a", "all",
+    "D", "dry",
     "g", "gitless",
     "h", "help",
     "P", "packageless",
@@ -35,6 +36,7 @@ const minOpts = {
     b: "base",
     c: "command",
     d: "date",
+    D: "dry",
     g: "gitless",
     h: "help",
     m: "message",
@@ -237,6 +239,7 @@ async function main() {
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
+    -D, --dry             Do not create a tag or commit, just print what would be done
     -v, --version         Print the version
     -h, --help            Print this help
 
@@ -378,6 +381,11 @@ async function main() {
     if (stdout?.length) changelog = stdout;
   } catch {}
 
+  if (args.dry) {
+    return console.info(`Would create new tag and commit: ${tagName}`);
+  }
+
+  // create commit
   const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
   if (args.all) {
     await run(["git", "commit", "-a", "--allow-empty", "-F", "-"], {input: commitMsg});
@@ -391,6 +399,7 @@ async function main() {
     }
   }
 
+  // create tag
   const tagMsg = joinStrings([...msgs, changelog], "\n\n");
   // adding explicit -a here seems to make git no longer sign the tag
   await run(["git", "tag", "-f", "-F", "-", tagName], {input: tagMsg});
