@@ -12,9 +12,17 @@ deps: node_modules
 lint: node_modules
 	npx eslint --color .
 
+.PHONY: lint-fix
+lint-fix: node_modules
+	npx eslint --color . --fix
+
 .PHONY: test
-test: node_modules lint build
+test: node_modules build
 	npx vitest
+
+.PHONY: test-update
+test-update: node_modules build
+	npx vitest -u
 
 .PHONY: build
 build: $(DST)
@@ -37,16 +45,16 @@ update: node_modules
 	@touch node_modules
 
 .PHONY: patch
-patch: node_modules test
+patch: node_modules lint test
 	node $(DST) -c 'make build' patch package.json package-lock.json
 	@$(MAKE) --no-print-directory publish
 
 .PHONY: minor
-minor: node_modules test
+minor: node_modules lint test
 	node $(DST) -c 'make build' minor package.json package-lock.json
 	@$(MAKE) --no-print-directory publish
 
 .PHONY: major
-major: node_modules test
+major: node_modules lint test
 	node $(DST) -c 'make build' major package.json package-lock.json
 	@$(MAKE) --no-print-directory publish
