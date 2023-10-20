@@ -8,20 +8,20 @@
   "bin": "./bin/versions.js",
   "type": "module",
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "files": [
     "./bin/versions.js"
   ],
   "devDependencies": {
-    "esbuild": "0.19.2",
-    "eslint": "8.47.0",
-    "eslint-config-silverwind": "74.1.2",
+    "esbuild": "0.19.5",
+    "eslint": "8.52.0",
+    "eslint-config-silverwind": "79.0.4",
     "execa": "8.0.1",
     "minimist": "1.2.8",
     "toml": "3.0.0",
-    "updates": "14.3.5",
-    "vitest": "0.34.2",
+    "updates": "15.0.3",
+    "vitest": "0.34.6",
     "vitest-config-silverwind": "3.0.0"
   }
 }
