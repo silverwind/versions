@@ -21,7 +21,7 @@
     "minimist": "1.2.8",
     "toml": "3.0.0",
     "updates": "15.0.4",
-    "vitest": "1.0.0",
-    "vitest-config-silverwind": "3.0.0"
+    "vitest": "1.0.1",
+    "vitest-config-silverwind": "4.0.0"
   }
 }
