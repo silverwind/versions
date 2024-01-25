@@ -14,14 +14,14 @@
     "./bin/versions.js"
   ],
   "devDependencies": {
-    "esbuild": "0.19.8",
-    "eslint": "8.55.0",
-    "eslint-config-silverwind": "79.3.6",
+    "esbuild": "0.19.12",
+    "eslint": "8.56.0",
+    "eslint-config-silverwind": "79.4.0",
     "execa": "8.0.1",
     "minimist": "1.2.8",
     "toml": "3.0.0",
-    "updates": "15.0.4",
-    "vitest": "1.0.1",
-    "vitest-config-silverwind": "5.0.0"
+    "updates": "15.1.1",
+    "vitest": "1.2.1",
+    "vitest-config-silverwind": "5.1.0"
   }
 }
