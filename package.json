@@ -5,13 +5,13 @@
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/versions",
   "license": "BSD-2-Clause",
-  "bin": "./bin/versions.js",
+  "bin": "bin/versions.js",
   "type": "module",
   "engines": {
     "node": ">=18"
   },
   "files": [
-    "./bin/versions.js"
+    "bin/versions.js"
   ],
   "devDependencies": {
     "esbuild": "0.20.0",
