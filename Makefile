@@ -1,5 +1,5 @@
 SRC := versions.js
-DST := bin/versions.js
+DST := dist/versions.js
 
 node_modules: package-lock.json
 	npm install --no-save

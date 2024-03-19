@@ -30,7 +30,7 @@ afterAll(async () => {
 
 test("version", async () => {
   const {version: expected} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
-  const {stdout, exitCode} = await execa("node", ["bin/versions.js", "-v"]);
+  const {stdout, exitCode} = await execa("node", ["dist/versions.js", "-v"]);
   expect(stdout).toEqual(expected);
   expect(exitCode).toEqual(0);
 });
@@ -57,7 +57,7 @@ test("semver", async () => {
 });
 
 async function run(args) {
-  return await execa(`node bin/versions.js ${args}`, {shell: true});
+  return await execa(`node dist/versions.js ${args}`, {shell: true});
 }
 
 async function verify(version) {
