@@ -2,15 +2,16 @@ import {execa} from "execa";
 import {readFileSync} from "node:fs";
 import {readFile, writeFile, unlink} from "node:fs/promises";
 import {parse as parseToml} from "toml";
+import type {SemverLevel} from "./versions.ts";
 
 const pkgFile = new URL("package.json", import.meta.url);
 const pyFile = new URL("fixtures/pyproject.toml", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
-const isSemver = str => semverRe.test(str.replace(/^v/, ""));
-let pkgStr;
+const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
+let pkgStr: string;
 
-function incrementSemver(str, level) {
+function incrementSemver(str: string, level: SemverLevel) {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
     return `${Number(m1) + 1}.0.0${m2}`;
@@ -35,7 +36,7 @@ test("version", async () => {
   expect(exitCode).toEqual(0);
 });
 
-test("semver", async () => {
+test("semver", () => {
   expect(isSemver("1.0.0")).toEqual(true);
   expect(isSemver("1.0.0-pre-1.0.0")).toEqual(true);
   expect(isSemver("1.2.3-0123")).toEqual(false);
@@ -56,11 +57,11 @@ test("semver", async () => {
   expect(incrementSemver("10.10.10-pre-1.0.0", "major")).toEqual("11.0.0-pre-1.0.0");
 });
 
-async function run(args) {
+async function run(args: string) {
   return await execa(`node dist/versions.js ${args}`, {shell: true});
 }
 
-async function verify(version) {
+async function verify(version: string) {
   expect(await readFile(testFile, "utf8")).toEqual(
     `testfile v${version} (${(new Date()).toISOString().substring(0, 10)})`
   );

@@ -5,15 +5,22 @@ import {basename, dirname, join, relative} from "node:path";
 import {cwd, exit as doExit} from "node:process";
 import {platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
+import type {Opts as MinimistOpts} from "minimist";
 
+export type SemverLevel = "patch" | "minor" | "major";
+
+// @ts-ignore
 const packageVersion = import.meta.VERSION || "0.0.0";
-const esc = str => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
+const esc = (str: string) => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
-const isSemver = str => semverRe.test(str.replace(/^v/, ""));
-const uniq = arr => Array.from(new Set(arr));
+const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
 const pwd = cwd();
 
-const minOpts = {
+function uniq<T extends any[]>(arr: T): T {
+  return Array.from(new Set(arr)) as T;
+}
+
+const minOpts: MinimistOpts = {
   boolean: [
     "a", "all",
     "D", "dry",
@@ -46,7 +53,7 @@ const minOpts = {
   }
 };
 
-function replaceTokens(str, newVersion) {
+function replaceTokens(str: string, newVersion: string) {
   const [major, minor, patch] = newVersion.split(".");
   return str
     .replace(/_VER_/g, newVersion)
@@ -55,7 +62,7 @@ function replaceTokens(str, newVersion) {
     .replace(/_PATCH_/g, patch);
 }
 
-function incrementSemver(str, level) {
+function incrementSemver(str: string, level: SemverLevel) {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
     return `${Number(m1) + 1}.0.0${m2}`;
@@ -68,7 +75,7 @@ function incrementSemver(str, level) {
   });
 }
 
-function find(filename, dir, stopDir) {
+function find(filename: string, dir: string, stopDir?: string) {
   const path = join(dir, filename);
 
   try {
@@ -84,7 +91,7 @@ function find(filename, dir, stopDir) {
   }
 }
 
-async function run(cmd, {silent = false, input} = {}) {
+async function run(cmd: string | string[], {silent = false, input}: {silent?: boolean, input?: any} = {}) {
   let child;
   if (Array.isArray(cmd)) {
     const [c, ...args] = cmd;
@@ -98,7 +105,7 @@ async function run(cmd, {silent = false, input} = {}) {
   return await child;
 }
 
-async function removeIgnoredFiles(files) {
+async function removeIgnoredFiles(files: string[]) {
   let stdout;
   try {
     ({stdout} = await run(["git", "check-ignore", "--", ...files], {silent: true}));
@@ -109,7 +116,15 @@ async function removeIgnoredFiles(files) {
   return files.filter(file => !ignoredFiles.has(file));
 }
 
-function getFileChanges({file, baseVersion, newVersion, replacements, date}) {
+type GetFileChangesOpts = {
+  file: string,
+  baseVersion: string,
+  newVersion: string,
+  replacements?: {re: RegExp | string, replacement: string}[],
+  date?: string,
+}
+
+function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts) {
   const oldData = readFileSync(file, "utf8");
   const fileName = basename(file);
 
@@ -137,7 +152,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}) {
     newData = newData.replace(re, (_, p1, p2) => `${p1}${date}${p2}`);
   }
 
-  if (replacements.length) {
+  if (replacements?.length) {
     for (const replacement of replacements) {
       newData = newData.replace(replacement.re, replacement.replacement);
     }
@@ -150,7 +165,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}) {
   }
 }
 
-function write(file, content) {
+function write(file: string, content: string) {
   if (platform() === "win32") {
     try {
       truncateSync(file);
@@ -163,7 +178,7 @@ function write(file, content) {
   }
 }
 
-function parseMixedArg(arg) {
+function parseMixedArg(arg: any) {
   if (arg === "") {
     return true;
   } else if (typeof arg === "string") {
@@ -176,8 +191,8 @@ function parseMixedArg(arg) {
 }
 
 // handle minimist parsing issues like '-d patch'
-function fixArgs(commands, args, minOpts) {
-  for (const key of Object.keys(minOpts.alias)) {
+function fixArgs(commands: Set<string>, args: any, minOpts: MinimistOpts) {
+  for (const key of Object.keys(minOpts.alias as object)) {
     delete args[key];
   }
 
@@ -202,7 +217,7 @@ function fixArgs(commands, args, minOpts) {
 }
 
 // join strings, ignoring falsy values and trimming the result
-function joinStrings(strings, separator) {
+function joinStrings(strings: (string | undefined)[], separator: string) {
   const arr = [];
   for (const string of strings) {
     if (!string) continue;
@@ -211,15 +226,19 @@ function joinStrings(strings, separator) {
   return arr.join(separator).trim();
 }
 
-function exit(err) {
-  if (err) console.info(String(err.stack || err.message || err).trim());
+function exit(err?: Error | string | void) {
+  if (err instanceof Error) {
+    console.info(String(err.stack || err.message || err).trim());
+  } else {
+    console.info(err);
+  }
   doExit(err ? 1 : 0);
 }
 
 async function main() {
   const commands = new Set(["patch", "minor", "major"]);
   const args = fixArgs(commands, minimist(process.argv.slice(2), minOpts), minOpts);
-  let [level, ...files] = args._;
+  let [level, ...files]: [SemverLevel, ...string[]] = args._;
   files = uniq(files);
 
   if (args.version) {
@@ -251,7 +270,7 @@ async function main() {
     exit();
   }
 
-  let date = parseMixedArg(args.date);
+  let date: any = parseMixedArg(args.date);
   if (date) {
     if (date === true) {
       date = (new Date()).toISOString().substring(0, 10);
@@ -278,7 +297,7 @@ async function main() {
     } catch {}
 
     if (exitCode === 0) {
-      for (const tag of stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
+      for (const tag of String(stdout).split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
         if (isSemver(tag)) {
           baseVersion = tag.replace(/^v/, "");
           break;
@@ -317,9 +336,7 @@ async function main() {
       }
 
       replacement = replaceTokens(replacement, newVersion);
-
-      re = new RegExp(re, flags || undefined);
-      replacements.push({re, replacement});
+      replacements.push({re: new RegExp(re, flags || undefined), replacement});
     }
   }
 
@@ -346,12 +363,12 @@ async function main() {
   if (args.command) await run(args.command);
   if (args.gitless) return; // nothing else to do
 
-  const messages = parseMixedArg(args.message);
+  const messages: string[] = parseMixedArg(args.message) as string[];
   const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
-  const msgs = [];
+  const msgs: string[] = [];
 
   if (messages) {
-    msgs.push(messages.map(message => replaceTokens(message, newVersion)));
+    msgs.push(...messages.map(message => replaceTokens(message, newVersion)));
   }
 
   // check if base tag exists
@@ -372,7 +389,7 @@ async function main() {
   // use the whole log (for cases where it's the first release)
   if (!range) range = "";
 
-  let changelog;
+  let changelog: string | undefined;
   try {
     const args = ["git", "log"];
     if (range) args.push(range);
