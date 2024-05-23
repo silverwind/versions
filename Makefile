@@ -19,11 +19,11 @@ lint-fix: node_modules
 	npx tsc
 
 .PHONY: test
-test: build node_modules
+test: node_modules build
 	npx vitest
 
 .PHONY: test-update
-test-update: build node_modules
+test-update: node_modules build
 	npx vitest -u
 
 .PHONY: build
