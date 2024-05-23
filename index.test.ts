@@ -2,8 +2,9 @@ import {execa} from "execa";
 import {readFileSync} from "node:fs";
 import {readFile, writeFile, unlink} from "node:fs/promises";
 import {parse as parseToml} from "toml";
-import type {SemverLevel} from "./versions.ts";
+import type {SemverLevel} from "./index.ts";
 
+const distFile = "dist/index.js";
 const pkgFile = new URL("package.json", import.meta.url);
 const pyFile = new URL("fixtures/pyproject.toml", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
@@ -31,7 +32,7 @@ afterAll(async () => {
 
 test("version", async () => {
   const {version: expected} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
-  const {stdout, exitCode} = await execa("node", ["dist/versions.js", "-v"]);
+  const {stdout, exitCode} = await execa("node", [distFile, "-v"]);
   expect(stdout).toEqual(expected);
   expect(exitCode).toEqual(0);
 });
@@ -58,7 +59,7 @@ test("semver", () => {
 });
 
 async function run(args: string) {
-  return await execa(`node dist/versions.js ${args}`, {shell: true});
+  return await execa(`node ${distFile} ${args}`, {shell: true});
 }
 
 async function verify(version: string) {

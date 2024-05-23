@@ -5,12 +5,12 @@ import {basename, dirname, join, relative} from "node:path";
 import {cwd, exit as doExit} from "node:process";
 import {platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
+import {version} from "./package.json" with {type: "json"};
 import type {Opts as MinimistOpts} from "minimist";
 
 export type SemverLevel = "patch" | "minor" | "major";
 
-// @ts-ignore
-const packageVersion = import.meta.VERSION || "0.0.0";
+const packageVersion = version || "0.0.0";
 const esc = (str: string) => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
@@ -229,7 +229,7 @@ function joinStrings(strings: (string | undefined)[], separator: string) {
 function exit(err?: Error | string | void) {
   if (err instanceof Error) {
     console.info(String(err.stack || err.message || err).trim());
-  } else {
+  } else if (err) {
     console.info(err);
   }
   doExit(err ? 1 : 0);

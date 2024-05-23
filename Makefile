@@ -19,11 +19,11 @@ lint-fix: node_modules
 	npx tsc
 
 .PHONY: test
-test: node_modules
+test: build node_modules
 	npx vitest
 
 .PHONY: test-update
-test-update: node_modules
+test-update: build node_modules
 	npx vitest -u
 
 .PHONY: build
@@ -31,6 +31,7 @@ build: node_modules $(DIST_FILES)
 
 $(DIST_FILES): $(SOURCE_FILES) package-lock.json vite.config.ts
 	npx vite build
+	chmod +x $(DIST_FILES)
 
 .PHONY: publish
 publish: node_modules
