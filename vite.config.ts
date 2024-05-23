@@ -7,5 +7,8 @@ export default defineConfig(lib({
   build: {
     target: "node18",
     minify: true,
-  }
+  },
+  resolve: {
+    mainFields: ["module"],
+  },
 }));
