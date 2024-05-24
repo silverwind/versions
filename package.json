@@ -26,7 +26,7 @@
     "typescript-config-silverwind": "4.3.2",
     "updates": "16.1.1",
     "vite": "5.2.11",
-    "vite-config-silverwind": "2.0.3",
+    "vite-config-silverwind": "2.1.0",
     "vitest": "1.6.0",
     "vitest-config-silverwind": "9.0.6"
   }
