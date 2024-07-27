@@ -1,7 +1,7 @@
 import {execa} from "execa";
 import {readFileSync} from "node:fs";
 import {readFile, writeFile, unlink} from "node:fs/promises";
-import {parse as parseToml} from "toml";
+import {parse} from "smol-toml";
 import type {SemverLevel} from "./index.ts";
 
 const distFile = "dist/index.js";
@@ -96,7 +96,7 @@ test("versions", async () => {
 
 test("pyproject.toml", async () => {
   const str = await readFile(pyFile, "utf8");
-  const dataBefore = parseToml(str);
+  const dataBefore = parse(str) as Record<string, any>;
 
   const versionBefore = dataBefore.tool.poetry.version;
   expect(dataBefore.tool.poetry.dependencies.flask).toEqual(versionBefore);
@@ -107,7 +107,7 @@ test("pyproject.toml", async () => {
   // todo: eliminate need for -b
   await run(`minor --gitless --date --base ${versionBefore} pyproject.toml`);
 
-  const dataAfter = parseToml(await readFile(tmpFile, "utf8"));
+  const dataAfter = parse(await readFile(tmpFile, "utf8")) as Record<string, any>;
   const versionAfter = incrementSemver(versionBefore, "minor");
   expect(dataAfter.tool.poetry.version).toEqual(versionAfter);
   expect(dataAfter.tool.poetry.dependencies.flask).toEqual(versionBefore);
