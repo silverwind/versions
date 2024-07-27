@@ -1,16 +1,16 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --import @swc-node/register/esm-register
 import {execa} from "execa";
 import minimist from "minimist";
 import {basename, dirname, join, relative} from "node:path";
 import {cwd, exit as doExit} from "node:process";
 import {platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
-import {version} from "./package.json" with {type: "json"};
+import pkg from "./package.json" with {type: "json"};
 import type {Opts as MinimistOpts} from "minimist";
 
 export type SemverLevel = "patch" | "minor" | "major";
 
-const packageVersion = version || "0.0.0";
+const packageVersion = pkg.version || "0.0.0";
 const esc = (str: string) => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
