@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --import @swc-node/register/esm-register
+#!/usr/bin/env -S node --experimental-strip-types
 import {execa} from "execa";
 import minimist from "minimist";
 import {basename, dirname, join, relative} from "node:path";
