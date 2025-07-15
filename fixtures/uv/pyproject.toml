@@ -1,0 +1,12 @@
+[project]
+name = "test"
+version = "1.0.2"
+description = "test"
+dependencies = [
+  "foo==1.0.2",
+]
+
+[dependency-groups]
+dev = [
+  "ruff==1.0.2",
+]

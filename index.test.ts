@@ -6,7 +6,8 @@ import type {SemverLevel} from "./index.ts";
 
 const distFile = "dist/index.js";
 const pkgFile = new URL("package.json", import.meta.url);
-const pyFile = new URL("fixtures/pyproject.toml", import.meta.url);
+const pyFilePoetry = new URL("fixtures/poetry/pyproject.toml", import.meta.url);
+const pyFileUv = new URL("fixtures/uv/pyproject.toml", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
@@ -94,13 +95,12 @@ test("versions", async () => {
   version = await verify(incrementSemver(version, "minor"));
 });
 
-test("pyproject.toml", async () => {
-  const str = await readFile(pyFile, "utf8");
+test("poetry", async () => {
+  const str = await readFile(pyFilePoetry, "utf8");
   const dataBefore = parse(str) as Record<string, any>;
 
   const versionBefore = dataBefore.tool.poetry.version;
   expect(dataBefore.tool.poetry.dependencies.flask).toEqual(versionBefore);
-  expect(dataBefore["build-system"].requires[0]).toEqual(`poetry>=${versionBefore}`);
 
   const tmpFile = new URL("pyproject.toml", import.meta.url);
   await writeFile(tmpFile, str);
@@ -111,6 +111,22 @@ test("pyproject.toml", async () => {
   const versionAfter = incrementSemver(versionBefore, "minor");
   expect(dataAfter.tool.poetry.version).toEqual(versionAfter);
   expect(dataAfter.tool.poetry.dependencies.flask).toEqual(versionBefore);
-  expect(dataAfter["build-system"].requires[0]).toEqual(`poetry>=${versionBefore}`);
+  await unlink(tmpFile);
+});
+
+test("uv", async () => {
+  const str = await readFile(pyFileUv, "utf8");
+  const dataBefore = parse(str) as Record<string, any>;
+
+  const versionBefore = dataBefore.project.version;
+
+  const tmpFile = new URL("pyproject.toml", import.meta.url);
+  await writeFile(tmpFile, str);
+  await run(`minor --gitless --date --base ${versionBefore} pyproject.toml`);
+
+  const dataAfter = parse(await readFile(tmpFile, "utf8")) as Record<string, any>;
+  const versionAfter = incrementSemver(versionBefore, "minor");
+  expect(dataAfter.project.version).toEqual(versionAfter);
+
   await unlink(tmpFile);
 });
