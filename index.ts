@@ -10,11 +10,13 @@ import type {Opts as MinimistOpts} from "minimist";
 
 export type SemverLevel = "patch" | "minor" | "major";
 
-const packageVersion = pkg.version || "0.0.0";
-const esc = (str: string) => str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
-const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
-const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
-const pwd = cwd();
+function esc(str: string) {
+  return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
+}
+
+function isSemver(str: string) {
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/.test(str.replace(/^v/, ""));
+}
 
 function uniq<T extends any[]>(arr: T): T {
   return Array.from(new Set(arr)) as T;
@@ -91,8 +93,8 @@ function find(filename: string, dir: string, stopDir?: string) {
   }
 }
 
-async function run(cmd: string | string[], {silent = false, input}: {silent?: boolean, input?: any} = {}) {
-  let child;
+async function run(cmd: string | Array<string>, {silent = false, input}: {silent?: boolean, input?: any} = {}) {
+  let child: any;
   if (Array.isArray(cmd)) {
     const [c, ...args] = cmd;
     child = execa(c, args, {input});
@@ -105,8 +107,8 @@ async function run(cmd: string | string[], {silent = false, input}: {silent?: bo
   return await child;
 }
 
-async function removeIgnoredFiles(files: string[]) {
-  let stdout;
+async function removeIgnoredFiles(files: Array<string>) {
+  let stdout: any;
   try {
     ({stdout} = await run(["git", "check-ignore", "--", ...files], {silent: true}));
   } catch {
@@ -128,17 +130,17 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
   const oldData = readFileSync(file, "utf8");
   const fileName = basename(file);
 
-  let newData;
+  let newData: string;
   if (fileName === "package.json") {
     const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
     newData = oldData.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (fileName === "package-lock.json") {
     // special case for package-lock.json which contains a lot of version
     // strings which make regexp replacement risky.
-    newData = JSON.parse(oldData);
-    if (newData.version) newData.version = newVersion; // v1 and v2
-    if (newData?.packages?.[""]?.version) newData.packages[""].version = newVersion; // v2 and v3
-    newData = `${JSON.stringify(newData, null, 2)}\n`;
+    const lockFile = JSON.parse(oldData);
+    if (lockFile.version) lockFile.version = newVersion; // v1 and v2
+    if (lockFile?.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
+    newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
     const re = new RegExp(`(^version ?= ?["'])${esc(baseVersion)}(["'].*)`, "gm");
     newData = oldData.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
@@ -238,11 +240,11 @@ function exit(err?: Error | string | void) {
 async function main() {
   const commands = new Set(["patch", "minor", "major"]);
   const args = fixArgs(commands, minimist(process.argv.slice(2), minOpts), minOpts);
-  let [level, ...files]: [SemverLevel, ...string[]] = args._;
+  let [level, ...files]: [SemverLevel, ...Array<string>] = args._;
   files = uniq(files);
 
   if (args.version) {
-    console.info(packageVersion);
+    console.info(pkg.version || "0.0.0");
     exit();
   }
 
@@ -283,15 +285,17 @@ async function main() {
     }
   }
 
+  const pwd = cwd();
   const gitDir = find(".git", pwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
   if (!projectRoot) projectRoot = pwd;
 
   // obtain old version
-  let baseVersion;
+  let baseVersion: string = "";
   if (!args.base) {
     if (args.gitless) return exit(new Error(`--gitless requires --base to be set`));
-    let stdout, exitCode;
+    let stdout: any;
+    let exitCode: number = 0;
     try {
       ({stdout, exitCode} = await run(["git", "tag", "--list", "--sort=-creatordate"], {silent: true}));
     } catch {}
@@ -363,16 +367,16 @@ async function main() {
   if (args.command) await run(args.command);
   if (args.gitless) return; // nothing else to do
 
-  const messages: string[] = parseMixedArg(args.message) as string[];
+  const messages: Array<string> = parseMixedArg(args.message) as Array<string>;
   const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
-  const msgs: string[] = [];
+  const msgs: Array<string> = [];
 
   if (messages) {
     msgs.push(...messages.map(message => replaceTokens(message, newVersion)));
   }
 
   // check if base tag exists
-  let range;
+  let range: string = "";
   try {
     await run(["git", "show", tagName], {silent: true});
     range = `${tagName}..HEAD`;
