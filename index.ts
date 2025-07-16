@@ -19,7 +19,7 @@ function isSemver(str: string) {
   return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/.test(str.replace(/^v/, ""));
 }
 
-function uniq<T extends any[]>(arr: T): T {
+function uniq<T extends Array<any>>(arr: T): T {
   return Array.from(new Set(arr)) as T;
 }
 
@@ -115,7 +115,7 @@ async function removeIgnoredFiles(files: Array<string>) {
   } catch {
     return files;
   }
-  const ignoredFiles = new Set(stdout.split(/\r?\n/));
+  const ignoredFiles = new Set<string>(stdout.split(/\r?\n/));
   return files.filter(file => !ignoredFiles.has(file));
 }
 
@@ -123,7 +123,7 @@ type GetFileChangesOpts = {
   file: string,
   baseVersion: string,
   newVersion: string,
-  replacements?: {re: RegExp | string, replacement: string}[],
+  replacements?: Array<{re: RegExp | string, replacement: string}>,
   date?: string,
 }
 
@@ -229,8 +229,8 @@ function fixArgs(commands: Set<string>, args: any, minOpts: MinimistOpts) {
 }
 
 // join strings, ignoring falsy values and trimming the result
-function joinStrings(strings: (string | undefined)[], separator: string) {
-  const arr = [];
+function joinStrings(strings: Array<string | undefined>, separator: string) {
+  const arr: Array<string> = [];
   for (const string of strings) {
     if (!string) continue;
     arr.push(string);
@@ -339,7 +339,7 @@ async function main() {
   // set new version
   const newVersion = incrementSemver(baseVersion, level);
 
-  const replacements = [];
+  const replacements: Array<{re: RegExp, replacement: string}> = [];
   if (args.replace) {
     args.replace = Array.isArray(args.replace) ? args.replace : [args.replace];
     for (const replaceStr of args.replace) {
@@ -364,7 +364,7 @@ async function main() {
     }
 
     // update files
-    const todo = [];
+    const todo: Array<Array<string>> = [];
     for (const file of files) {
       todo.push(getFileChanges({file, baseVersion, newVersion, replacements, date}));
     }
@@ -386,7 +386,7 @@ async function main() {
   }
 
   // check if base tag exists
-  let range: string = "";
+  let range = "";
   try {
     await run(["git", "show", tagName], {silent: true});
     range = `${tagName}..HEAD`;
