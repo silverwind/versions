@@ -4,10 +4,6 @@ import {readFile, writeFile, unlink} from "node:fs/promises";
 import {parse} from "smol-toml";
 import type {SemverLevel} from "./index.ts";
 
-const distFile = "dist/index.js";
-const pkgFile = new URL("package.json", import.meta.url);
-const pyFilePoetry = new URL("fixtures/poetry/pyproject.toml", import.meta.url);
-const pyFileUv = new URL("fixtures/uv/pyproject.toml", import.meta.url);
 const testFile = new URL("testfile", import.meta.url);
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
@@ -27,13 +23,13 @@ function incrementSemver(str: string, level: SemverLevel) {
 }
 
 afterAll(async () => {
-  if (pkgStr) await writeFile(pkgFile, pkgStr);
+  if (pkgStr) await writeFile(new URL("package.json", import.meta.url), pkgStr);
   await unlink(testFile);
 });
 
 test("version", async () => {
   const {version: expected} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
-  const {stdout, exitCode} = await execa("node", [distFile, "-v"]);
+  const {stdout, exitCode} = await execa("node", ["dist/index.js", "-v"]);
   expect(stdout).toEqual(expected);
   expect(exitCode).toEqual(0);
 });
@@ -60,7 +56,7 @@ test("semver", () => {
 });
 
 async function run(args: string) {
-  return await execa(`node ${distFile} ${args}`, {shell: true});
+  return await execa(`node dist/index.js ${args}`, {shell: true});
 }
 
 async function verify(version: string) {
@@ -71,7 +67,7 @@ async function verify(version: string) {
 }
 
 test("versions", async () => {
-  pkgStr = await readFile(pkgFile, "utf8");
+  pkgStr = await readFile(new URL("package.json", import.meta.url), "utf8");
   let {version} = await JSON.parse(pkgStr);
 
   await writeFile(testFile, `testfile v${version} (1999-01-01)`);
@@ -96,7 +92,7 @@ test("versions", async () => {
 });
 
 test("poetry", async () => {
-  const str = await readFile(pyFilePoetry, "utf8");
+  const str = await readFile(new URL("fixtures/poetry/pyproject.toml", import.meta.url), "utf8");
   const dataBefore = parse(str) as Record<string, any>;
 
   const versionBefore = dataBefore.tool.poetry.version;
@@ -115,18 +111,33 @@ test("poetry", async () => {
 });
 
 test("uv", async () => {
-  const str = await readFile(pyFileUv, "utf8");
-  const dataBefore = parse(str) as Record<string, any>;
+  const pyproject = await readFile(new URL("fixtures/uv/pyproject.toml", import.meta.url), "utf8");
+  const lock = await readFile(new URL("fixtures/uv/uv.lock", import.meta.url), "utf8");
 
-  const versionBefore = dataBefore.project.version;
+  const dataBeforePyproject = parse(pyproject) as Record<string, any>;
 
-  const tmpFile = new URL("pyproject.toml", import.meta.url);
-  await writeFile(tmpFile, str);
-  await run(`minor --gitless --date --base ${versionBefore} pyproject.toml`);
+  const name = dataBeforePyproject.project.name;
+  const versionBefore = dataBeforePyproject.project.version;
 
-  const dataAfter = parse(await readFile(tmpFile, "utf8")) as Record<string, any>;
+  const tmpFilePyproject = new URL("pyproject.toml", import.meta.url);
+  await writeFile(tmpFilePyproject, pyproject);
+  const tmpFileLock = new URL("uv.lock", import.meta.url);
+  await writeFile(tmpFileLock, lock);
+  await run(`minor --gitless --date --base ${versionBefore} pyproject.toml uv.lock`);
+
+  const dataAfter = parse(await readFile(tmpFilePyproject, "utf8")) as Record<string, any>;
   const versionAfter = incrementSemver(versionBefore, "minor");
   expect(dataAfter.project.version).toEqual(versionAfter);
 
-  await unlink(tmpFile);
+  const lockAfter = parse(await readFile(tmpFileLock, "utf8")) as Record<string, any>;
+
+  for (const pkg of lockAfter.package) {
+    if (pkg.name === name) {
+      expect(pkg.version).toEqual(versionAfter);
+      break;
+    }
+  }
+
+  await unlink(tmpFilePyproject);
+  await unlink(tmpFileLock);
 });

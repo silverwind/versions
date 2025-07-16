@@ -6,6 +6,7 @@ import {cwd, exit as doExit} from "node:process";
 import {platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
+import {parse} from "smol-toml";
 import type {Opts as MinimistOpts} from "minimist";
 
 export type SemverLevel = "patch" | "minor" | "major";
@@ -144,6 +145,15 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
   } else if (fileName === "pyproject.toml") {
     const re = new RegExp(`(^version ?= ?["'])${esc(baseVersion)}(["'].*)`, "gm");
     newData = oldData.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
+  } else if (fileName === "uv.lock") {
+    // uv.lock is a tricky case because it lists all packages and the current package. we parse pyproject.toml
+    // to obtain the current package name and then search for that name in uv.lock and replace the version
+    // on the next line which luckily is possible because of static ordering.
+    const projStr = readFileSync(file.replace(/uv\.lock$/, "pyproject.toml"), "utf8");
+    const toml = parse(projStr) as {project: {name: string}};
+    const name = toml.project.name;
+    const re = new RegExp(`(\\[\\[package\\]\\]\r?\n.+${esc(name)}.+\r?\nversion = ").+?(")`);
+    newData = oldData.replace(re, (_m, p1, p2) => `${p1}${newVersion}${p2}`);
   } else {
     const re = new RegExp(esc(baseVersion), "g");
     newData = oldData.replace(re, newVersion);
