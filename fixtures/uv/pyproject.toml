@@ -1,12 +1,11 @@
 [project]
-name = "test"
-version = "1.0.2"
-description = "test"
+name = "uvapp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
 dependencies = [
-  "foo==1.0.2",
-]
-
-[dependency-groups]
-dev = [
-  "ruff==1.0.2",
+    "numpy==2.3.1",
+    "requests==2.32.4",
+    "ruff==0.12.3",
 ]
