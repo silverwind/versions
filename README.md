@@ -4,8 +4,10 @@
 > CLI to flexibly increment a project's version
 
 ## Usage
+
+To increment patch version of current project:
+
 ```bash
-# increment patch version of current project
 npx versions patch
 ```
 
