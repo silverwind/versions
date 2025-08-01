@@ -9,13 +9,6 @@
 npx versions patch
 ```
 
-## Bun and Deno
-
-```bash
-bunx versions
-deno run -A npm:versions
-```
-
 ## Options
 ```
 usage: versions [options] patch|minor|major [files...]
