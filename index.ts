@@ -125,7 +125,7 @@ type GetFileChangesOpts = {
   newVersion: string,
   replacements?: Array<{re: RegExp | string, replacement: string}>,
   date?: string,
-}
+};
 
 function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts) {
   const oldData = readFileSync(file, "utf8");
