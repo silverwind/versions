@@ -334,7 +334,7 @@ async function main() {
   }
 
   // convert paths to relative
-  files = await Promise.all(files.map(file => relative(pwd, file)));
+  files = files.map(file => relative(pwd, file));
 
   // set new version
   const newVersion = incrementSemver(baseVersion, level);
