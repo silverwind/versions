@@ -80,7 +80,7 @@ test("versions", async () => {
   await run(`--date --base ${version} --gitless major testfile`);
   version = await verify(incrementSemver(version, "major"));
 
-  await run(`--date --base ${version} --gitless major t*stf*le`);
+  await run(`--date --base ${version} --gitless major testfile`);
   version = await verify(incrementSemver(version, "major"));
 
   await run(`--date --base ${version} --gitless major testfile testfile`);
