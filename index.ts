@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --experimental-strip-types --no-warnings
+#!/usr/bin/env node
 import {execa} from "execa";
 import minimist from "minimist";
 import {basename, dirname, join, relative} from "node:path";
