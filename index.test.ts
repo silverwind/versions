@@ -1,4 +1,4 @@
-import {execa} from "execa";
+import spawn from "nano-spawn";
 import {readFileSync} from "node:fs";
 import {readFile, writeFile, unlink} from "node:fs/promises";
 import {parse} from "smol-toml";
@@ -29,9 +29,8 @@ afterAll(async () => {
 
 test("version", async () => {
   const {version: expected} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
-  const {stdout, exitCode} = await execa("node", ["dist/index.js", "-v"]);
+  const {stdout} = await spawn("node", ["dist/index.js", "-v"]);
   expect(stdout).toEqual(expected);
-  expect(exitCode).toEqual(0);
 });
 
 test("semver", () => {
@@ -56,7 +55,7 @@ test("semver", () => {
 });
 
 async function run(args: string) {
-  return await execa(`node dist/index.js ${args}`, {shell: true});
+  return await spawn(`node dist/index.js ${args}`, {shell: true});
 }
 
 async function verify(version: string) {

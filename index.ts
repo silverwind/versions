@@ -1,21 +1,22 @@
 #!/usr/bin/env node
-import {execa} from "execa";
+import nanoSpawn from "nano-spawn";
 import minimist from "minimist";
 import {basename, dirname, join, relative} from "node:path";
-import {cwd, exit as doExit} from "node:process";
-import {platform} from "node:os";
+import {cwd, exit as doExit, stdout, argv} from "node:process";
+import {EOL, platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
 import {parse} from "smol-toml";
 import type {Opts as MinimistOpts} from "minimist";
+import type {Result} from "nano-spawn";
 
 export type SemverLevel = "patch" | "minor" | "major";
 
-function esc(str: string) {
+function esc(str: string): string {
   return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 }
 
-function isSemver(str: string) {
+function isSemver(str: string): boolean {
   return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/.test(str.replace(/^v/, ""));
 }
 
@@ -56,7 +57,7 @@ const minOpts: MinimistOpts = {
   }
 };
 
-function replaceTokens(str: string, newVersion: string) {
+function replaceTokens(str: string, newVersion: string): string {
   const [major, minor, patch] = newVersion.split(".");
   return str
     .replace(/_VER_/g, newVersion)
@@ -65,7 +66,7 @@ function replaceTokens(str: string, newVersion: string) {
     .replace(/_PATCH_/g, patch);
 }
 
-function incrementSemver(str: string, level: SemverLevel) {
+function incrementSemver(str: string, level: SemverLevel): string {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
     return `${Number(m1) + 1}.0.0${m2}`;
@@ -78,7 +79,7 @@ function incrementSemver(str: string, level: SemverLevel) {
   });
 }
 
-function find(filename: string, dir: string, stopDir?: string) {
+function find(filename: string, dir: string, stopDir?: string): string | null {
   const path = join(dir, filename);
 
   try {
@@ -94,28 +95,14 @@ function find(filename: string, dir: string, stopDir?: string) {
   }
 }
 
-async function run(cmd: string | Array<string>, {silent = false, input}: {silent?: boolean, input?: any} = {}) {
-  let child: any;
-  if (Array.isArray(cmd)) {
-    const [c, ...args] = cmd;
-    child = execa(c, args, {input});
-  } else {
-    child = execa(cmd, {shell: true, input});
-  }
-
-  if (!silent) child.stdout.pipe(process.stdout);
-  if (!silent) child.stderr.pipe(process.stderr);
-  return await child;
-}
-
-async function removeIgnoredFiles(files: Array<string>) {
-  let stdout: any;
+async function removeIgnoredFiles(files: Array<string>): Promise<Array<string>> {
+  let result: Result;
   try {
-    ({stdout} = await run(["git", "check-ignore", "--", ...files], {silent: true}));
+    result = await nanoSpawn("git", ["check-ignore", "--", ...files]);
   } catch {
     return files;
   }
-  const ignoredFiles = new Set<string>(stdout.split(/\r?\n/));
+  const ignoredFiles = new Set<string>(result.stdout.split(/\r?\n/));
   return files.filter(file => !ignoredFiles.has(file));
 }
 
@@ -127,7 +114,7 @@ type GetFileChangesOpts = {
   date?: string,
 };
 
-function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts) {
+function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): Array<string> {
   const oldData = readFileSync(file, "utf8");
   const fileName = basename(file);
 
@@ -177,7 +164,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
   }
 }
 
-function write(file: string, content: string) {
+function write(file: string, content: string): void {
   if (platform() === "win32") {
     try {
       truncateSync(file);
@@ -229,7 +216,7 @@ function fixArgs(commands: Set<string>, args: any, minOpts: MinimistOpts) {
 }
 
 // join strings, ignoring falsy values and trimming the result
-function joinStrings(strings: Array<string | undefined>, separator: string) {
+function joinStrings(strings: Array<string | undefined>, separator: string): string {
   const arr: Array<string> = [];
   for (const string of strings) {
     if (!string) continue;
@@ -238,7 +225,7 @@ function joinStrings(strings: Array<string | undefined>, separator: string) {
   return arr.join(separator).trim();
 }
 
-function exit(err?: Error | string | void) {
+function exit(err?: Error | string | void): void {
   if (err instanceof Error) {
     console.info(String(err.stack || err.message || err).trim());
   } else if (err) {
@@ -247,9 +234,18 @@ function exit(err?: Error | string | void) {
   doExit(err ? 1 : 0);
 }
 
-async function main() {
+function ensureEol(str: string): string {
+  return str.endsWith(EOL) ? str : `${str}${EOL}`;
+}
+
+function writeResult(result: Result): void {
+  if (result.stdout) stdout.write(ensureEol(result.stdout));
+  if (result.stderr) stdout.write(ensureEol(result.stderr));
+}
+
+async function main(): Promise<void> {
   const commands = new Set(["patch", "minor", "major"]);
-  const args = fixArgs(commands, minimist(process.argv.slice(2), minOpts), minOpts);
+  const args = fixArgs(commands, minimist(argv.slice(2), minOpts), minOpts);
   let [level, ...files]: [SemverLevel, ...Array<string>] = args._;
   files = uniq(files);
 
@@ -304,18 +300,14 @@ async function main() {
   let baseVersion: string = "";
   if (!args.base) {
     if (args.gitless) return exit(new Error(`--gitless requires --base to be set`));
-    let stdout: any;
-    let exitCode: number = 0;
+    let stdout: string = "";
     try {
-      ({stdout, exitCode} = await run(["git", "tag", "--list", "--sort=-creatordate"], {silent: true}));
+      ({stdout} = await nanoSpawn("git", ["tag", "--list", "--sort=-creatordate"]));
     } catch {}
-
-    if (exitCode === 0) {
-      for (const tag of String(stdout).split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
-        if (isSemver(tag)) {
-          baseVersion = tag.replace(/^v/, "");
-          break;
-        }
+    for (const tag of stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
+      if (isSemver(tag)) {
+        baseVersion = tag.replace(/^v/, "");
+        break;
       }
     }
     if (!baseVersion) {
@@ -374,7 +366,9 @@ async function main() {
     }
   }
 
-  if (args.command) await run(args.command);
+  if (args.command) {
+    writeResult(await nanoSpawn(args.command, [], {shell: true}));
+  }
   if (args.gitless) return; // nothing else to do
 
   const messages: Array<string> = parseMixedArg(args.message) as Array<string>;
@@ -388,14 +382,14 @@ async function main() {
   // check if base tag exists
   let range = "";
   try {
-    await run(["git", "show", tagName], {silent: true});
+    await nanoSpawn("git", ["show", tagName]);
     range = `${tagName}..HEAD`;
   } catch {}
 
   // check if we have any previous tag
   if (!range) {
     try {
-      const {stdout} = await run(["git", "describe", "--abbrev=0"], {silent: true});
+      const {stdout} = await nanoSpawn("git", ["describe", "--abbrev=0"]);
       range = `${stdout}..HEAD`;
     } catch {}
   }
@@ -405,10 +399,10 @@ async function main() {
 
   let changelog: string | undefined;
   try {
-    const args = ["git", "log"];
+    const args = ["log"];
     if (range) args.push(range);
     // https://git-scm.com/docs/pretty-formats
-    const {stdout} = await run([...args, `--pretty=format:* %s (%aN)`], {silent: true});
+    const {stdout} = await nanoSpawn("git", [...args, `--pretty=format:* %s (%aN)`]);
     if (stdout?.length) changelog = stdout;
   } catch {}
 
@@ -419,21 +413,21 @@ async function main() {
   // create commit
   const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
   if (args.all) {
-    await run(["git", "commit", "-a", "--allow-empty", "-F", "-"], {input: commitMsg});
+    writeResult(await nanoSpawn("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
   } else {
     const filesToAdd = await removeIgnoredFiles(files);
     if (filesToAdd.length) {
-      await run(["git", "add", ...filesToAdd]);
-      await run(["git", "commit", "-F", "-"], {input: commitMsg});
+      writeResult(await nanoSpawn("git", ["add", ...filesToAdd]));
+      writeResult(await nanoSpawn("git", ["commit", "-F", "-"], {stdin: {string: commitMsg}}));
     } else {
-      await run(["git", "commit", "--allow-empty", "-F", "-"], {input: commitMsg});
+      writeResult(await nanoSpawn("git", ["commit", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
     }
   }
 
   // create tag
   const tagMsg = joinStrings([...msgs, changelog], "\n\n");
   // adding explicit -a here seems to make git no longer sign the tag
-  await run(["git", "tag", "-f", "-F", "-", tagName], {input: tagMsg});
+  writeResult(await nanoSpawn("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
 }
 
 main().then(exit).catch(exit);
