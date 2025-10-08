@@ -14,6 +14,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: latest
+          registry-url: "https://registry.npmjs.org"
       - run: make deps
       - run: make build
       - run: make publish
