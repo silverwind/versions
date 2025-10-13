@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 import nanoSpawn from "nano-spawn";
-import minimist from "minimist";
+import {parseArgs} from "node:util";
 import {basename, dirname, join, relative} from "node:path";
-import {cwd, exit as doExit, stdout, argv} from "node:process";
+import {cwd, exit as doExit, stdout} from "node:process";
 import {EOL, platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
 import {parse} from "smol-toml";
-import type {Opts as MinimistOpts} from "minimist";
 import type {Result} from "nano-spawn";
 
 export type SemverLevel = "patch" | "minor" | "major";
@@ -23,39 +22,6 @@ function isSemver(str: string): boolean {
 function uniq<T extends Array<any>>(arr: T): T {
   return Array.from(new Set(arr)) as T;
 }
-
-const minOpts: MinimistOpts = {
-  boolean: [
-    "a", "all",
-    "D", "dry",
-    "g", "gitless",
-    "h", "help",
-    "P", "packageless",
-    "p", "prefix",
-    "v", "version",
-  ],
-  string: [
-    "b", "base",
-    "c", "command",
-    "d", "date",
-    "r", "replace",
-    "m", "message",
-    "_",
-  ],
-  alias: {
-    a: "all",
-    b: "base",
-    c: "command",
-    d: "date",
-    D: "dry",
-    g: "gitless",
-    h: "help",
-    m: "message",
-    p: "prefix",
-    r: "replace",
-    v: "version",
-  }
-};
 
 function replaceTokens(str: string, newVersion: string): string {
   const [major, minor, patch] = newVersion.split(".");
@@ -177,44 +143,6 @@ function write(file: string, content: string): void {
   }
 }
 
-function parseMixedArg(arg: any) {
-  if (arg === "") {
-    return true;
-  } else if (typeof arg === "string") {
-    return arg.includes(",") ? arg.split(",") : [arg];
-  } else if (Array.isArray(arg)) {
-    return arg;
-  } else {
-    return Boolean(arg);
-  }
-}
-
-// handle minimist parsing issues like '-d patch'
-function fixArgs(commands: Set<string>, args: any, minOpts: MinimistOpts) {
-  for (const key of Object.keys(minOpts.alias as object)) {
-    delete args[key];
-  }
-
-  if (commands.has(args.date)) {
-    args._ = [args.date, ...args._];
-    args.date = true;
-  }
-  if (commands.has(args.base)) {
-    args._ = [args.base, ...args._];
-    args.base = true;
-  }
-  if (commands.has(args.command)) {
-    args._ = [args.command, ...args._];
-    args.command = "";
-  }
-  if (commands.has(args.replace)) {
-    args._ = [args.replace, ...args._];
-    args.replace = "";
-  }
-
-  return args;
-}
-
 // join strings, ignoring falsy values and trimming the result
 function joinStrings(strings: Array<string | undefined>, separator: string): string {
   const arr: Array<string> = [];
@@ -245,8 +173,26 @@ function writeResult(result: Result): void {
 
 async function main(): Promise<void> {
   const commands = new Set(["patch", "minor", "major"]);
-  const args = fixArgs(commands, minimist(argv.slice(2), minOpts), minOpts);
-  let [level, ...files]: [SemverLevel, ...Array<string>] = args._;
+  const result = parseArgs({
+    strict: true,
+    allowPositionals: true,
+    options: {
+      all: {short: "a", type: "boolean"},
+      dry: {short: "D", type: "boolean"},
+      gitless: {short: "g", type: "boolean"},
+      help: {short: "h", type: "boolean"},
+      packageless: {short: "P", type: "boolean"},
+      prefix: {short: "p", type: "boolean"},
+      version: {short: "v", type: "boolean"},
+      date: {short: "d", type: "boolean"},
+      base: {short: "b", type: "string"},
+      command: {short: "c", type: "string"},
+      replace: {short: "r", type: "string", multiple: true},
+      message: {short: "m", type: "string"},
+    },
+  });
+  const args = result.values;
+  let [level, ...files] = result.positionals;
   files = uniq(files);
 
   if (args.version) {
@@ -262,7 +208,7 @@ async function main(): Promise<void> {
     -b, --base <version>  Base version. Default is from latest git tag or 0.0.0
     -p, --prefix          Prefix version string with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
-    -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
+    -d, --date            Replace dates in format YYYY-MM-DD with current date
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
@@ -278,17 +224,9 @@ async function main(): Promise<void> {
     exit();
   }
 
-  let date: any = parseMixedArg(args.date);
-  if (date) {
-    if (date === true) {
-      date = (new Date()).toISOString().substring(0, 10);
-    } else if (Array.isArray(date)) {
-      date = date[date.length - 1];
-    }
-
-    if (typeof date !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) {
-      exit(`Invalid date argument: ${date}`);
-    }
+  let date = "";
+  if (args.date) {
+    date = (new Date()).toISOString().substring(0, 10);
   }
 
   const pwd = cwd();
@@ -314,7 +252,7 @@ async function main(): Promise<void> {
       baseVersion = "0.0.0";
     }
   } else {
-    baseVersion = args.base;
+    baseVersion = String(args.base);
   }
 
   // chop off "v"
@@ -329,11 +267,11 @@ async function main(): Promise<void> {
   files = files.map(file => relative(pwd, file));
 
   // set new version
-  const newVersion = incrementSemver(baseVersion, level);
+  const newVersion = incrementSemver(baseVersion, level as SemverLevel);
 
   const replacements: Array<{re: RegExp, replacement: string}> = [];
   if (args.replace) {
-    args.replace = Array.isArray(args.replace) ? args.replace : [args.replace];
+    args.replace = (Array.isArray(args.replace) ? args.replace : [args.replace] as Array<string>);
     for (const replaceStr of args.replace) {
       let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*)$/.exec(replaceStr) || []);
 
@@ -371,13 +309,8 @@ async function main(): Promise<void> {
   }
   if (args.gitless) return; // nothing else to do
 
-  const messages: Array<string> = parseMixedArg(args.message) as Array<string>;
+  const msg = args.message;
   const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
-  const msgs: Array<string> = [];
-
-  if (messages) {
-    msgs.push(...messages.map(message => replaceTokens(message, newVersion)));
-  }
 
   // check if base tag exists
   let range = "";
@@ -411,7 +344,7 @@ async function main(): Promise<void> {
   }
 
   // create commit
-  const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
+  const commitMsg = joinStrings([tagName, msg, changelog].filter(Boolean), "\n\n");
   if (args.all) {
     writeResult(await nanoSpawn("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
   } else {
@@ -425,7 +358,7 @@ async function main(): Promise<void> {
   }
 
   // create tag
-  const tagMsg = joinStrings([...msgs, changelog], "\n\n");
+  const tagMsg = joinStrings([msg, changelog].filter(Boolean), "\n\n");
   // adding explicit -a here seems to make git no longer sign the tag
   writeResult(await nanoSpawn("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
 }
