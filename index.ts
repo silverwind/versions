@@ -174,7 +174,7 @@ function writeResult(result: Result): void {
 async function main(): Promise<void> {
   const commands = new Set(["patch", "minor", "major"]);
   const result = parseArgs({
-    strict: true,
+    strict: false,
     allowPositionals: true,
     options: {
       all: {short: "a", type: "boolean"},
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
       base: {short: "b", type: "string"},
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
-      message: {short: "m", type: "string"},
+      message: {short: "m", type: "string", multiple: true},
     },
   });
   const args = result.values;
@@ -270,9 +270,9 @@ async function main(): Promise<void> {
   const newVersion = incrementSemver(baseVersion, level as SemverLevel);
 
   const replacements: Array<{re: RegExp, replacement: string}> = [];
-  if (args.replace) {
-    args.replace = (Array.isArray(args.replace) ? args.replace : [args.replace] as Array<string>);
-    for (const replaceStr of args.replace) {
+  if (args.replace?.length) {
+    const replace = args.replace.filter(arg => typeof arg === "string");
+    for (const replaceStr of replace) {
       let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*)$/.exec(replaceStr) || []);
 
       if (!re || !replacement) {
@@ -304,12 +304,12 @@ async function main(): Promise<void> {
     }
   }
 
-  if (args.command) {
+  if (typeof args.command === "string") {
     writeResult(await nanoSpawn(args.command, [], {shell: true}));
   }
   if (args.gitless) return; // nothing else to do
 
-  const msg = args.message;
+  const msgs = (args.message || []).filter(msg => typeof msg === "string");
   const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
 
   // check if base tag exists
@@ -344,7 +344,7 @@ async function main(): Promise<void> {
   }
 
   // create commit
-  const commitMsg = joinStrings([tagName, msg, changelog].filter(Boolean), "\n\n");
+  const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
   if (args.all) {
     writeResult(await nanoSpawn("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
   } else {
@@ -358,7 +358,7 @@ async function main(): Promise<void> {
   }
 
   // create tag
-  const tagMsg = joinStrings([msg, changelog].filter(Boolean), "\n\n");
+  const tagMsg = joinStrings([...msgs, changelog], "\n\n");
   // adding explicit -a here seems to make git no longer sign the tag
   writeResult(await nanoSpawn("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
 }
