@@ -15,10 +15,10 @@
     "node": ">=20"
   },
   "devDependencies": {
-    "@types/node": "24.7.0",
+    "@types/node": "24.7.2",
     "eslint": "9.37.0",
-    "eslint-config-silverwind": "105.2.3",
-    "nano-spawn": "1.0.3",
+    "eslint-config-silverwind": "106.0.0",
+    "nano-spawn": "2.0.0",
     "smol-toml": "1.4.2",
     "tsdown": "0.15.6",
     "tsdown-config-silverwind": "1.4.0",
