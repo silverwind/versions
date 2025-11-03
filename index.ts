@@ -189,6 +189,7 @@ async function main(): Promise<void> {
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
       message: {short: "m", type: "string", multiple: true},
+      tagsort: {short: "t", type: "string"},
     },
   });
   const args = result.values;
@@ -213,6 +214,8 @@ async function main(): Promise<void> {
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
+    -t, --tagsort         How to determine base version from git tags, either "highest" or "latest".
+                          Default is "highest".
     -v, --version         Print the version
     -h, --help            Print this help
 
@@ -240,7 +243,8 @@ async function main(): Promise<void> {
     if (args.gitless) return exit(new Error(`--gitless requires --base to be set`));
     let stdout: string = "";
     try {
-      ({stdout} = await nanoSpawn("git", ["tag", "--list", "--sort=-creatordate"]));
+      const sort = args.tagsort === "latest" ? "-creatordate" : "-version:refname";
+      ({stdout} = await nanoSpawn("git", ["tag", "--list", `--sort=${sort}`]));
     } catch {}
     for (const tag of stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
       if (isSemver(tag)) {
