@@ -15,17 +15,17 @@
     "node": ">=22"
   },
   "devDependencies": {
-    "@types/node": "24.9.1",
-    "eslint": "9.38.0",
-    "eslint-config-silverwind": "108.0.3",
+    "@types/node": "24.10.1",
+    "eslint": "9.39.1",
+    "eslint-config-silverwind": "111.0.5",
     "nano-spawn": "2.0.0",
     "smol-toml": "1.4.2",
-    "tsdown": "0.15.9",
-    "tsdown-config-silverwind": "1.4.0",
+    "tsdown": "0.16.3",
+    "tsdown-config-silverwind": "1.5.2",
     "typescript": "5.9.3",
     "typescript-config-silverwind": "12.0.0",
-    "updates": "16.8.2",
-    "vitest": "4.0.1",
-    "vitest-config-silverwind": "10.4.0"
+    "updates": "16.9.1",
+    "vitest": "4.0.8",
+    "vitest-config-silverwind": "10.4.2"
   }
 }
