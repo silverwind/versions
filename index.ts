@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import nanoSpawn from "nano-spawn";
+import nanoSpawn, {SubprocessError} from "nano-spawn";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative} from "node:path";
 import {cwd, exit as doExit, stdout} from "node:process";
@@ -154,7 +154,9 @@ function joinStrings(strings: Array<string | undefined>, separator: string): str
 }
 
 function exit(err?: Error | string | void): void {
-  if (err instanceof Error) {
+  if (err instanceof SubprocessError) {
+    console.info(`${err.message}\n${err.output}`);
+  } else if (err instanceof Error) {
     console.info(String(err.stack || err.message || err).trim());
   } else if (err) {
     console.info(err);
