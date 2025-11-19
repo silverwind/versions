@@ -2,7 +2,7 @@
 import nanoSpawn, {SubprocessError} from "nano-spawn";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative} from "node:path";
-import {cwd, exit as doExit, stdout} from "node:process";
+import {cwd, exit, stdout} from "node:process";
 import {EOL, platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
@@ -153,7 +153,7 @@ function joinStrings(strings: Array<string | undefined>, separator: string): str
   return arr.join(separator).trim();
 }
 
-function exit(err?: Error | string | void): void {
+function end(err?: Error | string | void): void {
   if (err instanceof SubprocessError) {
     console.info(`${err.message}\n${err.output}`);
   } else if (err instanceof Error) {
@@ -161,7 +161,7 @@ function exit(err?: Error | string | void): void {
   } else if (err) {
     console.info(err);
   }
-  doExit(err ? 1 : 0);
+  exit(err ? 1 : 0);
 }
 
 function ensureEol(str: string): string {
@@ -199,7 +199,7 @@ async function main(): Promise<void> {
 
   if (args.version) {
     console.info(pkg.version || "0.0.0");
-    exit();
+    end();
   }
 
   if (!commands.has(level) || args.help) {
@@ -223,7 +223,7 @@ async function main(): Promise<void> {
   Examples:
     $ versions patch
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
-    exit();
+    end();
   }
 
   let date = "";
@@ -239,7 +239,7 @@ async function main(): Promise<void> {
   // obtain old version
   let baseVersion: string = "";
   if (!args.base) {
-    if (args.gitless) return exit(new Error(`--gitless requires --base to be set`));
+    if (args.gitless) return end(new Error(`--gitless requires --base to be set`));
     let stdout: string = "";
     try {
       ({stdout} = await nanoSpawn("git", ["tag", "--list", "--sort=-creatordate"]));
@@ -278,7 +278,7 @@ async function main(): Promise<void> {
       let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*)$/.exec(replaceStr) || []);
 
       if (!re || !replacement) {
-        exit(new Error(`Invalid replace string: ${replaceStr}`));
+        end(new Error(`Invalid replace string: ${replaceStr}`));
       }
 
       replacement = replaceTokens(replacement, newVersion);
@@ -365,4 +365,4 @@ async function main(): Promise<void> {
   writeResult(await nanoSpawn("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
 }
 
-main().then(exit).catch(exit);
+main().then(end).catch(end);
