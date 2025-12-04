@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@types/node": "24.10.1",
+    "@typescript/native-preview": "7.0.0-dev.20251203.1",
     "eslint": "9.39.1",
     "eslint-config-silverwind": "112.1.0",
     "nano-spawn": "2.0.0",
