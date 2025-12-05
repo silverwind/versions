@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import nanoSpawn, {SubprocessError} from "nano-spawn";
+import nanoSpawn, {SubprocessError, type Result} from "nano-spawn";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative} from "node:path";
 import {cwd, exit, stdout} from "node:process";
@@ -7,7 +7,6 @@ import {EOL, platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
 import {parse} from "smol-toml";
-import type {Result} from "nano-spawn";
 
 export type SemverLevel = "patch" | "minor" | "major";
 
@@ -32,7 +31,7 @@ function replaceTokens(str: string, newVersion: string): string {
     .replace(/_PATCH_/g, patch);
 }
 
-function incrementSemver(str: string, level: SemverLevel): string {
+function incrementSemver(str: string, level: string): string {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
     return `${Number(m1) + 1}.0.0${m2}`;
@@ -45,7 +44,7 @@ function incrementSemver(str: string, level: SemverLevel): string {
   });
 }
 
-function find(filename: string, dir: string, stopDir?: string): string | null {
+function findUp(filename: string, dir: string, stopDir?: string): string | null {
   const path = join(dir, filename);
 
   try {
@@ -57,7 +56,7 @@ function find(filename: string, dir: string, stopDir?: string): string | null {
   if ((stopDir && path === stopDir) || parent === dir) {
     return null;
   } else {
-    return find(filename, parent, stopDir);
+    return findUp(filename, parent, stopDir);
   }
 }
 
@@ -232,7 +231,7 @@ async function main(): Promise<void> {
   }
 
   const pwd = cwd();
-  const gitDir = find(".git", pwd);
+  const gitDir = findUp(".git", pwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
   if (!projectRoot) projectRoot = pwd;
 
@@ -269,7 +268,7 @@ async function main(): Promise<void> {
   files = files.map(file => relative(pwd, file));
 
   // set new version
-  const newVersion = incrementSemver(baseVersion, level as SemverLevel);
+  const newVersion = incrementSemver(baseVersion, level);
 
   const replacements: Array<{re: RegExp, replacement: string}> = [];
   if (args.replace?.length) {
