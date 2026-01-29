@@ -4,7 +4,7 @@ import {readFileSync} from "node:fs";
 import {readFile, writeFile, unlink, mkdir, rm} from "node:fs/promises";
 import {parse} from "smol-toml";
 import type {SemverLevel} from "./index.ts";
-import {enhanceSubprocessError} from "./lib.ts";
+import {enhanceSubprocessError} from "./utils.ts";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 

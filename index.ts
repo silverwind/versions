@@ -9,7 +9,7 @@ import pkg from "./package.json" with {type: "json"};
 import {parse} from "smol-toml";
 
 export type SemverLevel = "patch" | "minor" | "major";
-export {enhanceSubprocessError} from "./lib.ts";
+export {enhanceSubprocessError} from "./utils.ts";
 
 function esc(str: string): string {
   return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
