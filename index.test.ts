@@ -11,7 +11,7 @@ import {tmpdir} from "node:os";
 const testFile = new URL("testfile", import.meta.url);
 
 // Helper function to run spawn with better error messages
-async function spawnWithErrorHandling(file: string, args?: readonly string[], options?: Options) {
+async function spawnEnhanced(file: string, args?: readonly string[], options?: Options) {
   try {
     return await spawn(file, args, options);
   } catch (err) {
@@ -165,9 +165,9 @@ test("fallback to package.json when no git tags exist", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.5.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 2.5.0");
 
-    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -193,9 +193,9 @@ version = "3.2.1"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 3.2.1");
 
-    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -218,11 +218,11 @@ test("fallback behavior with git repo but no tags", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-package", version: "5.1.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 5.1.0");
 
-    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["add", "."], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["add", "."], {cwd: tmpDir});
+    await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -248,9 +248,9 @@ version = "0.5.2"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 0.5.2");
 
-    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -277,9 +277,9 @@ version = "2.0.0"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -306,9 +306,9 @@ version = "3.0.0"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 3.0.0");
 
-    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
