@@ -10,18 +10,20 @@ import {tmpdir} from "node:os";
 const testFile = new URL("testfile", import.meta.url);
 
 // Helper function to run spawn with better error messages
-async function spawnWithErrorHandling(file: string, args?: readonly string[], options?: Options) {
+async function spawnWithErrorHandling(file: string, args?: readonly string[], options?: Options): Promise<Awaited<ReturnType<typeof spawn>>> {
   try {
     return await spawn(file, args, options);
   } catch (err) {
     if (err instanceof SubprocessError) {
-      // Enhance error message with stderr/stdout details
+      // Enhance error message with stderr/stdout details while preserving stack trace
       const errorMsg = [
         err.message,
         err.stderr ? `stderr: ${err.stderr}` : "",
         err.stdout ? `stdout: ${err.stdout}` : "",
       ].filter(Boolean).join("\n");
-      throw new Error(errorMsg);
+      const enhancedError = new Error(errorMsg);
+      enhancedError.stack = err.stack;
+      throw enhancedError;
     }
     throw err;
   }
