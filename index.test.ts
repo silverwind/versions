@@ -156,6 +156,7 @@ test("fallback to package.json when no git tags exist", async () => {
     await spawnEnhanced("git", ["init"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -184,6 +185,7 @@ version = "3.2.1"
     await spawnEnhanced("git", ["init"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -209,6 +211,7 @@ test("fallback behavior with git repo but no tags", async () => {
     await spawnEnhanced("git", ["init"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
     await spawnEnhanced("git", ["add", "."], {cwd: tmpDir});
     await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
 
@@ -239,6 +242,7 @@ version = "0.5.2"
     await spawnEnhanced("git", ["init"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -268,6 +272,7 @@ version = "2.0.0"
     await spawnEnhanced("git", ["init"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -297,6 +302,7 @@ version = "3.0.0"
     await spawnEnhanced("git", ["init"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
     await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
