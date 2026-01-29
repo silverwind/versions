@@ -1,26 +1,14 @@
-import spawn, {SubprocessError} from "nano-spawn";
-import type {Options} from "nano-spawn";
+import spawn from "nano-spawn";
 import {readFileSync} from "node:fs";
 import {readFile, writeFile, unlink, mkdir, rm} from "node:fs/promises";
 import {parse} from "smol-toml";
 import type {SemverLevel} from "./index.ts";
-import {enhanceSubprocessError} from "./utils.ts";
+import {spawnEnhanced} from "./utils.ts";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 
 const testFile = new URL("testfile", import.meta.url);
 
-// Helper function to run spawn with better error messages
-async function spawnEnhanced(file: string, args?: readonly string[], options?: Options) {
-  try {
-    return await spawn(file, args, options);
-  } catch (err) {
-    if (err instanceof SubprocessError) {
-      throw enhanceSubprocessError(err);
-    }
-    throw err;
-  }
-}
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
 let pkgStr: string;
