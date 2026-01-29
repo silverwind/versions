@@ -1,8 +1,10 @@
 import spawn from "nano-spawn";
 import {readFileSync} from "node:fs";
-import {readFile, writeFile, unlink} from "node:fs/promises";
+import {readFile, writeFile, unlink, mkdir, rm} from "node:fs/promises";
 import {parse} from "smol-toml";
 import type {SemverLevel} from "./index.ts";
+import {join} from "node:path";
+import {tmpdir} from "node:os";
 
 const testFile = new URL("testfile", import.meta.url);
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
@@ -139,4 +141,170 @@ test("uv", async () => {
 
   await unlink(tmpFilePyproject);
   await unlink(tmpFileLock);
+});
+
+test("fallback to package.json when no git tags exist", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.5.0"}, null, 2));
+    await writeFile(join(tmpDir, "testfile.txt"), "version 2.5.0");
+
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "patch",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.5.1");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("fallback to pyproject.toml when no git tags exist", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "pyproject.toml"), `[project]
+name = "test-project"
+version = "3.2.1"
+`);
+    await writeFile(join(tmpDir, "testfile.txt"), "version 3.2.1");
+
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "minor",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 3.3.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("fallback behavior with git repo but no tags", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-package", version: "5.1.0"}, null, 2));
+    await writeFile(join(tmpDir, "testfile.txt"), "version 5.1.0");
+
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawn("git", ["add", "."], {cwd: tmpDir});
+    await spawn("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "major",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 6.0.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("poetry-style pyproject.toml fallback", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "pyproject.toml"), `[tool.poetry]
+name = "poetry-test"
+version = "0.5.2"
+`);
+    await writeFile(join(tmpDir, "testfile.txt"), "version 0.5.2");
+
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "patch",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 0.5.3");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("package.json takes precedence over pyproject.toml", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+    await writeFile(join(tmpDir, "pyproject.toml"), `[project]
+name = "test-project"
+version = "2.0.0"
+`);
+    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "patch",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("fallback to pyproject.toml when package.json has invalid semver", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "invalid"}, null, 2));
+    await writeFile(join(tmpDir, "pyproject.toml"), `[project]
+name = "test-project"
+version = "3.0.0"
+`);
+    await writeFile(join(tmpDir, "testfile.txt"), "version 3.0.0");
+
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "minor",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 3.1.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
 });
