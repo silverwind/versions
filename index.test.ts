@@ -1,8 +1,10 @@
 import spawn from "nano-spawn";
 import {readFileSync} from "node:fs";
-import {readFile, writeFile, unlink} from "node:fs/promises";
+import {readFile, writeFile, unlink, mkdir, rm} from "node:fs/promises";
 import {parse} from "smol-toml";
 import type {SemverLevel} from "./index.ts";
+import {join} from "node:path";
+import {tmpdir} from "node:os";
 
 const testFile = new URL("testfile", import.meta.url);
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
@@ -139,4 +141,147 @@ test("uv", async () => {
 
   await unlink(tmpFilePyproject);
   await unlink(tmpFileLock);
+});
+
+test("fallback to package.json when no git tags exist", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    // Create a minimal package.json with a version
+    const packageJson = {name: "test-pkg", version: "2.5.0"};
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify(packageJson, null, 2));
+
+    // Create a test file to update
+    const testFilePath = join(tmpDir, "testfile.txt");
+    await writeFile(testFilePath, "version 2.5.0");
+
+    // Initialize git repo without tags
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    // Run versions command with gitless flag (since we don't have git setup properly)
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "patch",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    // Verify the file was updated to 2.5.1
+    const updatedContent = await readFile(testFilePath, "utf8");
+    expect(updatedContent).toEqual("version 2.5.1");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("fallback to pyproject.toml when no git tags exist", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    // Create a minimal pyproject.toml with a version (PEP 621 style)
+    const pyprojectToml = `[project]
+name = "test-project"
+version = "3.2.1"
+`;
+    await writeFile(join(tmpDir, "pyproject.toml"), pyprojectToml);
+
+    // Create a test file to update
+    const testFilePath = join(tmpDir, "testfile.txt");
+    await writeFile(testFilePath, "version 3.2.1");
+
+    // Initialize git repo without tags
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    // Run versions command with gitless flag
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "minor",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    // Verify the file was updated to 3.3.0
+    const updatedContent = await readFile(testFilePath, "utf8");
+    expect(updatedContent).toEqual("version 3.3.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("fallback behavior with git repo but no tags", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    // Create package.json with version
+    const packageJson = {name: "test-package", version: "5.1.0"};
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify(packageJson, null, 2));
+
+    // Create test file
+    const testFilePath = join(tmpDir, "testfile.txt");
+    await writeFile(testFilePath, "version 5.1.0");
+
+    // Initialize git repo and commit (but no tags)
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawn("git", ["add", "."], {cwd: tmpDir});
+    await spawn("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
+
+    // Run versions with --gitless flag - should fallback to package.json
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "major",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    const updatedContent = await readFile(testFilePath, "utf8");
+    expect(updatedContent).toEqual("version 6.0.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("poetry-style pyproject.toml fallback", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    // Create poetry-style pyproject.toml with version
+    const pyprojectToml = `[tool.poetry]
+name = "poetry-test"
+version = "0.5.2"
+`;
+    await writeFile(join(tmpDir, "pyproject.toml"), pyprojectToml);
+
+    // Create test file
+    const testFilePath = join(tmpDir, "testfile.txt");
+    await writeFile(testFilePath, "version 0.5.2");
+
+    // Initialize git repo without tags
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    // Run versions with gitless flag
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "patch",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    // Verify the file was updated to 0.5.3
+    const updatedContent = await readFile(testFilePath, "utf8");
+    expect(updatedContent).toEqual("version 0.5.3");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
 });

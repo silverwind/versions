@@ -60,6 +60,43 @@ function findUp(filename: string, dir: string, stopDir?: string): string | null 
   }
 }
 
+function readVersionFromPackageJson(projectRoot: string): string | null {
+  const packageJsonPath = findUp("package.json", projectRoot);
+  if (!packageJsonPath) return null;
+
+  try {
+    const content = readFileSync(packageJsonPath, "utf8");
+    const pkg = JSON.parse(content);
+    if (pkg.version && isSemver(pkg.version)) {
+      return pkg.version.replace(/^v/, "");
+    }
+  } catch {}
+
+  return null;
+}
+
+function readVersionFromPyprojectToml(projectRoot: string): string | null {
+  const pyprojectPath = findUp("pyproject.toml", projectRoot);
+  if (!pyprojectPath) return null;
+
+  try {
+    const content = readFileSync(pyprojectPath, "utf8");
+    const toml = parse(content) as any;
+
+    // Try project.version first (PEP 621 style)
+    if (toml.project?.version && isSemver(toml.project.version)) {
+      return toml.project.version.replace(/^v/, "");
+    }
+
+    // Try tool.poetry.version (Poetry style)
+    if (toml.tool?.poetry?.version && isSemver(toml.tool.poetry.version)) {
+      return toml.tool.poetry.version.replace(/^v/, "");
+    }
+  } catch {}
+
+  return null;
+}
+
 async function removeIgnoredFiles(files: Array<string>): Promise<Array<string>> {
   let result: Result;
   try {
@@ -206,7 +243,7 @@ async function main(): Promise<void> {
 
   Options:
     -a, --all             Add all changed files to the commit
-    -b, --base <version>  Base version. Default is from latest git tag or 0.0.0
+    -b, --base <version>  Base version. Default is from latest git tag, package.json, pyproject.toml, or 0.0.0
     -p, --prefix          Prefix version string with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date            Replace dates in format YYYY-MM-DD with current date
@@ -238,19 +275,27 @@ async function main(): Promise<void> {
   // obtain old version
   let baseVersion: string = "";
   if (!args.base) {
-    if (args.gitless) return end(new Error(`--gitless requires --base to be set`));
     let stdout: string = "";
-    try {
-      ({stdout} = await nanoSpawn("git", ["tag", "--list", "--sort=-creatordate"]));
-    } catch {}
-    for (const tag of stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
-      if (isSemver(tag)) {
-        baseVersion = tag.replace(/^v/, "");
-        break;
+    if (!args.gitless) {
+      try {
+        ({stdout} = await nanoSpawn("git", ["tag", "--list", "--sort=-creatordate"]));
+      } catch {}
+      for (const tag of stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
+        if (isSemver(tag)) {
+          baseVersion = tag.replace(/^v/, "");
+          break;
+        }
       }
     }
     if (!baseVersion) {
-      baseVersion = "0.0.0";
+      // Try to get version from package.json or pyproject.toml
+      baseVersion = readVersionFromPackageJson(projectRoot) || readVersionFromPyprojectToml(projectRoot) || "";
+      if (!baseVersion && args.gitless) {
+        return end(new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`));
+      }
+      if (!baseVersion) {
+        baseVersion = "0.0.0";
+      }
     }
   } else {
     baseVersion = String(args.base);
