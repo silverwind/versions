@@ -4,6 +4,7 @@ import {readFileSync} from "node:fs";
 import {readFile, writeFile, unlink, mkdir, rm} from "node:fs/promises";
 import {parse} from "smol-toml";
 import type {SemverLevel} from "./index.ts";
+import {enhanceSubprocessError} from "./lib.ts";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 
@@ -15,15 +16,7 @@ async function spawnWithErrorHandling(file: string, args?: readonly string[], op
     return await spawn(file, args, options);
   } catch (err) {
     if (err instanceof SubprocessError) {
-      // Enhance error message with stderr/stdout details while preserving stack trace
-      const errorMsg = [
-        err.message,
-        err.stderr ? `stderr: ${err.stderr}` : "",
-        err.stdout ? `stdout: ${err.stdout}` : "",
-      ].filter(Boolean).join("\n");
-      const enhancedError = new Error(errorMsg);
-      enhancedError.stack = err.stack;
-      throw enhancedError;
+      throw enhanceSubprocessError(err);
     }
     throw err;
   }
