@@ -122,8 +122,12 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
 
   let newData: string;
   if (fileName === "package.json") {
-    const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
-    newData = oldData.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
+    // Parse JSON to safely update only the top-level version field,
+    // avoiding accidental replacement of nested version fields or version
+    // strings in dependency specifications.
+    const pkg = JSON.parse(oldData);
+    if (pkg.version) pkg.version = newVersion;
+    newData = `${JSON.stringify(pkg, null, 2)}\n`;
   } else if (fileName === "package-lock.json") {
     // special case for package-lock.json which contains a lot of version
     // strings which make regexp replacement risky.

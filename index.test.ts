@@ -308,3 +308,62 @@ version = "3.0.0"
     await rm(tmpDir, {recursive: true, force: true});
   }
 });
+
+test("package.json only updates top-level version field (issue #31)", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    // Test case 1: nested version field in devDependencies
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({
+      name: "test-pkg",
+      version: "1.3.1",
+      devDependencies: {
+        foo: {
+          version: "1.3.1"
+        }
+      }
+    }, null, 2));
+
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "minor",
+      "package.json"
+    ], {cwd: tmpDir});
+
+    const result1 = JSON.parse(await readFile(join(tmpDir, "package.json"), "utf8"));
+    expect(result1.version).toEqual("1.4.0");
+    // Nested version field should NOT be changed
+    expect(result1.devDependencies.foo.version).toEqual("1.3.1");
+
+    // Test case 2: npm alias with version number
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({
+      name: "test-pkg",
+      version: "2.0.0",
+      devDependencies: {
+        bar: "npm:baz@2.0.0"
+      }
+    }, null, 2));
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "--base",
+      "2.0.0",
+      "patch",
+      "package.json"
+    ], {cwd: tmpDir});
+
+    const result2 = JSON.parse(await readFile(join(tmpDir, "package.json"), "utf8"));
+    expect(result2.version).toEqual("2.0.1");
+    // npm alias version should NOT be changed
+    expect(result2.devDependencies.bar).toEqual("npm:baz@2.0.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
