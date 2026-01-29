@@ -170,8 +170,8 @@ test("fallback to package.json when no git tags exist", async () => {
     await writeFile(join(tmpDir, "testfile.txt"), "version 2.5.0");
 
     await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -198,8 +198,8 @@ version = "3.2.1"
     await writeFile(join(tmpDir, "testfile.txt"), "version 3.2.1");
 
     await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -223,8 +223,8 @@ test("fallback behavior with git repo but no tags", async () => {
     await writeFile(join(tmpDir, "testfile.txt"), "version 5.1.0");
 
     await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
     await spawnWithErrorHandling("git", ["add", "."], {cwd: tmpDir});
     await spawnWithErrorHandling("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
 
@@ -253,8 +253,8 @@ version = "0.5.2"
     await writeFile(join(tmpDir, "testfile.txt"), "version 0.5.2");
 
     await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -282,8 +282,8 @@ version = "2.0.0"
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
     await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -311,8 +311,8 @@ version = "3.0.0"
     await writeFile(join(tmpDir, "testfile.txt"), "version 3.0.0");
 
     await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
