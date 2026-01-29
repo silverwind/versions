@@ -1,4 +1,4 @@
-import spawn from "nano-spawn";
+import spawn, {SubprocessError} from "nano-spawn";
 import {readFileSync} from "node:fs";
 import {readFile, writeFile, unlink, mkdir, rm} from "node:fs/promises";
 import {parse} from "smol-toml";
@@ -7,6 +7,24 @@ import {join} from "node:path";
 import {tmpdir} from "node:os";
 
 const testFile = new URL("testfile", import.meta.url);
+
+// Helper function to run spawn with better error messages
+async function spawnWithErrorHandling(...args: Parameters<typeof spawn>) {
+  try {
+    return await spawn(...args);
+  } catch (err) {
+    if (err instanceof SubprocessError) {
+      // Enhance error message with stderr/stdout details
+      const errorMsg = [
+        err.message,
+        err.stderr ? `stderr: ${err.stderr}` : "",
+        err.stdout ? `stdout: ${err.stdout}` : "",
+      ].filter(Boolean).join("\n");
+      throw new Error(errorMsg);
+    }
+    throw err;
+  }
+}
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
 let pkgStr: string;
@@ -151,9 +169,9 @@ test("fallback to package.json when no git tags exist", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.5.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 2.5.0");
 
-    await spawn("git", ["init"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -179,9 +197,9 @@ version = "3.2.1"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 3.2.1");
 
-    await spawn("git", ["init"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -204,11 +222,11 @@ test("fallback behavior with git repo but no tags", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-package", version: "5.1.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 5.1.0");
 
-    await spawn("git", ["init"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
-    await spawn("git", ["add", "."], {cwd: tmpDir});
-    await spawn("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["add", "."], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -234,9 +252,9 @@ version = "0.5.2"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 0.5.2");
 
-    await spawn("git", ["init"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -263,9 +281,9 @@ version = "2.0.0"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await spawn("git", ["init"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -292,9 +310,9 @@ version = "3.0.0"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 3.0.0");
 
-    await spawn("git", ["init"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
-    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["init"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnWithErrorHandling("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
