@@ -161,7 +161,7 @@ test("fallback to package.json when no git tags exist", async () => {
     await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
     await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
 
-    // Run versions command with gitless flag (since we don't have git setup properly)
+    // Run versions command with gitless flag to test fallback behavior
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
       "--gitless",
