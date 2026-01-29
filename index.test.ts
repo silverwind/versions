@@ -1,4 +1,5 @@
 import spawn, {SubprocessError} from "nano-spawn";
+import type {Options} from "nano-spawn";
 import {readFileSync} from "node:fs";
 import {readFile, writeFile, unlink, mkdir, rm} from "node:fs/promises";
 import {parse} from "smol-toml";
@@ -9,9 +10,9 @@ import {tmpdir} from "node:os";
 const testFile = new URL("testfile", import.meta.url);
 
 // Helper function to run spawn with better error messages
-async function spawnWithErrorHandling(...args: Parameters<typeof spawn>) {
+async function spawnWithErrorHandling(file: string, args?: readonly string[], options?: Options) {
   try {
-    return await spawn(...args);
+    return await spawn(file, args, options);
   } catch (err) {
     if (err instanceof SubprocessError) {
       // Enhance error message with stderr/stdout details
