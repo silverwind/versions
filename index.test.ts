@@ -11,7 +11,7 @@ import {tmpdir} from "node:os";
 const testFile = new URL("testfile", import.meta.url);
 
 // Helper function to run spawn with better error messages
-async function spawnWithErrorHandling(file: string, args?: readonly string[], options?: Options): Promise<Awaited<ReturnType<typeof spawn>>> {
+async function spawnWithErrorHandling(file: string, args?: readonly string[], options?: Options) {
   try {
     return await spawn(file, args, options);
   } catch (err) {
