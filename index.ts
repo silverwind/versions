@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import nanoSpawn, {SubprocessError, type Result} from "nano-spawn";
+import {SubprocessError, type Result} from "nano-spawn";
+import {spawnEnhanced} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative} from "node:path";
 import {cwd, exit, stdout} from "node:process";
@@ -100,7 +101,7 @@ function readVersionFromPyprojectToml(projectRoot: string): string | null {
 async function removeIgnoredFiles(files: Array<string>): Promise<Array<string>> {
   let result: Result;
   try {
-    result = await nanoSpawn("git", ["check-ignore", "--", ...files]);
+    result = await spawnEnhanced("git", ["check-ignore", "--", ...files]);
   } catch {
     return files;
   }
@@ -278,7 +279,7 @@ async function main(): Promise<void> {
     let stdout: string = "";
     if (!args.gitless) {
       try {
-        ({stdout} = await nanoSpawn("git", ["tag", "--list", "--sort=-creatordate"]));
+        ({stdout} = await spawnEnhanced("git", ["tag", "--list", "--sort=-creatordate"]));
       } catch {}
       for (const tag of stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
         if (isSemver(tag)) {
@@ -352,7 +353,7 @@ async function main(): Promise<void> {
   }
 
   if (typeof args.command === "string") {
-    writeResult(await nanoSpawn(args.command, [], {shell: true}));
+    writeResult(await spawnEnhanced(args.command, [], {shell: true}));
   }
   if (args.gitless) return; // nothing else to do
 
@@ -362,14 +363,14 @@ async function main(): Promise<void> {
   // check if base tag exists
   let range = "";
   try {
-    await nanoSpawn("git", ["show", tagName]);
+    await spawnEnhanced("git", ["show", tagName]);
     range = `${tagName}..HEAD`;
   } catch {}
 
   // check if we have any previous tag
   if (!range) {
     try {
-      const {stdout} = await nanoSpawn("git", ["describe", "--abbrev=0"]);
+      const {stdout} = await spawnEnhanced("git", ["describe", "--abbrev=0"]);
       range = `${stdout}..HEAD`;
     } catch {}
   }
@@ -382,7 +383,7 @@ async function main(): Promise<void> {
     const args = ["log"];
     if (range) args.push(range);
     // https://git-scm.com/docs/pretty-formats
-    const {stdout} = await nanoSpawn("git", [...args, `--pretty=format:* %s (%aN)`]);
+    const {stdout} = await spawnEnhanced("git", [...args, `--pretty=format:* %s (%aN)`]);
     if (stdout?.length) changelog = stdout;
   } catch {}
 
@@ -393,21 +394,21 @@ async function main(): Promise<void> {
   // create commit
   const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
   if (args.all) {
-    writeResult(await nanoSpawn("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
+    writeResult(await spawnEnhanced("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
   } else {
     const filesToAdd = await removeIgnoredFiles(files);
     if (filesToAdd.length) {
-      writeResult(await nanoSpawn("git", ["add", ...filesToAdd]));
-      writeResult(await nanoSpawn("git", ["commit", "-F", "-"], {stdin: {string: commitMsg}}));
+      writeResult(await spawnEnhanced("git", ["add", ...filesToAdd]));
+      writeResult(await spawnEnhanced("git", ["commit", "-F", "-"], {stdin: {string: commitMsg}}));
     } else {
-      writeResult(await nanoSpawn("git", ["commit", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
+      writeResult(await spawnEnhanced("git", ["commit", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
     }
   }
 
   // create tag
   const tagMsg = joinStrings([...msgs, changelog], "\n\n");
   // adding explicit -a here seems to make git no longer sign the tag
-  writeResult(await nanoSpawn("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
+  writeResult(await spawnEnhanced("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
 }
 
 main().then(end).catch(end);
