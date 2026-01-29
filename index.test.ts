@@ -285,3 +285,84 @@ version = "0.5.2"
     await rm(tmpDir, {recursive: true, force: true});
   }
 });
+
+test("package.json takes precedence over pyproject.toml", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    // Create both package.json and pyproject.toml with different versions
+    const packageJson = {name: "test-pkg", version: "1.0.0"};
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify(packageJson, null, 2));
+
+    const pyprojectToml = `[project]
+name = "test-project"
+version = "2.0.0"
+`;
+    await writeFile(join(tmpDir, "pyproject.toml"), pyprojectToml);
+
+    // Create test file with package.json version
+    const testFilePath = join(tmpDir, "testfile.txt");
+    await writeFile(testFilePath, "version 1.0.0");
+
+    // Initialize git repo without tags
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    // Run versions - should use package.json (1.0.0) not pyproject.toml (2.0.0)
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "patch",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    // Verify the file was updated to 1.0.1 (not 2.0.1)
+    const updatedContent = await readFile(testFilePath, "utf8");
+    expect(updatedContent).toEqual("version 1.0.1");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("fallback to pyproject.toml when package.json has invalid semver", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    // Create package.json with invalid semver
+    const packageJson = {name: "test-pkg", version: "invalid"};
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify(packageJson, null, 2));
+
+    // Create pyproject.toml with valid version
+    const pyprojectToml = `[project]
+name = "test-project"
+version = "3.0.0"
+`;
+    await writeFile(join(tmpDir, "pyproject.toml"), pyprojectToml);
+
+    // Create test file with pyproject.toml version
+    const testFilePath = join(tmpDir, "testfile.txt");
+    await writeFile(testFilePath, "version 3.0.0");
+
+    // Initialize git repo without tags
+    await spawn("git", ["init"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawn("git", ["config", "user.name", "Test User"], {cwd: tmpDir});
+
+    // Run versions - should fallback to pyproject.toml
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "minor",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    // Verify the file was updated to 3.1.0
+    const updatedContent = await readFile(testFilePath, "utf8");
+    expect(updatedContent).toEqual("version 3.1.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});

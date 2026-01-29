@@ -288,7 +288,8 @@ async function main(): Promise<void> {
       }
     }
     if (!baseVersion) {
-      // Try to get version from package.json or pyproject.toml
+      // Try to get version from package.json first, then pyproject.toml as fallback
+      // package.json takes precedence for JavaScript/TypeScript projects
       baseVersion = readVersionFromPackageJson(projectRoot) || readVersionFromPyprojectToml(projectRoot) || "";
       if (!baseVersion && args.gitless) {
         return end(new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`));
