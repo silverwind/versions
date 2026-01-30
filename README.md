@@ -26,7 +26,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
-    --release             Create a GitHub or Gitea release with the changelog as body
+    -R, --release         Create a GitHub or Gitea release with the changelog as body
     -v, --version         Print the version
     -h, --help            Print this help
 

@@ -332,8 +332,10 @@ async function getRepoInfo(): Promise<RepoInfo | null> {
   }
 }
 
-async function createGithubRelease(repoInfo: RepoInfo, tagName: string, body: string, token: string): Promise<void> {
-  const apiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
+async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, token: string): Promise<void> {
+  const apiUrl = repoInfo.type === "github" ?
+    `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/releases` :
+    `https://${repoInfo.host}/api/v1/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
 
   const releaseData = {
     tag_name: tagName,
@@ -343,68 +345,38 @@ async function createGithubRelease(repoInfo: RepoInfo, tagName: string, body: st
     prerelease: rePrereleaseVersion.test(tagName) && tagName.includes("-"),
   };
 
-  const response = await fetch(apiUrl, {
-    method: "POST",
-    headers: {
-      "Accept": "application/vnd.github+json",
-      "Authorization": `Bearer ${token}`,
-      "X-GitHub-Api-Version": "2022-11-28",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(releaseData),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to create GitHub release: ${response.status} ${response.statusText}\n${errorText}`);
-  }
-
-  try {
-    const result = await response.json();
-    if (result.html_url) {
-      console.info(`Created GitHub release: ${result.html_url}`);
-    } else {
-      console.info("Created GitHub release");
-    }
-  } catch {
-    console.info("Created GitHub release");
-  }
-}
-
-async function createGiteaRelease(repoInfo: RepoInfo, tagName: string, body: string, token: string): Promise<void> {
-  const apiUrl = `https://${repoInfo.host}/api/v1/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
-
-  const releaseData = {
-    tag_name: tagName,
-    name: tagName,
-    body,
-    draft: false,
-    prerelease: rePrereleaseVersion.test(tagName) && tagName.includes("-"),
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
   };
 
+  if (repoInfo.type === "github") {
+    headers["Accept"] = "application/vnd.github+json";
+    headers["Authorization"] = `Bearer ${token}`;
+    headers["X-GitHub-Api-Version"] = "2022-11-28";
+  } else {
+    headers["Authorization"] = `token ${token}`;
+  }
+
   const response = await fetch(apiUrl, {
     method: "POST",
-    headers: {
-      "Authorization": `token ${token}`,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(releaseData),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Failed to create Gitea release: ${response.status} ${response.statusText}\n${errorText}`);
+    throw new Error(`Failed to create release: ${response.status} ${response.statusText}\n${errorText}`);
   }
 
   try {
     const result = await response.json();
     if (result.html_url) {
-      console.info(`Created Gitea release: ${result.html_url}`);
+      console.info(`Created release: ${result.html_url}`);
     } else {
-      console.info("Created Gitea release");
+      console.info("Created release");
     }
   } catch {
-    console.info("Created Gitea release");
+    console.info("Created release");
   }
 }
 
@@ -427,7 +399,7 @@ async function main(): Promise<void> {
       prefix: {short: "p", type: "boolean"},
       version: {short: "v", type: "boolean"},
       date: {short: "d", type: "boolean"},
-      release: {type: "boolean"},
+      release: {short: "R", type: "boolean"},
       base: {short: "b", type: "string"},
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
@@ -458,7 +430,7 @@ async function main(): Promise<void> {
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
-    --release             Create a GitHub or Gitea release with the changelog as body
+    -R, --release         Create a GitHub or Gitea release with the changelog as body
     -v, --version         Print the version
     -h, --help            Print this help
 
@@ -637,13 +609,13 @@ async function main(): Promise<void> {
       if (!token) {
         throw new Error("GitHub release requested but no token found in environment variables (VERSIONS_GITHUB_API_TOKEN, GITHUB_API_TOKEN, GITHUB_TOKEN, GH_TOKEN, HOMEBREW_GITHUB_API_TOKEN)");
       }
-      await createGithubRelease(repoInfo, tagName, releaseBody, token);
+      await createForgeRelease(repoInfo, tagName, releaseBody, token);
     } else if (repoInfo.type === "gitea") {
       const token = getGiteaToken();
       if (!token) {
         throw new Error("Gitea release requested but no token found in environment variables (VERSIONS_GITEA_API_TOKEN, GITEA_API_TOKEN, GITEA_AUTH_TOKEN, GITEA_TOKEN)");
       }
-      await createGiteaRelease(repoInfo, tagName, releaseBody, token);
+      await createForgeRelease(repoInfo, tagName, releaseBody, token);
     }
   }
 }
