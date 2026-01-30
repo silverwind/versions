@@ -308,8 +308,8 @@ async function main(): Promise<void> {
 
   Examples:
     $ versions patch
-    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
-    $ versions prerelease --preid=alpha package.json`);
+    $ versions prerelease --preid=alpha
+    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
     end();
   }
 

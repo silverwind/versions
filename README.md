@@ -33,8 +33,8 @@ usage: versions [options] patch|minor|major|prerelease [files...]
 
   Examples:
     $ versions patch
+    $ versions prerelease --preid=alpha
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
-    $ versions prerelease --preid=alpha package.json
 ```
 
 ## Signing commits and tags

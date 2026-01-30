@@ -26,13 +26,6 @@ function incrementSemver(str: string, level: SemverLevel) {
   });
 }
 
-async function initGitRepo(tmpDir: string): Promise<void> {
-  await spawnEnhanced("git", ["init"], {cwd: tmpDir});
-  await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
-  await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
-  await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
-}
-
 afterAll(async () => {
   if (pkgStr) await writeFile(new URL("package.json", import.meta.url), pkgStr);
   await unlink(testFile);
@@ -160,7 +153,10 @@ test("fallback to package.json when no git tags exist", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.5.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 2.5.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -186,7 +182,10 @@ version = "3.2.1"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 3.2.1");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -209,7 +208,10 @@ test("fallback behavior with git repo but no tags", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-package", version: "5.1.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 5.1.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
     await spawnEnhanced("git", ["add", "."], {cwd: tmpDir});
     await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
 
@@ -237,7 +239,10 @@ version = "0.5.2"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 0.5.2");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -264,7 +269,10 @@ version = "2.0.0"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -291,7 +299,10 @@ version = "3.0.0"
 `);
     await writeFile(join(tmpDir, "testfile.txt"), "version 3.0.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -314,7 +325,10 @@ test("prerelease from stable version", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -338,7 +352,10 @@ test("prerelease increment with same preid", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.1-beta.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.1-beta.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -362,7 +379,10 @@ test("prerelease with different preid", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.0.0-alpha.5"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 2.0.0-alpha.5");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -386,7 +406,10 @@ test("prerelease without preid fails", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     let error;
     try {
@@ -414,7 +437,10 @@ test("patch with preid creates prerelease", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -438,7 +464,10 @@ test("minor with preid creates prerelease", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -462,7 +491,10 @@ test("major with preid creates prerelease", async () => {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -486,7 +518,10 @@ test("patch with preid on prerelease version strips old prerelease", async () =>
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0-alpha.5"}, null, 2));
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0-alpha.5");
 
-    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
