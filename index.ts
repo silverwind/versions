@@ -9,7 +9,7 @@ import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "n
 import pkg from "./package.json" with {type: "json"};
 import {parse} from "smol-toml";
 
-export type SemverLevel = "patch" | "minor" | "major";
+export type SemverLevel = "patch" | "minor" | "major" | "prerelease";
 
 function esc(str: string): string {
   return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
@@ -32,7 +32,7 @@ function replaceTokens(str: string, newVersion: string): string {
     .replace(/_PATCH_/g, patch);
 }
 
-function incrementSemver(str: string, level: string): string {
+function incrementSemver(str: string, level: string, preid?: string): string {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
     return `${Number(m1) + 1}.0.0${m2}`;
@@ -40,6 +40,36 @@ function incrementSemver(str: string, level: string): string {
   if (level === "minor") return str.replace(/([0-9]+\.)([0-9]+)\.[0-9]+(.*)/, (_, m1, m2, m3) => {
     return `${m1}${Number(m2) + 1}.0${m3}`;
   });
+  if (level === "patch") return str.replace(/([0-9]+\.[0-9]+\.)([0-9]+)(.*)/, (_, m1, m2, m3) => {
+    return `${m1}${Number(m2) + 1}${m3}`;
+  });
+  if (level === "prerelease") {
+    if (!preid) throw new Error("prerelease requires --preid option");
+
+    // Check if current version has a prerelease
+    const match = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?/.exec(str);
+    if (!match) throw new Error(`Invalid semver: ${str}`);
+
+    const [, major, minor, patch, prerelease] = match;
+
+    if (!prerelease) {
+      // No prerelease, increment patch and add prerelease
+      return `${major}.${minor}.${Number(patch) + 1}-${preid}.0`;
+    }
+
+    // Has prerelease, check if it matches the requested preid
+    const prereleaseMatch = /^([a-zA-Z0-9-]+)\.(\d+)$/.exec(prerelease);
+    if (prereleaseMatch) {
+      const [, currentPreid, preNum] = prereleaseMatch;
+      if (currentPreid === preid) {
+        // Same preid, increment the number
+        return `${major}.${minor}.${patch}-${preid}.${Number(preNum) + 1}`;
+      }
+    }
+
+    // Different preid or no number, replace with new preid
+    return `${major}.${minor}.${patch}-${preid}.0`;
+  }
   return str.replace(/([0-9]+\.[0-9]+\.)([0-9]+)(.*)/, (_, m1, m2, m3) => {
     return `${m1}${Number(m2) + 1}${m3}`;
   });
@@ -211,7 +241,7 @@ function writeResult(result: Result): void {
 }
 
 async function main(): Promise<void> {
-  const commands = new Set(["patch", "minor", "major"]);
+  const commands = new Set(["patch", "minor", "major", "prerelease"]);
   const result = parseArgs({
     strict: false,
     allowPositionals: true,
@@ -228,6 +258,7 @@ async function main(): Promise<void> {
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
       message: {short: "m", type: "string", multiple: true},
+      preid: {short: "i", type: "string"},
     },
   });
   const args = result.values;
@@ -240,7 +271,7 @@ async function main(): Promise<void> {
   }
 
   if (!commands.has(level) || args.help) {
-    console.info(`usage: versions [options] patch|minor|major [files...]
+    console.info(`usage: versions [options] patch|minor|major|prerelease [files...]
 
   Options:
     -a, --all             Add all changed files to the commit
@@ -248,6 +279,7 @@ async function main(): Promise<void> {
     -p, --prefix          Prefix version string with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date            Replace dates in format YYYY-MM-DD with current date
+    -i, --preid <id>      Prerelease identifier (required for prerelease command, e.g., alpha, beta, rc)
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
@@ -259,7 +291,8 @@ async function main(): Promise<void> {
 
   Examples:
     $ versions patch
-    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
+    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
+    $ versions prerelease --preid=alpha package.json`);
     end();
   }
 
@@ -314,8 +347,13 @@ async function main(): Promise<void> {
   // convert paths to relative
   files = files.map(file => relative(pwd, file));
 
+  // validate prerelease requirements
+  if (level === "prerelease" && !args.preid) {
+    return end(new Error("prerelease requires --preid option"));
+  }
+
   // set new version
-  const newVersion = incrementSemver(baseVersion, level);
+  const newVersion = incrementSemver(baseVersion, level, typeof args.preid === "string" ? args.preid : undefined);
 
   const replacements: Array<{re: RegExp, replacement: string}> = [];
   if (args.replace?.length) {
