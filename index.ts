@@ -303,7 +303,7 @@ async function getRepoInfo(): Promise<RepoInfo | null> {
 
 async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, token: string): Promise<void> {
   const apiUrl = repoInfo.type === "github" ?
-    `https://api.${repoInfo.host}/repos/${repoInfo.owner}/${repoInfo.repo}/releases` :
+    `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/releases` :
     `https://${repoInfo.host}/api/v1/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
 
   const releaseData = {
