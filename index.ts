@@ -303,12 +303,12 @@ async function getRepoInfo(): Promise<RepoInfo | null> {
       };
     }
 
-    // Parse Gitea URLs (https://gitea.example.com/owner/repo.git or git@gitea.example.com:owner/repo.git)
-    // Only detect as Gitea if hostname contains "gitea" to avoid false positives with GitLab, Bitbucket, etc.
+    // Parse other git URLs as Gitea (https://host.com/owner/repo.git or git@host.com:owner/repo.git)
+    // If the host doesn't support Gitea API, the API error will inform the user
     const giteaHttpsMatch = /https:\/\/([^/]+)\/([^/]+)\/([^/.]+)/.exec(url);
     const giteaSshMatch = /git@([^:]+):([^/]+)\/([^/.]+)/.exec(url);
 
-    if (giteaHttpsMatch?.[1].includes("gitea")) {
+    if (giteaHttpsMatch) {
       return {
         owner: giteaHttpsMatch[2],
         repo: giteaHttpsMatch[3],
@@ -317,7 +317,7 @@ async function getRepoInfo(): Promise<RepoInfo | null> {
       };
     }
 
-    if (giteaSshMatch?.[1].includes("gitea")) {
+    if (giteaSshMatch) {
       return {
         owner: giteaSshMatch[2],
         repo: giteaSshMatch[3],
