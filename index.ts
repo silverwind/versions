@@ -34,15 +34,24 @@ function replaceTokens(str: string, newVersion: string): string {
 
 function incrementSemver(str: string, level: string, preid?: string): string {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
-  if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
-    return `${Number(m1) + 1}.0.0${m2}`;
-  });
-  if (level === "minor") return str.replace(/([0-9]+\.)([0-9]+)\.[0-9]+(.*)/, (_, m1, m2, m3) => {
-    return `${m1}${Number(m2) + 1}.0${m3}`;
-  });
-  if (level === "patch") return str.replace(/([0-9]+\.[0-9]+\.)([0-9]+)(.*)/, (_, m1, m2, m3) => {
-    return `${m1}${Number(m2) + 1}${m3}`;
-  });
+  if (level === "major") {
+    const newVer = str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1) => {
+      return `${Number(m1) + 1}.0.0`;
+    });
+    return preid ? `${newVer}-${preid}.0` : newVer;
+  }
+  if (level === "minor") {
+    const newVer = str.replace(/([0-9]+\.)([0-9]+)\.[0-9]+(.*)/, (_, m1, m2) => {
+      return `${m1}${Number(m2) + 1}.0`;
+    });
+    return preid ? `${newVer}-${preid}.0` : newVer;
+  }
+  if (level === "patch") {
+    const newVer = str.replace(/([0-9]+\.[0-9]+\.)([0-9]+)(.*)/, (_, m1, m2) => {
+      return `${m1}${Number(m2) + 1}`;
+    });
+    return preid ? `${newVer}-${preid}.0` : newVer;
+  }
   if (level === "prerelease") {
     if (!preid) throw new Error("prerelease requires --preid option");
 
@@ -279,7 +288,7 @@ async function main(): Promise<void> {
     -p, --prefix          Prefix version string with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date            Replace dates in format YYYY-MM-DD with current date
-    -i, --preid <id>      Prerelease identifier (required for prerelease command, e.g., alpha, beta, rc)
+    -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc. Can be used with any command to create a prerelease version
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
@@ -291,6 +300,7 @@ async function main(): Promise<void> {
 
   Examples:
     $ versions patch
+    $ versions patch --preid=alpha
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
     $ versions prerelease --preid=alpha package.json`);
     end();

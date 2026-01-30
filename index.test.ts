@@ -428,3 +428,84 @@ test("prerelease without preid fails", async () => {
     await rm(tmpDir, {recursive: true, force: true});
   }
 });
+
+test("patch with preid creates prerelease", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "--preid=alpha",
+      "patch",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-alpha.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("minor with preid creates prerelease", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "--preid=beta",
+      "minor",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.1.0-beta.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("major with preid creates prerelease", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+
+    await spawnEnhanced("git", ["init"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "--preid=rc",
+      "major",
+      "testfile.txt"
+    ], {cwd: tmpDir});
+
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.0.0-rc.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
