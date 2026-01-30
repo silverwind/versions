@@ -503,35 +503,8 @@ test("patch with preid on prerelease version strips old prerelease", async () =>
 });
 
 test("release with mocked github api", async () => {
-  const {createServer} = await import("node:http");
   const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
   await mkdir(tmpDir, {recursive: true});
-
-  let receivedBody: any;
-
-  const server = createServer((req, res) => {
-    let body = "";
-    req.on("data", chunk => {
-      body += chunk;
-    });
-    req.on("end", () => {
-      receivedBody = JSON.parse(body);
-      res.writeHead(201, {"Content-Type": "application/json"});
-      res.end(JSON.stringify({
-        html_url: `http://gitea.local/test/test/releases/tag/${receivedBody.tag_name}`,
-        tag_name: receivedBody.tag_name,
-      }));
-    });
-  });
-
-  await new Promise<void>(resolve => {
-    server.listen(0, "127.0.0.1", () => resolve());
-  });
-
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Failed to get server address");
-  }
 
   try {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
@@ -540,13 +513,10 @@ test("release with mocked github api", async () => {
     await initGitRepo(tmpDir);
     await spawnEnhanced("git", ["add", "."], {cwd: tmpDir});
     await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
-    // Use http URL to match our mock server
-    await spawnEnhanced("git", ["remote", "add", "origin", `http://gitea.local/test/test.git`], {cwd: tmpDir});
+    await spawnEnhanced("git", ["remote", "add", "origin", "https://github.com/test-copilot-versions/test-repo.git"], {cwd: tmpDir});
     await spawnEnhanced("git", ["tag", "1.0.0"], {cwd: tmpDir});
 
-    // Mock DNS resolution by overriding fetch in the subprocess
-    // Since we can't override fetch in subprocess, we'll use NODE_OPTIONS to add a custom module
-    // Actually, let's just expect the failure and validate what we can from the error
+    // Test with a fake token - should fail with 401/403 but shows the release flow works
     try {
       await spawn("node", [
         join(process.cwd(), "dist/index.js"),
@@ -555,21 +525,19 @@ test("release with mocked github api", async () => {
         "testfile.txt"
       ], {
         cwd: tmpDir,
-        env: {...process.env, GITEA_TOKEN: "test-token"},
+        env: {...process.env, GITHUB_TOKEN: "fake-test-token-12345"},
       });
-    } catch (err: any) {
-      // The command will fail because it can't actually reach gitea.local,
-      // but we can verify the file was updated
+      // If it somehow succeeds, that's fine (unlikely with fake token)
       expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
-      expect(err.output).toContain("1.0.1");
-      // Test passed - it updated the file and attempted to create the release
-      return;
+    } catch (err: any) {
+      // Expected to fail with authentication error
+      expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+      // Should contain error about failed release creation
+      expect(err.output).toContain("Failed to create release");
+      // Should show either 401 Unauthorized or 403 Forbidden
+      expect(err.output).toMatch(/401|403/);
     }
-
-    // If we somehow succeeded (unlikely), still check the file
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
   } finally {
-    server.close();
     await rm(tmpDir, {recursive: true, force: true});
   }
 });
