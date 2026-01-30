@@ -9,14 +9,30 @@ import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "n
 import pkg from "./package.json" with {type: "json"};
 import {parse} from "smol-toml";
 
-export type SemverLevel = "patch" | "minor" | "major";
+export type SemverLevel = "patch" | "minor" | "major" | "prerelease";
+
+const reEscapeChars = /[|\\{}()[\]^$+*?.-]/g;
+const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+const reVersionPrefix = /^v/;
+const reVerToken = /_VER_/g;
+const reMajorToken = /_MAJOR_/g;
+const reMinorToken = /_MINOR_/g;
+const rePatchToken = /_PATCH_/g;
+const reMajorVersion = /([0-9]+)\.[0-9]+\.[0-9]+(.*)/;
+const reMinorVersion = /([0-9]+\.)([0-9]+)\.[0-9]+(.*)/;
+const rePatchVersion = /([0-9]+\.[0-9]+\.)([0-9]+)(.*)/;
+const rePrereleaseVersion = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?/;
+const rePrereleaseIdNum = /^([a-zA-Z0-9-]+)\.(\d+)$/;
+const reNewline = /\r?\n/;
+const reDatePattern = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
+const reReplaceString = /^s#(.+?)#(.+?)#(.*)$/;
 
 function esc(str: string): string {
-  return str.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
+  return str.replace(reEscapeChars, "\\$&");
 }
 
 function isSemver(str: string): boolean {
-  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/.test(str.replace(/^v/, ""));
+  return reSemver.test(str.replace(reVersionPrefix, ""));
 }
 
 function uniq<T extends Array<any>>(arr: T): T {
@@ -26,23 +42,54 @@ function uniq<T extends Array<any>>(arr: T): T {
 function replaceTokens(str: string, newVersion: string): string {
   const [major, minor, patch] = newVersion.split(".");
   return str
-    .replace(/_VER_/g, newVersion)
-    .replace(/_MAJOR_/g, major)
-    .replace(/_MINOR_/g, minor)
-    .replace(/_PATCH_/g, patch);
+    .replace(reVerToken, newVersion)
+    .replace(reMajorToken, major)
+    .replace(reMinorToken, minor)
+    .replace(rePatchToken, patch);
 }
 
-function incrementSemver(str: string, level: string): string {
+function incrementSemver(str: string, level: string, preid?: string): string {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
-  if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
-    return `${Number(m1) + 1}.0.0${m2}`;
-  });
-  if (level === "minor") return str.replace(/([0-9]+\.)([0-9]+)\.[0-9]+(.*)/, (_, m1, m2, m3) => {
-    return `${m1}${Number(m2) + 1}.0${m3}`;
-  });
-  return str.replace(/([0-9]+\.[0-9]+\.)([0-9]+)(.*)/, (_, m1, m2, m3) => {
-    return `${m1}${Number(m2) + 1}${m3}`;
-  });
+  if (level === "major") {
+    const newVer = str.replace(reMajorVersion, (_, m1) => `${Number(m1) + 1}.0.0`);
+    return preid ? `${newVer}-${preid}.0` : newVer;
+  }
+  if (level === "minor") {
+    const newVer = str.replace(reMinorVersion, (_, m1, m2) => `${m1}${Number(m2) + 1}.0`);
+    return preid ? `${newVer}-${preid}.0` : newVer;
+  }
+  if (level === "patch") {
+    const newVer = str.replace(rePatchVersion, (_, m1, m2) => `${m1}${Number(m2) + 1}`);
+    return preid ? `${newVer}-${preid}.0` : newVer;
+  }
+  if (level === "prerelease") {
+    if (!preid) throw new Error("prerelease requires --preid option");
+
+    // Check if current version has a prerelease
+    const match = rePrereleaseVersion.exec(str);
+    if (!match) throw new Error(`Invalid semver: ${str}`);
+
+    const [, major, minor, patch, prerelease] = match;
+
+    if (!prerelease) {
+      // No prerelease, increment patch and add prerelease
+      return `${major}.${minor}.${Number(patch) + 1}-${preid}.0`;
+    }
+
+    // Has prerelease, check if it matches the requested preid
+    const prereleaseMatch = rePrereleaseIdNum.exec(prerelease);
+    if (prereleaseMatch) {
+      const [, currentPreid, preNum] = prereleaseMatch;
+      if (currentPreid === preid) {
+        // Same preid, increment the number
+        return `${major}.${minor}.${patch}-${preid}.${Number(preNum) + 1}`;
+      }
+    }
+
+    // Different preid or no number, replace with new preid
+    return `${major}.${minor}.${patch}-${preid}.0`;
+  }
+  return str.replace(rePatchVersion, (_, m1, m2, m3) => `${m1}${Number(m2) + 1}${m3}`);
 }
 
 function findUp(filename: string, dir: string, stopDir?: string): string | null {
@@ -69,7 +116,7 @@ function readVersionFromPackageJson(projectRoot: string): string | null {
     const content = readFileSync(packageJsonPath, "utf8");
     const pkg = JSON.parse(content);
     if (pkg.version && isSemver(pkg.version)) {
-      return pkg.version.replace(/^v/, "");
+      return pkg.version.replace(reVersionPrefix, "");
     }
   } catch {}
 
@@ -86,12 +133,12 @@ function readVersionFromPyprojectToml(projectRoot: string): string | null {
 
     // Try project.version first (PEP 621 style)
     if (toml.project?.version && isSemver(toml.project.version)) {
-      return toml.project.version.replace(/^v/, "");
+      return toml.project.version.replace(reVersionPrefix, "");
     }
 
     // Try tool.poetry.version (Poetry style)
     if (toml.tool?.poetry?.version && isSemver(toml.tool.poetry.version)) {
-      return toml.tool.poetry.version.replace(/^v/, "");
+      return toml.tool.poetry.version.replace(reVersionPrefix, "");
     }
   } catch {}
 
@@ -105,7 +152,7 @@ async function removeIgnoredFiles(files: Array<string>): Promise<Array<string>> 
   } catch {
     return files;
   }
-  const ignoredFiles = new Set<string>(result.stdout.split(/\r?\n/));
+  const ignoredFiles = new Set<string>(result.stdout.split(reNewline));
   return files.filter(file => !ignoredFiles.has(file));
 }
 
@@ -150,7 +197,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
   }
 
   if (date) {
-    const re = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
+    const re = reDatePattern;
     newData = newData.replace(re, (_, p1, p2) => `${p1}${date}${p2}`);
   }
 
@@ -211,7 +258,7 @@ function writeResult(result: Result): void {
 }
 
 async function main(): Promise<void> {
-  const commands = new Set(["patch", "minor", "major"]);
+  const commands = new Set(["patch", "minor", "major", "prerelease"]);
   const result = parseArgs({
     strict: false,
     allowPositionals: true,
@@ -228,6 +275,7 @@ async function main(): Promise<void> {
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
       message: {short: "m", type: "string", multiple: true},
+      preid: {short: "i", type: "string"},
     },
   });
   const args = result.values;
@@ -240,7 +288,7 @@ async function main(): Promise<void> {
   }
 
   if (!commands.has(level) || args.help) {
-    console.info(`usage: versions [options] patch|minor|major [files...]
+    console.info(`usage: versions [options] patch|minor|major|prerelease [files...]
 
   Options:
     -a, --all             Add all changed files to the commit
@@ -248,6 +296,7 @@ async function main(): Promise<void> {
     -p, --prefix          Prefix version string with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date            Replace dates in format YYYY-MM-DD with current date
+    -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
@@ -259,6 +308,7 @@ async function main(): Promise<void> {
 
   Examples:
     $ versions patch
+    $ versions prerelease --preid=alpha
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
     end();
   }
@@ -281,9 +331,9 @@ async function main(): Promise<void> {
       try {
         ({stdout} = await spawnEnhanced("git", ["tag", "--list", "--sort=-creatordate"]));
       } catch {}
-      for (const tag of stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
+      for (const tag of stdout.split(reNewline).map(v => v.trim()).filter(Boolean)) {
         if (isSemver(tag)) {
-          baseVersion = tag.replace(/^v/, "");
+          baseVersion = tag.replace(reVersionPrefix, "");
           break;
         }
       }
@@ -314,14 +364,19 @@ async function main(): Promise<void> {
   // convert paths to relative
   files = files.map(file => relative(pwd, file));
 
+  // validate prerelease requirements
+  if (level === "prerelease" && !args.preid) {
+    return end(new Error("prerelease requires --preid option"));
+  }
+
   // set new version
-  const newVersion = incrementSemver(baseVersion, level);
+  const newVersion = incrementSemver(baseVersion, level, typeof args.preid === "string" ? args.preid : undefined);
 
   const replacements: Array<{re: RegExp, replacement: string}> = [];
   if (args.replace?.length) {
     const replace = args.replace.filter(arg => typeof arg === "string");
     for (const replaceStr of replace) {
-      let [_, re, replacement, flags] = (/^s#(.+?)#(.+?)#(.*)$/.exec(replaceStr) || []);
+      let [_, re, replacement, flags] = (reReplaceString.exec(replaceStr) || []);
 
       if (!re || !replacement) {
         end(new Error(`Invalid replace string: ${replaceStr}`));
