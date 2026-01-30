@@ -368,14 +368,10 @@ async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: str
     throw new Error(`Failed to create release: ${response.status} ${response.statusText}\n${errorText}`);
   }
 
-  try {
-    const result = await response.json();
-    if (result.html_url) {
-      console.info(`Created release: ${result.html_url}`);
-    } else {
-      console.info("Created release");
-    }
-  } catch {
+  const result = await response.json();
+  if (result.html_url) {
+    console.info(`Created release: ${result.html_url}`);
+  } else {
     console.info("Created release");
   }
 }
