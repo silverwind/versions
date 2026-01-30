@@ -253,7 +253,7 @@ function ensureEol(str: string): string {
 }
 
 function getGithubToken(): string | null {
-  return process.env.VERSIONS_GITHUB_API_TOKEN ||
+  return process.env.VERSIONS_FORGE_TOKEN ||
          process.env.GITHUB_API_TOKEN ||
          process.env.GITHUB_TOKEN ||
          process.env.GH_TOKEN ||
@@ -262,7 +262,7 @@ function getGithubToken(): string | null {
 }
 
 function getGiteaToken(): string | null {
-  return process.env.VERSIONS_GITEA_API_TOKEN ||
+  return process.env.VERSIONS_FORGE_TOKEN ||
          process.env.GITEA_API_TOKEN ||
          process.env.GITEA_AUTH_TOKEN ||
          process.env.GITEA_TOKEN ||
@@ -607,13 +607,13 @@ async function main(): Promise<void> {
     if (repoInfo.type === "github") {
       const token = getGithubToken();
       if (!token) {
-        throw new Error("GitHub release requested but no token found in environment variables (VERSIONS_GITHUB_API_TOKEN, GITHUB_API_TOKEN, GITHUB_TOKEN, GH_TOKEN, HOMEBREW_GITHUB_API_TOKEN)");
+        throw new Error("GitHub release requested but no token found in environment variables (VERSIONS_FORGE_TOKEN, GITHUB_API_TOKEN, GITHUB_TOKEN, GH_TOKEN, HOMEBREW_GITHUB_API_TOKEN)");
       }
       await createForgeRelease(repoInfo, tagName, releaseBody, token);
     } else if (repoInfo.type === "gitea") {
       const token = getGiteaToken();
       if (!token) {
-        throw new Error("Gitea release requested but no token found in environment variables (VERSIONS_GITEA_API_TOKEN, GITEA_API_TOKEN, GITEA_AUTH_TOKEN, GITEA_TOKEN)");
+        throw new Error("Gitea release requested but no token found in environment variables (VERSIONS_FORGE_TOKEN, GITEA_API_TOKEN, GITEA_AUTH_TOKEN, GITEA_TOKEN)");
       }
       await createForgeRelease(repoInfo, tagName, releaseBody, token);
     }

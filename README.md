@@ -62,14 +62,14 @@ The tool will automatically detect whether you're using GitHub or Gitea based on
 ### API Tokens
 
 For GitHub releases, provide an API token via one of these environment variables (in priority order):
-- `VERSIONS_GITHUB_API_TOKEN`
+- `VERSIONS_FORGE_TOKEN`
 - `GITHUB_API_TOKEN`
 - `GITHUB_TOKEN`
 - `GH_TOKEN`
 - `HOMEBREW_GITHUB_API_TOKEN`
 
 For Gitea releases, provide an API token via one of these environment variables (in priority order):
-- `VERSIONS_GITEA_API_TOKEN`
+- `VERSIONS_FORGE_TOKEN`
 - `GITEA_API_TOKEN`
 - `GITEA_AUTH_TOKEN`
 - `GITEA_TOKEN`
