@@ -304,10 +304,11 @@ async function getRepoInfo(): Promise<RepoInfo | null> {
     }
 
     // Parse Gitea URLs (https://gitea.example.com/owner/repo.git or git@gitea.example.com:owner/repo.git)
+    // Only detect as Gitea if hostname contains "gitea" to avoid false positives with GitLab, Bitbucket, etc.
     const giteaHttpsMatch = /https:\/\/([^/]+)\/([^/]+)\/([^/.]+)/.exec(url);
     const giteaSshMatch = /git@([^:]+):([^/]+)\/([^/.]+)/.exec(url);
 
-    if (giteaHttpsMatch) {
+    if (giteaHttpsMatch?.[1].includes("gitea")) {
       return {
         owner: giteaHttpsMatch[2],
         repo: giteaHttpsMatch[3],
@@ -316,7 +317,7 @@ async function getRepoInfo(): Promise<RepoInfo | null> {
       };
     }
 
-    if (giteaSshMatch) {
+    if (giteaSshMatch?.[1].includes("gitea")) {
       return {
         owner: giteaSshMatch[2],
         repo: giteaSshMatch[3],
@@ -339,7 +340,7 @@ async function createGithubRelease(repoInfo: RepoInfo, tagName: string, body: st
     name: tagName,
     body,
     draft: false,
-    prerelease: tagName.includes("-"),
+    prerelease: rePrereleaseVersion.test(tagName) && tagName.includes("-"),
   };
 
   const response = await fetch(apiUrl, {
@@ -358,8 +359,16 @@ async function createGithubRelease(repoInfo: RepoInfo, tagName: string, body: st
     throw new Error(`Failed to create GitHub release: ${response.status} ${response.statusText}\n${errorText}`);
   }
 
-  const result = await response.json();
-  console.info(`Created GitHub release: ${result.html_url}`);
+  try {
+    const result = await response.json();
+    if (result.html_url) {
+      console.info(`Created GitHub release: ${result.html_url}`);
+    } else {
+      console.info("Created GitHub release");
+    }
+  } catch {
+    console.info("Created GitHub release");
+  }
 }
 
 async function createGiteaRelease(repoInfo: RepoInfo, tagName: string, body: string, token: string): Promise<void> {
@@ -370,7 +379,7 @@ async function createGiteaRelease(repoInfo: RepoInfo, tagName: string, body: str
     name: tagName,
     body,
     draft: false,
-    prerelease: tagName.includes("-"),
+    prerelease: rePrereleaseVersion.test(tagName) && tagName.includes("-"),
   };
 
   const response = await fetch(apiUrl, {
@@ -387,8 +396,16 @@ async function createGiteaRelease(repoInfo: RepoInfo, tagName: string, body: str
     throw new Error(`Failed to create Gitea release: ${response.status} ${response.statusText}\n${errorText}`);
   }
 
-  const result = await response.json();
-  console.info(`Created Gitea release: ${result.html_url}`);
+  try {
+    const result = await response.json();
+    if (result.html_url) {
+      console.info(`Created Gitea release: ${result.html_url}`);
+    } else {
+      console.info("Created Gitea release");
+    }
+  } catch {
+    console.info("Created Gitea release");
+  }
 }
 
 function writeResult(result: Result): void {
@@ -610,8 +627,7 @@ async function main(): Promise<void> {
   if (args.release) {
     const repoInfo = await getRepoInfo();
     if (!repoInfo) {
-      console.warn("Warning: Could not determine repository type from git remote, skipping release creation");
-      return;
+      throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
     }
 
     const releaseBody = changelog || tagName;
