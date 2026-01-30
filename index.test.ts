@@ -32,6 +32,7 @@ async function initGitRepo(tmpDir: string): Promise<void> {
   await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
   await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
   await spawnEnhanced("git", ["config", "--local", "tag.gpgsign", "false"], {cwd: tmpDir});
+  await spawnEnhanced("git", ["config", "--local", "tag.forcesignannotated", "false"], {cwd: tmpDir});
 }
 
 afterAll(async () => {
