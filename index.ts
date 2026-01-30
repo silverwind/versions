@@ -570,13 +570,13 @@ async function main(): Promise<void> {
     if (repoInfo.type === "github") {
       const token = getGithubToken();
       if (!token) {
-        throw new Error("GitHub release requested but no token found in environment (VERSIONS_FORGE_TOKEN, GITHUB_API_TOKEN, GITHUB_TOKEN, GH_TOKEN, HOMEBREW_GITHUB_API_TOKEN)");
+        throw new Error("GitHub release requested but no token found in environment");
       }
       await createForgeRelease(repoInfo, tagName, releaseBody, token);
     } else if (repoInfo.type === "gitea") {
       const token = getGiteaToken();
       if (!token) {
-        throw new Error("Gitea release requested but no token found in environment (VERSIONS_FORGE_TOKEN, GITEA_API_TOKEN, GITEA_AUTH_TOKEN, GITEA_TOKEN)");
+        throw new Error("Gitea release requested but no token found in environment");
       }
       await createForgeRelease(repoInfo, tagName, releaseBody, token);
     }
