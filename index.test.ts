@@ -26,11 +26,22 @@ function incrementSemver(str: string, level: SemverLevel) {
   });
 }
 
+// Create isolated git environment that ignores global and system configs
+function getIsolatedGitEnv(tmpDir: string) {
+  const isolatedHome = join(tmpDir, ".home");
+  return {
+    HOME: isolatedHome,
+    GIT_CONFIG_GLOBAL: join(isolatedHome, ".gitconfig"),
+    GIT_CONFIG_NOSYSTEM: "1",
+  };
+}
+
 async function initGitRepo(tmpDir: string): Promise<void> {
-  await spawnEnhanced("git", ["init"], {cwd: tmpDir});
-  await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir});
-  await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir});
-  await spawnEnhanced("git", ["config", "--local", "commit.gpgsign", "false"], {cwd: tmpDir});
+  const env = getIsolatedGitEnv(tmpDir);
+  await mkdir(env.HOME, {recursive: true});
+  await spawnEnhanced("git", ["init"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await spawnEnhanced("git", ["config", "--local", "user.email", "test@test.com"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir, env: {...process.env, ...env}});
 }
 
 afterAll(async () => {
@@ -210,8 +221,9 @@ test("fallback behavior with git repo but no tags", async () => {
     await writeFile(join(tmpDir, "testfile.txt"), "version 5.1.0");
 
     await initGitRepo(tmpDir);
-    await spawnEnhanced("git", ["add", "."], {cwd: tmpDir});
-    await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
+    const env = getIsolatedGitEnv(tmpDir);
+    await spawnEnhanced("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+    await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
 
     await spawn("node", [
       join(process.cwd(), "dist/index.js"),
@@ -511,10 +523,11 @@ test("release", async () => {
     await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
     await initGitRepo(tmpDir);
-    await spawnEnhanced("git", ["add", "."], {cwd: tmpDir});
-    await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
-    await spawnEnhanced("git", ["remote", "add", "origin", "https://github.com/test-copilot-versions/test-repo.git"], {cwd: tmpDir});
-    await spawnEnhanced("git", ["tag", "1.0.0"], {cwd: tmpDir});
+    const env = getIsolatedGitEnv(tmpDir);
+    await spawnEnhanced("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+    await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
+    await spawnEnhanced("git", ["remote", "add", "origin", "https://github.com/test-copilot-versions/test-repo.git"], {cwd: tmpDir, env: {...process.env, ...env}});
+    await spawnEnhanced("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
 
     // Test with a fake token - should fail with 401/403 but shows the release flow works
     try {
@@ -525,7 +538,7 @@ test("release", async () => {
         "testfile.txt"
       ], {
         cwd: tmpDir,
-        env: {...process.env, GITHUB_TOKEN: "fake-test-token-12345"},
+        env: {...process.env, GITHUB_TOKEN: "fake-test-token-12345", ...env},
       });
       // If it somehow succeeds, that's fine (unlikely with fake token)
       expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
