@@ -550,6 +550,7 @@ async function main(): Promise<void> {
 
   // create tag
   const tagMsg = joinStrings([...msgs, changelog], "\n\n");
+  // adding explicit -a here seems to make git no longer sign the tag
   writeResult(await spawnEnhanced("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
 
   // create release if requested
