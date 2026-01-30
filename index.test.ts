@@ -502,7 +502,7 @@ test("patch with preid on prerelease version strips old prerelease", async () =>
   }
 });
 
-test("release with mocked github api", async () => {
+test("release", async () => {
   const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
   await mkdir(tmpDir, {recursive: true});
 
