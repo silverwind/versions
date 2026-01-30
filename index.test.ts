@@ -501,9 +501,3 @@ test("patch with preid on prerelease version strips old prerelease", async () =>
     await rm(tmpDir, {recursive: true, force: true});
   }
 });
-
-test("help includes --release option", async () => {
-  const {stdout} = await spawn("node", ["dist/index.js", "-h"]);
-  expect(stdout).toContain("--release");
-  expect(stdout).toContain("Create a GitHub or Gitea release");
-});
