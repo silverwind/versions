@@ -26,6 +26,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
+    --release             Create a GitHub or Gitea release with the changelog as body
     -v, --version         Print the version
     -h, --help            Print this help
 
@@ -50,6 +51,33 @@ To automatically sign commits and tags created by `versions` with GPG add this t
   forceSignAnnotated = true
 [push]
   gpgSign = if-asked
+```
+
+## Creating releases
+
+When using the `--release` option, `versions` will automatically create a GitHub or Gitea release after creating the tag. The release body will contain the same changelog as the commit message.
+
+The tool will automatically detect whether you're using GitHub or Gitea based on your git remote URL.
+
+### API Tokens
+
+For GitHub releases, provide an API token via one of these environment variables (in priority order):
+- `VERSIONS_GITHUB_API_TOKEN`
+- `GITHUB_API_TOKEN`
+- `GITHUB_TOKEN`
+- `GH_TOKEN`
+- `HOMEBREW_GITHUB_API_TOKEN`
+
+For Gitea releases, provide an API token via one of these environment variables (in priority order):
+- `VERSIONS_GITEA_API_TOKEN`
+- `GITEA_API_TOKEN`
+- `GITEA_AUTH_TOKEN`
+- `GITEA_TOKEN`
+
+Example:
+```bash
+export GITHUB_TOKEN=ghp_your_token_here
+versions --release patch
 ```
 
 ## CI environments
