@@ -308,7 +308,7 @@ async function getRepoInfo(): Promise<RepoInfo | null> {
 
 async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, token: string): Promise<void> {
   const apiUrl = repoInfo.type === "github" ?
-    `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/releases` :
+    `https://api.${repoInfo.host}/repos/${repoInfo.owner}/${repoInfo.repo}/releases` :
     `https://${repoInfo.host}/api/v1/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
 
   const releaseData = {
@@ -321,15 +321,8 @@ async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: str
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "Authorization": repoInfo.type === "github" ? `Bearer ${token}` : `token ${token}`,
   };
-
-  if (repoInfo.type === "github") {
-    headers["Accept"] = "application/vnd.github+json";
-    headers["Authorization"] = `Bearer ${token}`;
-    headers["X-GitHub-Api-Version"] = "2022-11-28";
-  } else {
-    headers["Authorization"] = `token ${token}`;
-  }
 
   const response = await fetch(apiUrl, {
     method: "POST",
@@ -577,13 +570,13 @@ async function main(): Promise<void> {
     if (repoInfo.type === "github") {
       const token = getGithubToken();
       if (!token) {
-        throw new Error("GitHub release requested but no token found in environment variables (VERSIONS_FORGE_TOKEN, GITHUB_API_TOKEN, GITHUB_TOKEN, GH_TOKEN, HOMEBREW_GITHUB_API_TOKEN)");
+        throw new Error("GitHub release requested but no token found in environment (VERSIONS_FORGE_TOKEN, GITHUB_API_TOKEN, GITHUB_TOKEN, GH_TOKEN, HOMEBREW_GITHUB_API_TOKEN)");
       }
       await createForgeRelease(repoInfo, tagName, releaseBody, token);
     } else if (repoInfo.type === "gitea") {
       const token = getGiteaToken();
       if (!token) {
-        throw new Error("Gitea release requested but no token found in environment variables (VERSIONS_FORGE_TOKEN, GITEA_API_TOKEN, GITEA_AUTH_TOKEN, GITEA_TOKEN)");
+        throw new Error("Gitea release requested but no token found in environment (VERSIONS_FORGE_TOKEN, GITEA_API_TOKEN, GITEA_AUTH_TOKEN, GITEA_TOKEN)");
       }
       await createForgeRelease(repoInfo, tagName, releaseBody, token);
     }
