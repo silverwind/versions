@@ -508,18 +508,14 @@ test("release with mocked github api", async () => {
   await mkdir(tmpDir, {recursive: true});
 
   let receivedBody: any;
-  let receivedHeaders: any;
-  let requestPath = "";
 
   const server = createServer((req, res) => {
-    requestPath = req.url || "";
     let body = "";
     req.on("data", chunk => {
       body += chunk;
     });
     req.on("end", () => {
       receivedBody = JSON.parse(body);
-      receivedHeaders = req.headers;
       res.writeHead(201, {"Content-Type": "application/json"});
       res.end(JSON.stringify({
         html_url: `http://gitea.local/test/test/releases/tag/${receivedBody.tag_name}`,
@@ -536,7 +532,6 @@ test("release with mocked github api", async () => {
   if (!address || typeof address === "string") {
     throw new Error("Failed to get server address");
   }
-  const port = address.port;
 
   try {
     await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
