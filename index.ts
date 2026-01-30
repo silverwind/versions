@@ -281,48 +281,22 @@ async function getRepoInfo(): Promise<RepoInfo | null> {
     const {stdout} = await spawnEnhanced("git", ["remote", "get-url", "origin"]);
     const url = stdout.trim();
 
-    // Parse GitHub URLs (https://github.com/owner/repo.git or git@github.com:owner/repo.git)
-    const githubHttpsMatch = /https:\/\/github\.com\/([^/]+)\/([^/.]+)/.exec(url);
-    const githubSshMatch = /git@github\.com:([^/]+)\/([^/.]+)/.exec(url);
+    // Parse git URLs: https://host/owner/repo.git or git@host:owner/repo.git
+    const httpsMatch = /https:\/\/([^/]+)\/([^/]+)\/([^/.]+)/.exec(url);
+    const sshMatch = /git@([^:]+):([^/]+)\/([^/.]+)/.exec(url);
 
-    if (githubHttpsMatch) {
+    const match = httpsMatch || sshMatch;
+    if (match) {
+      const host = match[1];
+      const owner = match[2];
+      const repo = match[3];
+      const isGithub = host === "github.com";
+
       return {
-        owner: githubHttpsMatch[1],
-        repo: githubHttpsMatch[2],
-        host: "github.com",
-        type: "github",
-      };
-    }
-
-    if (githubSshMatch) {
-      return {
-        owner: githubSshMatch[1],
-        repo: githubSshMatch[2],
-        host: "github.com",
-        type: "github",
-      };
-    }
-
-    // Parse other git URLs as Gitea (https://host.com/owner/repo.git or git@host.com:owner/repo.git)
-    // If the host doesn't support Gitea API, the API error will inform the user
-    const giteaHttpsMatch = /https:\/\/([^/]+)\/([^/]+)\/([^/.]+)/.exec(url);
-    const giteaSshMatch = /git@([^:]+):([^/]+)\/([^/.]+)/.exec(url);
-
-    if (giteaHttpsMatch) {
-      return {
-        owner: giteaHttpsMatch[2],
-        repo: giteaHttpsMatch[3],
-        host: giteaHttpsMatch[1],
-        type: "gitea",
-      };
-    }
-
-    if (giteaSshMatch) {
-      return {
-        owner: giteaSshMatch[2],
-        repo: giteaSshMatch[3],
-        host: giteaSshMatch[1],
-        type: "gitea",
+        owner,
+        repo,
+        host,
+        type: isGithub ? "github" : "gitea",
       };
     }
 
