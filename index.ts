@@ -296,7 +296,7 @@ async function main(): Promise<void> {
     -p, --prefix          Prefix version string with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date            Replace dates in format YYYY-MM-DD with current date
-    -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc. Can be used with any command to create a prerelease version
+    -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
@@ -308,7 +308,6 @@ async function main(): Promise<void> {
 
   Examples:
     $ versions patch
-    $ versions patch --preid=alpha
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
     $ versions prerelease --preid=alpha package.json`);
     end();
