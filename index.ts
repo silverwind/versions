@@ -287,16 +287,11 @@ async function getRepoInfo(): Promise<RepoInfo | null> {
 
     const match = httpsMatch || sshMatch;
     if (match) {
-      const host = match[1];
-      const owner = match[2];
-      const repo = match[3];
-      const isGithub = host === "github.com";
-
       return {
-        owner,
-        repo,
-        host,
-        type: isGithub ? "github" : "gitea",
+        owner: match[2],
+        repo: match[3],
+        host: match[1],
+        type: match[1] === "github.com" ? "github" : "gitea",
       };
     }
 
