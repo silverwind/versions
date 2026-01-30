@@ -501,3 +501,43 @@ test("patch with preid on prerelease version strips old prerelease", async () =>
     await rm(tmpDir, {recursive: true, force: true});
   }
 });
+
+test("release", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+
+    await initGitRepo(tmpDir);
+    await spawnEnhanced("git", ["add", "."], {cwd: tmpDir});
+    await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["remote", "add", "origin", "https://github.com/test-copilot-versions/test-repo.git"], {cwd: tmpDir});
+    await spawnEnhanced("git", ["tag", "1.0.0"], {cwd: tmpDir});
+
+    // Test with a fake token - should fail with 401/403 but shows the release flow works
+    try {
+      await spawn("node", [
+        join(process.cwd(), "dist/index.js"),
+        "--release",
+        "patch",
+        "testfile.txt"
+      ], {
+        cwd: tmpDir,
+        env: {...process.env, GITHUB_TOKEN: "fake-test-token-12345"},
+      });
+      // If it somehow succeeds, that's fine (unlikely with fake token)
+      expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+    } catch (err: any) {
+      // Expected to fail with authentication error
+      expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+      // Should contain error about failed release creation
+      expect(err.output).toContain("Failed to create release");
+      // Should show either 401 Unauthorized or 403 Forbidden
+      expect(err.output).toMatch(/401|403/);
+    }
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});

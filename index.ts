@@ -252,6 +252,92 @@ function ensureEol(str: string): string {
   return str.endsWith(EOL) ? str : `${str}${EOL}`;
 }
 
+function getGithubToken(): string | null {
+  return process.env.VERSIONS_FORGE_TOKEN ||
+         process.env.GITHUB_API_TOKEN ||
+         process.env.GITHUB_TOKEN ||
+         process.env.GH_TOKEN ||
+         process.env.HOMEBREW_GITHUB_API_TOKEN ||
+         null;
+}
+
+function getGiteaToken(): string | null {
+  return process.env.VERSIONS_FORGE_TOKEN ||
+         process.env.GITEA_API_TOKEN ||
+         process.env.GITEA_AUTH_TOKEN ||
+         process.env.GITEA_TOKEN ||
+         null;
+}
+
+type RepoInfo = {
+  owner: string;
+  repo: string;
+  host: string;
+  type: "github" | "gitea";
+};
+
+async function getRepoInfo(): Promise<RepoInfo | null> {
+  try {
+    const {stdout} = await spawnEnhanced("git", ["remote", "get-url", "origin"]);
+    const url = stdout.trim();
+
+    // Parse git URLs: https://host/owner/repo.git or git@host:owner/repo.git
+    const httpsMatch = /https:\/\/([^/]+)\/([^/]+)\/([^/.]+)/.exec(url);
+    const sshMatch = /git@([^:]+):([^/]+)\/([^/.]+)/.exec(url);
+
+    const match = httpsMatch || sshMatch;
+    if (match) {
+      return {
+        owner: match[2],
+        repo: match[3],
+        host: match[1],
+        type: match[1] === "github.com" ? "github" : "gitea",
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, token: string): Promise<void> {
+  const apiUrl = repoInfo.type === "github" ?
+    `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/releases` :
+    `https://${repoInfo.host}/api/v1/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
+
+  const releaseData = {
+    tag_name: tagName,
+    name: tagName,
+    body,
+    draft: false,
+    prerelease: rePrereleaseVersion.test(tagName) && tagName.includes("-"),
+  };
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Authorization": repoInfo.type === "github" ? `Bearer ${token}` : `token ${token}`,
+  };
+
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(releaseData),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to create release: ${response.status} ${response.statusText}\n${errorText}`);
+  }
+
+  const result = await response.json();
+  if (result.html_url) {
+    console.info(`Created release: ${result.html_url}`);
+  } else {
+    console.info("Created release");
+  }
+}
+
 function writeResult(result: Result): void {
   if (result.stdout) stdout.write(ensureEol(result.stdout));
   if (result.stderr) stdout.write(ensureEol(result.stderr));
@@ -271,6 +357,7 @@ async function main(): Promise<void> {
       prefix: {short: "p", type: "boolean"},
       version: {short: "v", type: "boolean"},
       date: {short: "d", type: "boolean"},
+      release: {short: "R", type: "boolean"},
       base: {short: "b", type: "string"},
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
@@ -301,6 +388,7 @@ async function main(): Promise<void> {
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
+    -R, --release         Create a GitHub or Gitea release with the changelog as body
     -v, --version         Print the version
     -h, --help            Print this help
 
@@ -464,6 +552,30 @@ async function main(): Promise<void> {
   const tagMsg = joinStrings([...msgs, changelog], "\n\n");
   // adding explicit -a here seems to make git no longer sign the tag
   writeResult(await spawnEnhanced("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
+
+  // create release if requested
+  if (args.release) {
+    const repoInfo = await getRepoInfo();
+    if (!repoInfo) {
+      throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
+    }
+
+    const releaseBody = changelog || tagName;
+
+    if (repoInfo.type === "github") {
+      const token = getGithubToken();
+      if (!token) {
+        throw new Error("GitHub release requested but no token found in environment");
+      }
+      await createForgeRelease(repoInfo, tagName, releaseBody, token);
+    } else if (repoInfo.type === "gitea") {
+      const token = getGiteaToken();
+      if (!token) {
+        throw new Error("Gitea release requested but no token found in environment");
+      }
+      await createForgeRelease(repoInfo, tagName, releaseBody, token);
+    }
+  }
 }
 
 main().then(end).catch(end);
