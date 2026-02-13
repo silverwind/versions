@@ -503,23 +503,23 @@ async function main(): Promise<void> {
   const msgs = (args.message || []).filter(msg => typeof msg === "string");
   const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
 
-  // check if base tag exists
+  // start background tasks early
+  const repoInfoPromise = args.release ? getRepoInfo() : null;
+  const filesToAddPromise = (!args.all && files.length) ? removeIgnoredFiles(files) : null;
+
+  // determine changelog range (parallel git queries)
   let range = "";
-  try {
-    await spawnEnhanced("git", ["show", tagName]);
-    range = `${tagName}..HEAD`;
-  } catch {}
-
-  // check if we have any previous tag
-  if (!range) {
-    try {
-      const {stdout} = await spawnEnhanced("git", ["describe", "--abbrev=0"]);
-      range = `${stdout}..HEAD`;
-    } catch {}
+  {
+    const [showResult, describeResult] = await Promise.allSettled([
+      spawnEnhanced("git", ["show", tagName]),
+      spawnEnhanced("git", ["describe", "--abbrev=0"]),
+    ]);
+    if (showResult.status === "fulfilled") {
+      range = `${tagName}..HEAD`;
+    } else if (describeResult.status === "fulfilled") {
+      range = `${describeResult.value.stdout}..HEAD`;
+    }
   }
-
-  // use the whole log (for cases where it's the first release)
-  if (!range) range = "";
 
   let changelog: string | undefined;
   try {
@@ -539,7 +539,7 @@ async function main(): Promise<void> {
   if (args.all) {
     writeResult(await spawnEnhanced("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
   } else {
-    const filesToAdd = await removeIgnoredFiles(files);
+    const filesToAdd = filesToAddPromise ? await filesToAddPromise : [];
     if (filesToAdd.length) {
       writeResult(await spawnEnhanced("git", ["add", ...filesToAdd]));
       writeResult(await spawnEnhanced("git", ["commit", "-F", "-"], {stdin: {string: commitMsg}}));
@@ -555,7 +555,7 @@ async function main(): Promise<void> {
 
   // create release if requested
   if (args.release) {
-    const repoInfo = await getRepoInfo();
+    const repoInfo = await repoInfoPromise!;
     if (!repoInfo) {
       throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
     }
