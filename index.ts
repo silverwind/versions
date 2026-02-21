@@ -170,8 +170,8 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
 
   let newData: string;
   if (fileName === "package.json") {
-    const re = new RegExp(`("version":[^]*?")${esc(baseVersion)}(")`);
-    newData = oldData.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
+    newData = oldData.replace(/("version":[^]*?")\d+\.\d+\.\d+[^"]*(")/,
+      (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (fileName === "package-lock.json") {
     // special case for package-lock.json which contains a lot of version
     // strings which make regexp replacement risky.
@@ -180,8 +180,8 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
     if (lockFile?.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
-    const re = new RegExp(`(^version ?= ?["'])${esc(baseVersion)}(["'].*)`, "gm");
-    newData = oldData.replace(re, (_, p1, p2) => `${p1}${newVersion}${p2}`);
+    newData = oldData.replace(/(^version ?= ?["'])\d+\.\d+\.\d+[^"']*(["'].*)/gm,
+      (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (fileName === "uv.lock") {
     // uv.lock is a tricky case because it lists all packages and the current package. we parse pyproject.toml
     // to obtain the current package name and then search for that name in uv.lock and replace the version
@@ -207,11 +207,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
     }
   }
 
-  if (oldData === newData) {
-    throw new Error(`No replacement made in ${file} for base version ${baseVersion}`);
-  } else {
-    return [file, newData];
-  }
+  return [file, newData];
 }
 
 function write(file: string, content: string): void {

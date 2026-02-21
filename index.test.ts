@@ -514,6 +514,59 @@ test("patch with preid on prerelease version strips old prerelease", async () =>
   }
 });
 
+test("package.json with non-matching base version", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    // package.json has 1.0.0, but --base says 8.16.3
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+
+    await initGitRepo(tmpDir);
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "--base", "8.16.3",
+      "patch",
+      "package.json"
+    ], {cwd: tmpDir});
+
+    const result = JSON.parse(await readFile(join(tmpDir, "package.json"), "utf8"));
+    expect(result.version).toEqual("8.16.4");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
+test("pyproject.toml with non-matching base version", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    // pyproject.toml has 2.0.0, but --base says 5.3.1
+    await writeFile(join(tmpDir, "pyproject.toml"), `[project]
+name = "test-project"
+version = "2.0.0"
+`);
+
+    await initGitRepo(tmpDir);
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "--base", "5.3.1",
+      "minor",
+      "pyproject.toml"
+    ], {cwd: tmpDir});
+
+    const result = parse(await readFile(join(tmpDir, "pyproject.toml"), "utf8")) as Record<string, any>;
+    expect(result.project.version).toEqual("5.4.0");
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
 test("release", async () => {
   const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
   await mkdir(tmpDir, {recursive: true});
