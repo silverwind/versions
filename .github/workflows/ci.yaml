@@ -6,8 +6,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [22, 24]
+        js: [[node, 22], [node, 24], [bun, latest]]
         os: [ubuntu-latest, macos-latest, windows-latest]
+        exclude: # https://github.com/nodejs/node/issues/56645
+          - js: [node, 24]
+            os: windows-latest
     runs-on: ${{matrix.os}}
     steps:
       - uses: actions/checkout@v6
@@ -15,7 +18,13 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           cache: pnpm
-          node-version: ${{matrix.node}}
-      - run: make deps
-      - run: make lint
-      - run: make test
+          node-version: ${{matrix.js[1]}}
+        if: ${{matrix.js[0] == 'node'}}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{matrix.js[1]}}
+        if: ${{matrix.js[0] == 'bun'}}
+      - run: make deps lint test
+        if: ${{matrix.js[0] == 'node'}}
+      - run: bun install && bunx tsdown && bun test --timeout 180000
+        if: ${{matrix.js[0] == 'bun'}}
