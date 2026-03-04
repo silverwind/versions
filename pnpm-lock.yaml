@@ -16,10 +16,10 @@ importers:
         version: 7.0.0-dev.20260304.1
       eslint:
         specifier: 9.39.3
-        version: 9.39.3
+        version: 9.39.3(jiti@2.6.1)
       eslint-config-silverwind:
-        specifier: 121.1.8
-        version: 121.1.8(eslint@9.39.3)(typescript@5.9.3)
+        specifier: 121.1.9
+        version: 121.1.9(eslint@9.39.3(jiti@2.6.1))(typescript@5.9.3)
       jest-extended:
         specifier: 7.0.0
         version: 7.0.0(typescript@5.9.3)
@@ -49,10 +49,10 @@ importers:
         version: 1.0.3(prettier@3.8.1)
       vitest:
         specifier: 4.0.18
-        version: 4.0.18(@types/node@25.3.3)
+        version: 4.0.18(@types/node@25.3.3)(jiti@2.6.1)
       vitest-config-silverwind:
         specifier: 10.6.3
-        version: 10.6.3(typescript@5.9.3)(vite@7.3.1(@types/node@25.3.3))(vitest@4.0.18(@types/node@25.3.3))
+        version: 10.6.3(typescript@5.9.3)(vite@7.3.1(@types/node@25.3.3)(jiti@2.6.1))(vitest@4.0.18(@types/node@25.3.3)(jiti@2.6.1))
 
 packages:
 
@@ -1004,8 +1004,8 @@ packages:
     resolution: {integrity: sha512-TtpcNJ3XAzx3Gq8sWRzJaVajRs0uVxA2YAkdb1jm2YkPz4G6egUFAyA3n5vtEIZefPk5Wa4UXbKuS5fKkJWdgA==}
     engines: {node: '>=10'}
 
-  eslint-config-silverwind@121.1.8:
-    resolution: {integrity: sha512-nYopq8NEeUoImALxnbXE5M95T8x12anm2rzo0DbCTxnaBFK8HO2V3O7Z1PBWUgLn5QKf11ElNIQXU9CdKMsk+w==}
+  eslint-config-silverwind@121.1.9:
+    resolution: {integrity: sha512-1KiU/3lKhWx5wChFmdJUgpSXgjHOgdUuI1XXYaoA5IuQJFHShFSCyl9qWC2ujqSln9q3VTZQJdJeZCjVlfXSzw==}
     peerDependencies:
       eslint: '*'
 
@@ -1196,6 +1196,10 @@ packages:
     peerDependenciesMeta:
       jest:
         optional: true
+
+  jiti@2.6.1:
+    resolution: {integrity: sha512-ekilCSN1jwRvIbgeg/57YFh8qQDNbwDb9xT/qu2DAHbFFZUicIl4ygVaAvzveMhMVr3LnpSKTNnwt8PoOfmKhQ==}
+    hasBin: true
 
   js-yaml@4.1.1:
     resolution: {integrity: sha512-qQKT4zQxXl8lLwBtHMWwaTcGfFOZviOJet3Oy/xmGk2gZH677CJM9EvtfdSkgWcATZhj/55JZ0rmy3myCT5lsA==}
@@ -1731,9 +1735,9 @@ snapshots:
   '@esbuild/win32-x64@0.27.3':
     optional: true
 
-  '@eslint-community/eslint-utils@4.9.1(eslint@9.39.3)':
+  '@eslint-community/eslint-utils@4.9.1(eslint@9.39.3(jiti@2.6.1))':
     dependencies:
-      eslint: 9.39.3
+      eslint: 9.39.3(jiti@2.6.1)
       eslint-visitor-keys: 3.4.3
 
   '@eslint-community/regexpp@4.12.2': {}
@@ -2019,14 +2023,14 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
-  '@typescript-eslint/parser@8.56.1(eslint@9.39.3)(typescript@5.9.3)':
+  '@typescript-eslint/parser@8.56.1(eslint@9.39.3(jiti@2.6.1))(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/scope-manager': 8.56.1
       '@typescript-eslint/types': 8.56.1
       '@typescript-eslint/typescript-estree': 8.56.1(typescript@5.9.3)
       '@typescript-eslint/visitor-keys': 8.56.1
       debug: 4.4.3
-      eslint: 9.39.3
+      eslint: 9.39.3(jiti@2.6.1)
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color
@@ -2170,13 +2174,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.18(vite@7.3.1(@types/node@25.3.3))':
+  '@vitest/mocker@4.0.18(vite@7.3.1(@types/node@25.3.3)(jiti@2.6.1))':
     dependencies:
       '@vitest/spy': 4.0.18
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.1(@types/node@25.3.3)
+      vite: 7.3.1(@types/node@25.3.3)(jiti@2.6.1)
 
   '@vitest/pretty-format@4.0.18':
     dependencies:
@@ -2318,12 +2322,13 @@ snapshots:
 
   escape-string-regexp@4.0.0: {}
 
-  eslint-config-silverwind@121.1.8(eslint@9.39.3)(typescript@5.9.3):
+  eslint-config-silverwind@121.1.9(eslint@9.39.3(jiti@2.6.1))(typescript@5.9.3):
     dependencies:
-      '@typescript-eslint/parser': 8.56.1(eslint@9.39.3)(typescript@5.9.3)
-      eslint: 9.39.3
-      eslint-import-resolver-typescript: 4.4.4(eslint-plugin-import-x@4.16.1(eslint@9.39.3))(eslint@9.39.3)
-      eslint-plugin-import-x: 4.16.1(eslint@9.39.3)
+      '@typescript-eslint/parser': 8.56.1(eslint@9.39.3(jiti@2.6.1))(typescript@5.9.3)
+      eslint: 9.39.3(jiti@2.6.1)
+      eslint-import-resolver-typescript: 4.4.4(eslint-plugin-import-x@4.16.1(eslint@9.39.3(jiti@2.6.1)))(eslint@9.39.3(jiti@2.6.1))
+      eslint-plugin-import-x: 4.16.1(eslint@9.39.3(jiti@2.6.1))
+      jiti: 2.6.1
     transitivePeerDependencies:
       - '@typescript-eslint/utils'
       - eslint-import-resolver-node
@@ -2338,10 +2343,10 @@ snapshots:
     optionalDependencies:
       unrs-resolver: 1.11.1
 
-  eslint-import-resolver-typescript@4.4.4(eslint-plugin-import-x@4.16.1(eslint@9.39.3))(eslint@9.39.3):
+  eslint-import-resolver-typescript@4.4.4(eslint-plugin-import-x@4.16.1(eslint@9.39.3(jiti@2.6.1)))(eslint@9.39.3(jiti@2.6.1)):
     dependencies:
       debug: 4.4.3
-      eslint: 9.39.3
+      eslint: 9.39.3(jiti@2.6.1)
       eslint-import-context: 0.1.9(unrs-resolver@1.11.1)
       get-tsconfig: 4.13.6
       is-bun-module: 2.0.0
@@ -2349,16 +2354,16 @@ snapshots:
       tinyglobby: 0.2.15
       unrs-resolver: 1.11.1
     optionalDependencies:
-      eslint-plugin-import-x: 4.16.1(eslint@9.39.3)
+      eslint-plugin-import-x: 4.16.1(eslint@9.39.3(jiti@2.6.1))
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import-x@4.16.1(eslint@9.39.3):
+  eslint-plugin-import-x@4.16.1(eslint@9.39.3(jiti@2.6.1)):
     dependencies:
       '@typescript-eslint/types': 8.56.1
       comment-parser: 1.4.5
       debug: 4.4.3
-      eslint: 9.39.3
+      eslint: 9.39.3(jiti@2.6.1)
       eslint-import-context: 0.1.9(unrs-resolver@1.11.1)
       is-glob: 4.0.3
       minimatch: 10.2.4
@@ -2379,9 +2384,9 @@ snapshots:
 
   eslint-visitor-keys@5.0.1: {}
 
-  eslint@9.39.3:
+  eslint@9.39.3(jiti@2.6.1):
     dependencies:
-      '@eslint-community/eslint-utils': 4.9.1(eslint@9.39.3)
+      '@eslint-community/eslint-utils': 4.9.1(eslint@9.39.3(jiti@2.6.1))
       '@eslint-community/regexpp': 4.12.2
       '@eslint/config-array': 0.21.1
       '@eslint/config-helpers': 0.4.2
@@ -2415,6 +2420,8 @@ snapshots:
       minimatch: 3.1.5
       natural-compare: 1.4.0
       optionator: 0.9.4
+    optionalDependencies:
+      jiti: 2.6.1
     transitivePeerDependencies:
       - supports-color
 
@@ -2519,6 +2526,8 @@ snapshots:
     dependencies:
       jest-diff: 30.2.0
       typescript: 5.9.3
+
+  jiti@2.6.1: {}
 
   js-yaml@4.1.1:
     dependencies:
@@ -2845,7 +2854,7 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  vite@7.3.1(@types/node@25.3.3):
+  vite@7.3.1(@types/node@25.3.3)(jiti@2.6.1):
     dependencies:
       esbuild: 0.27.3
       fdir: 6.5.0(picomatch@4.0.3)
@@ -2856,20 +2865,21 @@ snapshots:
     optionalDependencies:
       '@types/node': 25.3.3
       fsevents: 2.3.3
+      jiti: 2.6.1
 
-  vitest-config-silverwind@10.6.3(typescript@5.9.3)(vite@7.3.1(@types/node@25.3.3))(vitest@4.0.18(@types/node@25.3.3)):
+  vitest-config-silverwind@10.6.3(typescript@5.9.3)(vite@7.3.1(@types/node@25.3.3)(jiti@2.6.1))(vitest@4.0.18(@types/node@25.3.3)(jiti@2.6.1)):
     dependencies:
       jest-extended: 7.0.0(typescript@5.9.3)
-      vite: 7.3.1(@types/node@25.3.3)
-      vitest: 4.0.18(@types/node@25.3.3)
+      vite: 7.3.1(@types/node@25.3.3)(jiti@2.6.1)
+      vitest: 4.0.18(@types/node@25.3.3)(jiti@2.6.1)
     transitivePeerDependencies:
       - jest
       - typescript
 
-  vitest@4.0.18(@types/node@25.3.3):
+  vitest@4.0.18(@types/node@25.3.3)(jiti@2.6.1):
     dependencies:
       '@vitest/expect': 4.0.18
-      '@vitest/mocker': 4.0.18(vite@7.3.1(@types/node@25.3.3))
+      '@vitest/mocker': 4.0.18(vite@7.3.1(@types/node@25.3.3)(jiti@2.6.1))
       '@vitest/pretty-format': 4.0.18
       '@vitest/runner': 4.0.18
       '@vitest/snapshot': 4.0.18
@@ -2886,7 +2896,7 @@ snapshots:
       tinyexec: 1.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vite: 7.3.1(@types/node@25.3.3)
+      vite: 7.3.1(@types/node@25.3.3)(jiti@2.6.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.3.3
