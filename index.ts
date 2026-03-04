@@ -412,13 +412,24 @@ async function main(): Promise<void> {
   if (!args.base) {
     let stdout: string = "";
     if (!args.gitless) {
+      // Try git describe first (O(depth) vs O(n·log n) for full tag list)
       try {
-        ({stdout} = await spawnEnhanced("git", ["tag", "--list", "--sort=-creatordate"]));
-      } catch {}
-      for (const tag of stdout.split(reNewline).map(v => v.trim()).filter(Boolean)) {
+        const result = await spawnEnhanced("git", ["describe", "--tags", "--abbrev=0"]);
+        const tag = result.stdout.trim();
         if (isSemver(tag)) {
           baseVersion = tag.replace(reVersionPrefix, "");
-          break;
+        }
+      } catch {}
+      // Fall back to full tag list if describe didn't yield a semver tag
+      if (!baseVersion) {
+        try {
+          ({stdout} = await spawnEnhanced("git", ["tag", "--list", "--sort=-creatordate"]));
+        } catch {}
+        for (const tag of stdout.split(reNewline).map(v => v.trim()).filter(Boolean)) {
+          if (isSemver(tag)) {
+            baseVersion = tag.replace(reVersionPrefix, "");
+            break;
+          }
         }
       }
     }
@@ -471,6 +482,10 @@ async function main(): Promise<void> {
     }
   }
 
+  // start background tasks early (before file processing and custom command)
+  const repoInfoPromise = (!args.gitless && args.release) ? getRepoInfo() : null;
+  const filesToAddPromise = (!args.gitless && !args.all && files.length) ? removeIgnoredFiles(files) : null;
+
   if (files.length) {
     // verify files exist
     for (const file of files) {
@@ -498,10 +513,6 @@ async function main(): Promise<void> {
 
   const msgs = (args.message || []).filter(msg => typeof msg === "string");
   const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
-
-  // start background tasks early
-  const repoInfoPromise = args.release ? getRepoInfo() : null;
-  const filesToAddPromise = (!args.all && files.length) ? removeIgnoredFiles(files) : null;
 
   // determine changelog range (parallel git queries)
   let range = "";
@@ -537,8 +548,7 @@ async function main(): Promise<void> {
   } else {
     const filesToAdd = filesToAddPromise ? await filesToAddPromise : [];
     if (filesToAdd.length) {
-      writeResult(await spawnEnhanced("git", ["add", ...filesToAdd]));
-      writeResult(await spawnEnhanced("git", ["commit", "-F", "-"], {stdin: {string: commitMsg}}));
+      writeResult(await spawnEnhanced("git", ["commit", "-i", "-F", "-", "--", ...filesToAdd], {stdin: {string: commitMsg}}));
     } else {
       writeResult(await spawnEnhanced("git", ["commit", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
     }
