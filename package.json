@@ -19,7 +19,7 @@
     "@types/node": "25.3.5",
     "@typescript/native-preview": "7.0.0-dev.20260306.1",
     "eslint": "9.39.3",
-    "eslint-config-silverwind": "122.0.2",
+    "eslint-config-silverwind": "122.0.4",
     "jest-extended": "7.0.0",
     "nano-spawn": "2.0.0",
     "smol-toml": "1.6.0",
