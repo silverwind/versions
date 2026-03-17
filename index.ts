@@ -25,7 +25,7 @@ const rePrereleaseVersion = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0
 const rePrereleaseIdNum = /^([a-zA-Z0-9-]+)\.(\d+)$/;
 const reNewline = /\r?\n/;
 const reDatePattern = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
-const reReplaceString = /^s#(.+?)#(.+?)#(.*)$/;
+const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
 
 function esc(str: string): string {
   return str.replace(reEscapeChars, "\\$&");
@@ -170,7 +170,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
 
   let newData: string;
   if (fileName === "package.json") {
-    newData = oldData.replace(/("version":[^]*?")\d+\.\d+\.\d+[^"]*(")/,
+    newData = oldData.replace(/("version":[^]*?")\d+\.\d+\.\d+(?:[^"\d][^"]*)?(")/,
       (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (fileName === "package-lock.json") {
     // special case for package-lock.json which contains a lot of version
@@ -180,7 +180,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
     if (lockFile?.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
-    newData = oldData.replace(/(^version ?= ?["'])\d+\.\d+\.\d+[^"']*(["'].*)/gm,
+    newData = oldData.replace(/(^version ?= ?["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)/gm,
       (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (fileName === "uv.lock") {
     // uv.lock is a tricky case because it lists all packages and the current package. we parse pyproject.toml
