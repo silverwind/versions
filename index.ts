@@ -165,8 +165,15 @@ type GetFileChangesOpts = {
 };
 
 function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): Array<string> {
-  const oldData = readFileSync(file, "utf8");
   const fileName = basename(file);
+
+  // Unhandled lockfiles do not store a project version. Doing a blind
+  // search-and-replace would corrupt dependency versions.
+  if ((/lock/i.test(fileName) || fileName === "go.sum") && fileName !== "package-lock.json" && fileName !== "uv.lock") {
+    return [file, readFileSync(file, "utf8")];
+  }
+
+  const oldData = readFileSync(file, "utf8");
 
   let newData: string;
   if (fileName === "package.json") {

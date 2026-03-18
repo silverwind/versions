@@ -567,6 +567,51 @@ version = "2.0.0"
   }
 });
 
+test("lockfiles are not corrupted by version replacement", async () => {
+  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
+  await mkdir(tmpDir, {recursive: true});
+
+  try {
+    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.3.0"}, null, 2));
+
+    // pnpm-lock.yaml contains a dependency with the same version as the project
+    const lockContent = `lockfileVersion: '9.0'
+
+packages:
+
+  some-dep@2.3.0:
+    resolution: {integrity: sha512-abc123}
+    engines: {node: '>=8'}
+
+snapshots:
+
+  some-dep@2.3.0:
+    dependencies:
+      other-dep: 1.0.0
+`;
+    await writeFile(join(tmpDir, "pnpm-lock.yaml"), lockContent);
+
+    await initGitRepo(tmpDir);
+
+    await spawn("node", [
+      join(process.cwd(), "dist/index.js"),
+      "--gitless",
+      "--base", "2.3.0",
+      "patch",
+      "package.json",
+      "pnpm-lock.yaml",
+    ], {cwd: tmpDir});
+
+    const pkgAfter = JSON.parse(await readFile(join(tmpDir, "package.json"), "utf8"));
+    expect(pkgAfter.version).toEqual("2.3.1");
+
+    // lockfile must remain unchanged - dependency versions must not be corrupted
+    expect(await readFile(join(tmpDir, "pnpm-lock.yaml"), "utf8")).toEqual(lockContent);
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+});
+
 test("release", async () => {
   const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
   await mkdir(tmpDir, {recursive: true});
