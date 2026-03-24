@@ -1,17 +1,16 @@
 import spawn from "nano-spawn";
 import {readFileSync} from "node:fs";
-import {readFile, writeFile, unlink, mkdir, rm} from "node:fs/promises";
+import {readFile, writeFile, rm, mkdir, mkdtemp} from "node:fs/promises";
 import {parse} from "smol-toml";
 import type {SemverLevel} from "./index.ts";
 import {spawnEnhanced} from "./utils.ts";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 
-const testFile = new URL("testfile", import.meta.url);
+const distPath = join(process.cwd(), "dist/index.js");
 
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
-let pkgStr: string;
 
 function incrementSemver(str: string, level: SemverLevel) {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
@@ -26,7 +25,6 @@ function incrementSemver(str: string, level: SemverLevel) {
   });
 }
 
-// Create isolated git environment that ignores global and system configs
 function getIsolatedGitEnv(tmpDir: string) {
   const isolatedHome = join(tmpDir, ".home");
   return {
@@ -44,14 +42,18 @@ async function initGitRepo(tmpDir: string): Promise<void> {
   await spawnEnhanced("git", ["config", "--local", "user.name", "Test User"], {cwd: tmpDir, env: {...process.env, ...env}});
 }
 
-afterAll(async () => {
-  if (pkgStr) await writeFile(new URL("package.json", import.meta.url), pkgStr);
-  await unlink(testFile);
-});
+async function withTmpDir(fn: (tmpDir: string) => Promise<void>): Promise<void> {
+  const tmpDir = await mkdtemp(join(tmpdir(), "versions-test-"));
+  try {
+    await fn(tmpDir);
+  } finally {
+    await rm(tmpDir, {recursive: true, force: true});
+  }
+}
 
 test("version", async () => {
   const {version: expected} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
-  const {stdout} = await spawn("node", ["dist/index.js", "-v"]);
+  const {stdout} = await spawn("node", [distPath, "-v"]);
   expect(stdout).toEqual(expected);
 });
 
@@ -76,22 +78,20 @@ test("semver", () => {
   expect(incrementSemver("10.10.10-pre-1.0.0", "major")).toEqual("11.0.0-pre-1.0.0");
 });
 
-async function run(args: string) {
-  return await spawn(`node dist/index.js ${args}`, {shell: true});
-}
+test("versions", () => withTmpDir(async (tmpDir) => {
+  const pkgStr = readFileSync(new URL("package.json", import.meta.url), "utf8");
+  let {version} = JSON.parse(pkgStr);
 
-async function verify(version: string) {
-  expect(await readFile(testFile, "utf8")).toEqual(
-    `testfile v${version} (${(new Date()).toISOString().substring(0, 10)})`
-  );
-  return version;
-}
+  await writeFile(join(tmpDir, "package.json"), pkgStr);
+  await writeFile(join(tmpDir, "testfile"), `testfile v${version} (1999-01-01)`);
 
-test("versions", async () => {
-  pkgStr = await readFile(new URL("package.json", import.meta.url), "utf8");
-  let {version} = await JSON.parse(pkgStr);
-
-  await writeFile(testFile, `testfile v${version} (1999-01-01)`);
+  const run = (args: string) => spawn(`node ${distPath} ${args}`, {shell: true, cwd: tmpDir});
+  const verify = async (ver: string) => {
+    expect(await readFile(join(tmpDir, "testfile"), "utf8")).toEqual(
+      `testfile v${ver} (${(new Date()).toISOString().substring(0, 10)})`
+    );
+    return ver;
+  };
 
   await run(`--date --base ${version} --gitless patch testfile`);
   version = await verify(incrementSemver(version, "patch"));
@@ -110,28 +110,25 @@ test("versions", async () => {
 
   await run(`--date --base ${version} --gitless minor testfile`);
   version = await verify(incrementSemver(version, "minor"));
-});
+}));
 
-test("poetry", async () => {
+test("poetry", () => withTmpDir(async (tmpDir) => {
   const str = await readFile(new URL("fixtures/poetry/pyproject.toml", import.meta.url), "utf8");
   const dataBefore = parse(str) as Record<string, any>;
 
   const versionBefore = dataBefore.tool.poetry.version;
   expect(dataBefore.tool.poetry.dependencies.flask).toEqual(versionBefore);
 
-  const tmpFile = new URL("pyproject.toml", import.meta.url);
-  await writeFile(tmpFile, str);
-  // todo: eliminate need for -b
-  await run(`minor --gitless --date --base ${versionBefore} pyproject.toml`);
+  await writeFile(join(tmpDir, "pyproject.toml"), str);
+  await spawn(`node ${distPath} minor --gitless --date --base ${versionBefore} pyproject.toml`, {shell: true, cwd: tmpDir});
 
-  const dataAfter = parse(await readFile(tmpFile, "utf8")) as Record<string, any>;
+  const dataAfter = parse(await readFile(join(tmpDir, "pyproject.toml"), "utf8")) as Record<string, any>;
   const versionAfter = incrementSemver(versionBefore, "minor");
   expect(dataAfter.tool.poetry.version).toEqual(versionAfter);
   expect(dataAfter.tool.poetry.dependencies.flask).toEqual(versionBefore);
-  await unlink(tmpFile);
-});
+}));
 
-test("uv", async () => {
+test("uv", () => withTmpDir(async (tmpDir) => {
   const pyproject = await readFile(new URL("fixtures/uv/pyproject.toml", import.meta.url), "utf8");
   const lock = await readFile(new URL("fixtures/uv/uv.lock", import.meta.url), "utf8");
 
@@ -140,17 +137,15 @@ test("uv", async () => {
   const name = dataBeforePyproject.project.name;
   const versionBefore = dataBeforePyproject.project.version;
 
-  const tmpFilePyproject = new URL("pyproject.toml", import.meta.url);
-  await writeFile(tmpFilePyproject, pyproject);
-  const tmpFileLock = new URL("uv.lock", import.meta.url);
-  await writeFile(tmpFileLock, lock);
-  await run(`minor --gitless --date --base ${versionBefore} pyproject.toml uv.lock`);
+  await writeFile(join(tmpDir, "pyproject.toml"), pyproject);
+  await writeFile(join(tmpDir, "uv.lock"), lock);
+  await spawn(`node ${distPath} minor --gitless --date --base ${versionBefore} pyproject.toml uv.lock`, {shell: true, cwd: tmpDir});
 
-  const dataAfter = parse(await readFile(tmpFilePyproject, "utf8")) as Record<string, any>;
+  const dataAfter = parse(await readFile(join(tmpDir, "pyproject.toml"), "utf8")) as Record<string, any>;
   const versionAfter = incrementSemver(versionBefore, "minor");
   expect(dataAfter.project.version).toEqual(versionAfter);
 
-  const lockAfter = parse(await readFile(tmpFileLock, "utf8")) as Record<string, any>;
+  const lockAfter = parse(await readFile(join(tmpDir, "uv.lock"), "utf8")) as Record<string, any>;
 
   for (const pkg of lockAfter.package) {
     if (pkg.name === name) {
@@ -158,424 +153,178 @@ test("uv", async () => {
       break;
     }
   }
+}));
 
-  await unlink(tmpFilePyproject);
-  await unlink(tmpFileLock);
-});
+test("fallback to package.json when no git tags exist", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.5.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 2.5.0");
 
-test("fallback to package.json when no git tags exist", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
+  await spawn("node", [distPath, "--gitless", "patch", "testfile.txt"], {cwd: tmpDir});
 
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.5.0"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 2.5.0");
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.5.1");
+}));
 
-    await initGitRepo(tmpDir);
-
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "patch",
-      "testfile.txt"
-    ], {cwd: tmpDir});
-
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.5.1");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
-
-test("fallback to pyproject.toml when no git tags exist", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    await writeFile(join(tmpDir, "pyproject.toml"), `[project]
+test("fallback to pyproject.toml when no git tags exist", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "pyproject.toml"), `[project]
 name = "test-project"
 version = "3.2.1"
 `);
-    await writeFile(join(tmpDir, "testfile.txt"), "version 3.2.1");
+  await writeFile(join(tmpDir, "testfile.txt"), "version 3.2.1");
 
-    await initGitRepo(tmpDir);
+  await spawn("node", [distPath, "--gitless", "minor", "testfile.txt"], {cwd: tmpDir});
 
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "minor",
-      "testfile.txt"
-    ], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 3.3.0");
+}));
 
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 3.3.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
+test("fallback behavior with git repo but no tags", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-package", version: "5.1.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 5.1.0");
 
-test("fallback behavior with git repo but no tags", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
+  await spawn("node", [distPath, "--gitless", "major", "testfile.txt"], {cwd: tmpDir});
 
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-package", version: "5.1.0"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 5.1.0");
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 6.0.0");
+}));
 
-    await initGitRepo(tmpDir);
-    const env = getIsolatedGitEnv(tmpDir);
-    await spawnEnhanced("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-    await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "major",
-      "testfile.txt"
-    ], {cwd: tmpDir});
-
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 6.0.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
-
-test("poetry-style pyproject.toml fallback", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    await writeFile(join(tmpDir, "pyproject.toml"), `[tool.poetry]
+test("poetry-style pyproject.toml fallback", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "pyproject.toml"), `[tool.poetry]
 name = "poetry-test"
 version = "0.5.2"
 `);
-    await writeFile(join(tmpDir, "testfile.txt"), "version 0.5.2");
+  await writeFile(join(tmpDir, "testfile.txt"), "version 0.5.2");
 
-    await initGitRepo(tmpDir);
+  await spawn("node", [distPath, "--gitless", "patch", "testfile.txt"], {cwd: tmpDir});
 
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "patch",
-      "testfile.txt"
-    ], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 0.5.3");
+}));
 
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 0.5.3");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
-
-test("package.json takes precedence over pyproject.toml", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-    await writeFile(join(tmpDir, "pyproject.toml"), `[project]
+test("package.json takes precedence over pyproject.toml", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "pyproject.toml"), `[project]
 name = "test-project"
 version = "2.0.0"
 `);
-    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await initGitRepo(tmpDir);
+  await spawn("node", [distPath, "--gitless", "patch", "testfile.txt"], {cwd: tmpDir});
 
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "patch",
-      "testfile.txt"
-    ], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+}));
 
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
-
-test("fallback to pyproject.toml when package.json has invalid semver", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "invalid"}, null, 2));
-    await writeFile(join(tmpDir, "pyproject.toml"), `[project]
+test("fallback to pyproject.toml when package.json has invalid semver", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "invalid"}, null, 2));
+  await writeFile(join(tmpDir, "pyproject.toml"), `[project]
 name = "test-project"
 version = "3.0.0"
 `);
-    await writeFile(join(tmpDir, "testfile.txt"), "version 3.0.0");
+  await writeFile(join(tmpDir, "testfile.txt"), "version 3.0.0");
 
-    await initGitRepo(tmpDir);
+  await spawn("node", [distPath, "--gitless", "minor", "testfile.txt"], {cwd: tmpDir});
 
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "minor",
-      "testfile.txt"
-    ], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 3.1.0");
+}));
 
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 3.1.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
+test("prerelease from stable version", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-test("prerelease from stable version", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
+  await spawn("node", [distPath, "--gitless", "--preid=alpha", "prerelease", "testfile.txt"], {cwd: tmpDir});
 
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-alpha.0");
+}));
+
+test("prerelease increment with same preid", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.1-beta.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.1-beta.0");
+
+  await spawn("node", [distPath, "--gitless", "--preid=beta", "prerelease", "testfile.txt"], {cwd: tmpDir});
+
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-beta.1");
+}));
+
+test("prerelease with different preid", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.0.0-alpha.5"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 2.0.0-alpha.5");
+
+  await spawn("node", [distPath, "--gitless", "--preid=rc", "prerelease", "testfile.txt"], {cwd: tmpDir});
+
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.0.0-rc.0");
+}));
+
+test("prerelease without preid fails", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+
+  let error;
   try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-
-    await initGitRepo(tmpDir);
-
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--preid=alpha",
-      "prerelease",
-      "testfile.txt"
-    ], {cwd: tmpDir});
-
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-alpha.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
+    await spawn("node", [distPath, "--gitless", "prerelease", "testfile.txt"], {cwd: tmpDir});
+  } catch (err) {
+    error = err;
   }
-});
 
-test("prerelease increment with same preid", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
+  expect(error).toBeDefined();
+}));
 
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.1-beta.0"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.1-beta.0");
+test("patch with preid creates prerelease", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await initGitRepo(tmpDir);
+  await spawn("node", [distPath, "--gitless", "--preid=alpha", "patch", "testfile.txt"], {cwd: tmpDir});
 
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--preid=beta",
-      "prerelease",
-      "testfile.txt"
-    ], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-alpha.0");
+}));
 
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-beta.1");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
+test("minor with preid creates prerelease", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-test("prerelease with different preid", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
+  await spawn("node", [distPath, "--gitless", "--preid=beta", "minor", "testfile.txt"], {cwd: tmpDir});
 
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.0.0-alpha.5"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 2.0.0-alpha.5");
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.1.0-beta.0");
+}));
 
-    await initGitRepo(tmpDir);
+test("major with preid creates prerelease", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--preid=rc",
-      "prerelease",
-      "testfile.txt"
-    ], {cwd: tmpDir});
+  await spawn("node", [distPath, "--gitless", "--preid=rc", "major", "testfile.txt"], {cwd: tmpDir});
 
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.0.0-rc.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.0.0-rc.0");
+}));
 
-test("prerelease without preid fails", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
+test("patch with preid on prerelease version strips old prerelease", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0-alpha.5"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0-alpha.5");
 
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+  await spawn("node", [distPath, "--gitless", "--preid=beta", "patch", "testfile.txt"], {cwd: tmpDir});
 
-    await initGitRepo(tmpDir);
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-beta.0");
+}));
 
-    let error;
-    try {
-      await spawn("node", [
-        join(process.cwd(), "dist/index.js"),
-        "--gitless",
-        "prerelease",
-        "testfile.txt"
-      ], {cwd: tmpDir});
-    } catch (err) {
-      error = err;
-    }
+test("package.json with non-matching base version", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
 
-    expect(error).toBeDefined();
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
+  await spawn("node", [distPath, "--gitless", "--base", "8.16.3", "patch", "package.json"], {cwd: tmpDir});
 
-test("patch with preid creates prerelease", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
+  const result = JSON.parse(await readFile(join(tmpDir, "package.json"), "utf8"));
+  expect(result.version).toEqual("8.16.4");
+}));
 
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-
-    await initGitRepo(tmpDir);
-
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--preid=alpha",
-      "patch",
-      "testfile.txt"
-    ], {cwd: tmpDir});
-
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-alpha.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
-
-test("minor with preid creates prerelease", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-
-    await initGitRepo(tmpDir);
-
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--preid=beta",
-      "minor",
-      "testfile.txt"
-    ], {cwd: tmpDir});
-
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.1.0-beta.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
-
-test("major with preid creates prerelease", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-
-    await initGitRepo(tmpDir);
-
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--preid=rc",
-      "major",
-      "testfile.txt"
-    ], {cwd: tmpDir});
-
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.0.0-rc.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
-
-test("patch with preid on prerelease version strips old prerelease", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0-alpha.5"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0-alpha.5");
-
-    await initGitRepo(tmpDir);
-
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--preid=beta",
-      "patch",
-      "testfile.txt"
-    ], {cwd: tmpDir});
-
-    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-beta.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
-
-test("package.json with non-matching base version", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    // package.json has 1.0.0, but --base says 8.16.3
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-
-    await initGitRepo(tmpDir);
-
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--base", "8.16.3",
-      "patch",
-      "package.json"
-    ], {cwd: tmpDir});
-
-    const result = JSON.parse(await readFile(join(tmpDir, "package.json"), "utf8"));
-    expect(result.version).toEqual("8.16.4");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
-
-test("pyproject.toml with non-matching base version", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    // pyproject.toml has 2.0.0, but --base says 5.3.1
-    await writeFile(join(tmpDir, "pyproject.toml"), `[project]
+test("pyproject.toml with non-matching base version", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "pyproject.toml"), `[project]
 name = "test-project"
 version = "2.0.0"
 `);
 
-    await initGitRepo(tmpDir);
+  await spawn("node", [distPath, "--gitless", "--base", "5.3.1", "minor", "pyproject.toml"], {cwd: tmpDir});
 
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--base", "5.3.1",
-      "minor",
-      "pyproject.toml"
-    ], {cwd: tmpDir});
+  const result = parse(await readFile(join(tmpDir, "pyproject.toml"), "utf8")) as Record<string, any>;
+  expect(result.project.version).toEqual("5.4.0");
+}));
 
-    const result = parse(await readFile(join(tmpDir, "pyproject.toml"), "utf8")) as Record<string, any>;
-    expect(result.project.version).toEqual("5.4.0");
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
+test("lockfiles are not corrupted by version replacement", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.3.0"}, null, 2));
 
-test("lockfiles are not corrupted by version replacement", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
-
-  try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.3.0"}, null, 2));
-
-    // pnpm-lock.yaml contains a dependency with the same version as the project
-    const lockContent = `lockfileVersion: '9.0'
+  const lockContent = `lockfileVersion: '9.0'
 
 packages:
 
@@ -589,66 +338,36 @@ snapshots:
     dependencies:
       other-dep: 1.0.0
 `;
-    await writeFile(join(tmpDir, "pnpm-lock.yaml"), lockContent);
+  await writeFile(join(tmpDir, "pnpm-lock.yaml"), lockContent);
 
-    await initGitRepo(tmpDir);
+  await spawn("node", [distPath, "--gitless", "--base", "2.3.0", "patch", "package.json", "pnpm-lock.yaml"], {cwd: tmpDir});
 
-    await spawn("node", [
-      join(process.cwd(), "dist/index.js"),
-      "--gitless",
-      "--base", "2.3.0",
-      "patch",
-      "package.json",
-      "pnpm-lock.yaml",
-    ], {cwd: tmpDir});
+  const pkgAfter = JSON.parse(await readFile(join(tmpDir, "package.json"), "utf8"));
+  expect(pkgAfter.version).toEqual("2.3.1");
 
-    const pkgAfter = JSON.parse(await readFile(join(tmpDir, "package.json"), "utf8"));
-    expect(pkgAfter.version).toEqual("2.3.1");
+  expect(await readFile(join(tmpDir, "pnpm-lock.yaml"), "utf8")).toEqual(lockContent);
+}));
 
-    // lockfile must remain unchanged - dependency versions must not be corrupted
-    expect(await readFile(join(tmpDir, "pnpm-lock.yaml"), "utf8")).toEqual(lockContent);
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
-  }
-});
+test("release", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-test("release", async () => {
-  const tmpDir = join(tmpdir(), `versions-test-${Date.now()}`);
-  await mkdir(tmpDir, {recursive: true});
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  await spawnEnhanced("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await spawnEnhanced("git", ["remote", "add", "origin", "https://github.com/test-copilot-versions/test-repo.git"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await spawnEnhanced("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
 
   try {
-    await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-    await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-
-    await initGitRepo(tmpDir);
-    const env = getIsolatedGitEnv(tmpDir);
-    await spawnEnhanced("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-    await spawnEnhanced("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-    await spawnEnhanced("git", ["remote", "add", "origin", "https://github.com/test-copilot-versions/test-repo.git"], {cwd: tmpDir, env: {...process.env, ...env}});
-    await spawnEnhanced("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
-
-    // Test with a fake token - should fail with 401/403 but shows the release flow works
-    try {
-      await spawn("node", [
-        join(process.cwd(), "dist/index.js"),
-        "--release",
-        "patch",
-        "testfile.txt"
-      ], {
-        cwd: tmpDir,
-        env: {...process.env, GITHUB_TOKEN: "fake-test-token-12345", ...env},
-      });
-      // If it somehow succeeds, that's fine (unlikely with fake token)
-      expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
-    } catch (err: any) {
-      // Expected to fail with authentication error
-      expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
-      // Should contain error about failed release creation
-      expect(err.output).toContain("Failed to create release");
-      // Should show either 401 Unauthorized or 403 Forbidden
-      expect(err.output).toMatch(/401|403/);
-    }
-  } finally {
-    await rm(tmpDir, {recursive: true, force: true});
+    await spawn("node", [distPath, "--release", "patch", "testfile.txt"], {
+      cwd: tmpDir,
+      env: {...process.env, GITHUB_TOKEN: "fake-test-token-12345", ...env},
+    });
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+  } catch (err: any) {
+    expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+    expect(err.output).toContain("Failed to create release");
+    expect(err.output).toMatch(/401|403/);
   }
-});
+}));
