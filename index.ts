@@ -164,13 +164,13 @@ type GetFileChangesOpts = {
   date?: string,
 };
 
-function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): Array<string> {
+function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): [string, string | null] {
   const fileName = basename(file);
 
   // Unhandled lockfiles do not store a project version. Doing a blind
   // search-and-replace would corrupt dependency versions.
   if ((/lock/i.test(fileName) || fileName === "go.sum") && fileName !== "package-lock.json" && fileName !== "uv.lock") {
-    return [file, readFileSync(file, "utf8")];
+    return [file, null];
   }
 
   const oldData = readFileSync(file, "utf8");
@@ -416,15 +416,16 @@ async function main(): Promise<void> {
 
   // obtain old version
   let baseVersion: string = "";
+  let cachedDescribeTag: string = "";
   if (!args.base) {
     let stdout: string = "";
     if (!args.gitless) {
       // Try git describe first (O(depth) vs O(n·log n) for full tag list)
       try {
         const result = await spawnEnhanced("git", ["describe", "--tags", "--abbrev=0"]);
-        const tag = result.stdout.trim();
-        if (isSemver(tag)) {
-          baseVersion = tag.replace(reVersionPrefix, "");
+        cachedDescribeTag = result.stdout.trim();
+        if (isSemver(cachedDescribeTag)) {
+          baseVersion = cachedDescribeTag.replace(reVersionPrefix, "");
         }
       } catch {}
       // Fall back to full tag list if describe didn't yield a semver tag
@@ -503,13 +504,13 @@ async function main(): Promise<void> {
     }
 
     // update files
-    const todo: Array<Array<string>> = [];
+    const todo: Array<[string, string | null]> = [];
     for (const file of files) {
       todo.push(getFileChanges({file, baseVersion, newVersion, replacements, date}));
     }
 
     for (const [file, newData] of todo) {
-      write(file, newData);
+      if (newData !== null) write(file, newData);
     }
   }
 
@@ -521,17 +522,13 @@ async function main(): Promise<void> {
   const msgs = (args.message || []).filter(msg => typeof msg === "string");
   const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
 
-  // determine changelog range (parallel git queries)
   let range = "";
   {
-    const [showResult, describeResult] = await Promise.allSettled([
-      spawnEnhanced("git", ["show", tagName]),
-      spawnEnhanced("git", ["describe", "--abbrev=0"]),
-    ]);
-    if (showResult.status === "fulfilled") {
+    const tagExists = await spawnEnhanced("git", ["rev-parse", "--verify", `refs/tags/${tagName}`]).then(() => true, () => false);
+    if (tagExists) {
       range = `${tagName}..HEAD`;
-    } else if (describeResult.status === "fulfilled") {
-      range = `${describeResult.value.stdout}..HEAD`;
+    } else if (cachedDescribeTag) {
+      range = `${cachedDescribeTag}..HEAD`;
     }
   }
 
