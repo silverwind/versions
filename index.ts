@@ -1,13 +1,11 @@
 #!/usr/bin/env node
-import {SubprocessError, type Result} from "nano-spawn";
-import {spawnEnhanced} from "./utils.ts";
+import {SubprocessError, type Result, exec, tomlGetString} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative} from "node:path";
 import {cwd, exit, stdout} from "node:process";
 import {EOL, platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
-import {parse} from "smol-toml";
 
 export type SemverLevel = "patch" | "minor" | "major" | "prerelease";
 
@@ -129,16 +127,13 @@ function readVersionFromPyprojectToml(projectRoot: string): string | null {
 
   try {
     const content = readFileSync(pyprojectPath, "utf8");
-    const toml = parse(content) as any;
-
-    // Try project.version first (PEP 621 style)
-    if (toml.project?.version && isSemver(toml.project.version)) {
-      return toml.project.version.replace(reVersionPrefix, "");
+    const projectVersion = tomlGetString(content, "project", "version");
+    if (projectVersion && isSemver(projectVersion)) {
+      return projectVersion.replace(reVersionPrefix, "");
     }
-
-    // Try tool.poetry.version (Poetry style)
-    if (toml.tool?.poetry?.version && isSemver(toml.tool.poetry.version)) {
-      return toml.tool.poetry.version.replace(reVersionPrefix, "");
+    const poetryVersion = tomlGetString(content, "tool.poetry", "version");
+    if (poetryVersion && isSemver(poetryVersion)) {
+      return poetryVersion.replace(reVersionPrefix, "");
     }
   } catch {}
 
@@ -148,7 +143,7 @@ function readVersionFromPyprojectToml(projectRoot: string): string | null {
 async function removeIgnoredFiles(files: Array<string>): Promise<Array<string>> {
   let result: Result;
   try {
-    result = await spawnEnhanced("git", ["check-ignore", "--", ...files]);
+    result = await exec("git", ["check-ignore", "--", ...files]);
   } catch {
     return files;
   }
@@ -194,8 +189,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
     // to obtain the current package name and then search for that name in uv.lock and replace the version
     // on the next line which luckily is possible because of static ordering.
     const projStr = readFileSync(file.replace(/uv\.lock$/, "pyproject.toml"), "utf8");
-    const toml = parse(projStr) as {project: {name: string}};
-    const name = toml.project.name;
+    const name = tomlGetString(projStr, "project", "name")!;
     const re = new RegExp(`(\\[\\[package\\]\\]\r?\n.+${esc(name)}.+\r?\nversion = ").+?(")`);
     newData = oldData.replace(re, (_m, p1, p2) => `${p1}${newVersion}${p2}`);
   } else {
@@ -281,7 +275,7 @@ type RepoInfo = {
 
 async function getRepoInfo(): Promise<RepoInfo | null> {
   try {
-    const {stdout} = await spawnEnhanced("git", ["remote", "get-url", "origin"]);
+    const {stdout} = await exec("git", ["remote", "get-url", "origin"]);
     const url = stdout.trim();
 
     // Parse git URLs: https://host/owner/repo.git or git@host:owner/repo.git
@@ -422,7 +416,7 @@ async function main(): Promise<void> {
     if (!args.gitless) {
       // Try git describe first (O(depth) vs O(n·log n) for full tag list)
       try {
-        const result = await spawnEnhanced("git", ["describe", "--tags", "--abbrev=0"]);
+        const result = await exec("git", ["describe", "--tags", "--abbrev=0"]);
         cachedDescribeTag = result.stdout.trim();
         if (isSemver(cachedDescribeTag)) {
           baseVersion = cachedDescribeTag.replace(reVersionPrefix, "");
@@ -431,7 +425,7 @@ async function main(): Promise<void> {
       // Fall back to full tag list if describe didn't yield a semver tag
       if (!baseVersion) {
         try {
-          ({stdout} = await spawnEnhanced("git", ["tag", "--list", "--sort=-creatordate"]));
+          ({stdout} = await exec("git", ["tag", "--list", "--sort=-creatordate"]));
         } catch {}
         for (const tag of stdout.split(reNewline).map(v => v.trim()).filter(Boolean)) {
           if (isSemver(tag)) {
@@ -515,7 +509,7 @@ async function main(): Promise<void> {
   }
 
   if (typeof args.command === "string") {
-    writeResult(await spawnEnhanced(args.command, [], {shell: true}));
+    writeResult(await exec(args.command, [], {shell: true}));
   }
   if (args.gitless) return; // nothing else to do
 
@@ -524,7 +518,7 @@ async function main(): Promise<void> {
 
   let range = "";
   {
-    const tagExists = await spawnEnhanced("git", ["rev-parse", "--verify", `refs/tags/${tagName}`]).then(() => true, () => false);
+    const tagExists = await exec("git", ["rev-parse", "--verify", `refs/tags/${tagName}`]).then(() => true, () => false);
     if (tagExists) {
       range = `${tagName}..HEAD`;
     } else if (cachedDescribeTag) {
@@ -537,7 +531,7 @@ async function main(): Promise<void> {
     const args = ["log"];
     if (range) args.push(range);
     // https://git-scm.com/docs/pretty-formats
-    const {stdout} = await spawnEnhanced("git", [...args, `--pretty=format:* %s (%aN)`]);
+    const {stdout} = await exec("git", [...args, `--pretty=format:* %s (%aN)`]);
     if (stdout?.length) changelog = stdout;
   } catch {}
 
@@ -548,20 +542,20 @@ async function main(): Promise<void> {
   // create commit
   const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
   if (args.all) {
-    writeResult(await spawnEnhanced("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
+    writeResult(await exec("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
   } else {
     const filesToAdd = filesToAddPromise ? await filesToAddPromise : [];
     if (filesToAdd.length) {
-      writeResult(await spawnEnhanced("git", ["commit", "-i", "-F", "-", "--", ...filesToAdd], {stdin: {string: commitMsg}}));
+      writeResult(await exec("git", ["commit", "-i", "-F", "-", "--", ...filesToAdd], {stdin: {string: commitMsg}}));
     } else {
-      writeResult(await spawnEnhanced("git", ["commit", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
+      writeResult(await exec("git", ["commit", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
     }
   }
 
   // create tag
   const tagMsg = joinStrings([...msgs, changelog], "\n\n");
   // adding explicit -a here seems to make git no longer sign the tag
-  writeResult(await spawnEnhanced("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
+  writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
 
   // create release if requested
   if (args.release) {
