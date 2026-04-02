@@ -3,8 +3,11 @@ import {readFile, writeFile, rm, mkdir, mkdtemp} from "node:fs/promises";
 import {EOL, tmpdir} from "node:os";
 import {join} from "node:path";
 import {
-  isSemver, incrementSemver, replaceTokens, esc,
-  joinStrings, ensureEol, findUp,
+  isSemver, incrementSemver, replaceTokens, esc, uniq,
+  joinStrings, ensureEol, findUp, getFileChanges, write,
+  readVersionFromPackageJson, readVersionFromPyprojectToml,
+  removeIgnoredFiles, getGithubToken, getGiteaToken,
+  getRepoInfo, writeResult,
 } from "./index.ts";
 import {exec, tomlGetString, SubprocessError} from "./utils.ts";
 
@@ -503,4 +506,190 @@ test("tomlGetString edge cases", () => {
   expect(tomlGetString("# comment\n[project]\nversion = '1.0.0'", "project", "version")).toEqual("1.0.0");
   expect(tomlGetString("[project]\nname = 'test'", "project", "version")).toBeUndefined();
   expect(tomlGetString("[other]\nversion = '1.0.0'", "project", "version")).toBeUndefined();
+});
+
+test("uniq", () => {
+  expect(uniq([1, 2, 2, 3])).toEqual([1, 2, 3]);
+  expect(uniq(["a", "b", "a"])).toEqual(["a", "b"]);
+  expect(uniq([])).toEqual([]);
+});
+
+test("incrementSemver unknown level fallthrough", () => {
+  expect(incrementSemver("1.0.0", "unknown")).toEqual("1.0.1");
+});
+
+test("readVersionFromPackageJson", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "3.2.1"}, null, 2));
+  expect(readVersionFromPackageJson(tmpDir)).toEqual("3.2.1");
+
+  const subDir = join(tmpDir, "sub");
+  await mkdir(subDir);
+  expect(readVersionFromPackageJson(subDir)).toEqual("3.2.1");
+}));
+
+test("readVersionFromPackageJson returns null", () => withTmpDir(async (tmpDir) => {
+  expect(readVersionFromPackageJson(tmpDir)).toBeNull();
+
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test"}, null, 2));
+  expect(readVersionFromPackageJson(tmpDir)).toBeNull();
+}));
+
+test("readVersionFromPyprojectToml", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "pyproject.toml"), `[project]\nname = "test"\nversion = "1.5.0"\n`);
+  expect(readVersionFromPyprojectToml(tmpDir)).toEqual("1.5.0");
+}));
+
+test("readVersionFromPyprojectToml poetry", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "pyproject.toml"), `[tool.poetry]\nname = "test"\nversion = "2.0.0"\n`);
+  expect(readVersionFromPyprojectToml(tmpDir)).toEqual("2.0.0");
+}));
+
+test("readVersionFromPyprojectToml returns null", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "pyproject.toml"), `[project]\nname = "test"\n`);
+  expect(readVersionFromPyprojectToml(tmpDir)).toBeNull();
+}));
+
+test("getFileChanges package.json", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "package.json");
+  await writeFile(file, JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
+  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1"});
+  expect(JSON.parse(content!).version).toEqual("1.0.1");
+}));
+
+test("getFileChanges package-lock.json", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "package-lock.json");
+  const data = {name: "test", version: "1.0.0", lockfileVersion: 3, packages: {"": {version: "1.0.0"}}};
+  await writeFile(file, JSON.stringify(data, null, 2));
+  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
+  const result = JSON.parse(content!);
+  expect(result.version).toEqual("2.0.0");
+  expect(result.packages[""].version).toEqual("2.0.0");
+}));
+
+test("getFileChanges pyproject.toml", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "pyproject.toml");
+  await writeFile(file, `[project]\nname = "test"\nversion = "1.0.0"\n`);
+  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.1.0"});
+  expect(content).toContain(`version = "1.1.0"`);
+}));
+
+test("getFileChanges uv.lock", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "pyproject.toml"), `[project]\nname = "myapp"\nversion = "1.0.0"\n`);
+  const file = join(tmpDir, "uv.lock");
+  await writeFile(file, `[[package]]\nname = "myapp"\nversion = "1.0.0"\n`);
+  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.1.0"});
+  expect(content).toContain(`version = "1.1.0"`);
+}));
+
+test("getFileChanges generic file", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "version.txt");
+  await writeFile(file, "version 1.0.0 here");
+  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
+  expect(content).toEqual("version 2.0.0 here");
+}));
+
+test("getFileChanges lockfile skip", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "yarn.lock");
+  await writeFile(file, "content 1.0.0");
+  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
+  expect(content).toBeNull();
+}));
+
+test("getFileChanges with date", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "changelog.txt");
+  await writeFile(file, "version 1.0.0 released 2020-01-01");
+  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1", date: "2025-06-15"});
+  expect(content).toEqual("version 1.0.1 released 2025-06-15");
+}));
+
+test("getFileChanges with replacements", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "file.txt");
+  await writeFile(file, "version 1.0.0 FOO");
+  const [, content] = getFileChanges({
+    file, baseVersion: "1.0.0", newVersion: "1.0.1",
+    replacements: [{re: /FOO/, replacement: "BAR"}],
+  });
+  expect(content).toEqual("version 1.0.1 BAR");
+}));
+
+test("write", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "out.txt");
+  await writeFile(file, "old");
+  write(file, "new");
+  expect(await readFile(file, "utf8")).toEqual("new");
+}));
+
+test("getGithubToken", () => {
+  const saved = {...process.env};
+  delete process.env.VERSIONS_FORGE_TOKEN;
+  delete process.env.GITHUB_API_TOKEN;
+  delete process.env.GITHUB_TOKEN;
+  delete process.env.GH_TOKEN;
+  delete process.env.HOMEBREW_GITHUB_API_TOKEN;
+  expect(getGithubToken()).toBeNull();
+  process.env.GH_TOKEN = "test-token";
+  expect(getGithubToken()).toEqual("test-token");
+  Object.assign(process.env, saved);
+});
+
+test("getGiteaToken", () => {
+  const saved = {...process.env};
+  delete process.env.VERSIONS_FORGE_TOKEN;
+  delete process.env.GITEA_API_TOKEN;
+  delete process.env.GITEA_AUTH_TOKEN;
+  delete process.env.GITEA_TOKEN;
+  expect(getGiteaToken()).toBeNull();
+  process.env.GITEA_TOKEN = "gitea-tok";
+  expect(getGiteaToken()).toEqual("gitea-tok");
+  Object.assign(process.env, saved);
+});
+
+test("getRepoInfo", async () => {
+  const info = await getRepoInfo();
+  expect(info).toBeTruthy();
+  expect(info!.owner).toEqual("silverwind");
+  expect(info!.repo).toEqual("versions");
+  expect(info!.type).toEqual("github");
+});
+
+test("getRepoInfo returns null without git", () => withTmpDir(async (tmpDir) => {
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    expect(await getRepoInfo()).toBeNull();
+  } finally {
+    process.chdir(origCwd);
+  }
+}));
+
+test("removeIgnoredFiles", () => withTmpDir(async (tmpDir) => {
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  await writeFile(join(tmpDir, ".gitignore"), "ignored.txt\n");
+  await writeFile(join(tmpDir, "kept.txt"), "");
+  await writeFile(join(tmpDir, "ignored.txt"), "");
+  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["commit", "-m", "init"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    const result = await removeIgnoredFiles(["kept.txt", "ignored.txt"]);
+    expect(result).toEqual(["kept.txt"]);
+  } finally {
+    process.chdir(origCwd);
+  }
+}));
+
+test("writeResult", () => {
+  let output = "";
+  const origWrite = process.stdout.write;
+  process.stdout.write = ((chunk: any) => { output += chunk; return true; }) as any;
+  try {
+    writeResult({stdout: "hello", stderr: "warn"});
+    expect(output).toContain("hello");
+    expect(output).toContain("warn");
+  } finally {
+    process.stdout.write = origWrite;
+  }
 });

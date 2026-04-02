@@ -33,7 +33,7 @@ export function isSemver(str: string): boolean {
   return reSemver.test(str.replace(reVersionPrefix, ""));
 }
 
-function uniq<T extends Array<any>>(arr: T): T {
+export function uniq<T extends Array<any>>(arr: T): T {
   return Array.from(new Set(arr)) as T;
 }
 
@@ -106,7 +106,7 @@ export function findUp(filename: string, dir: string, stopDir?: string): string 
   }
 }
 
-function readVersionFromPackageJson(projectRoot: string): string | null {
+export function readVersionFromPackageJson(projectRoot: string): string | null {
   const packageJsonPath = findUp("package.json", projectRoot);
   if (!packageJsonPath) return null;
 
@@ -121,7 +121,7 @@ function readVersionFromPackageJson(projectRoot: string): string | null {
   return null;
 }
 
-function readVersionFromPyprojectToml(projectRoot: string): string | null {
+export function readVersionFromPyprojectToml(projectRoot: string): string | null {
   const pyprojectPath = findUp("pyproject.toml", projectRoot);
   if (!pyprojectPath) return null;
 
@@ -140,7 +140,7 @@ function readVersionFromPyprojectToml(projectRoot: string): string | null {
   return null;
 }
 
-async function removeIgnoredFiles(files: Array<string>): Promise<Array<string>> {
+export async function removeIgnoredFiles(files: Array<string>): Promise<Array<string>> {
   let result: Result;
   try {
     result = await exec("git", ["check-ignore", "--", ...files]);
@@ -151,7 +151,7 @@ async function removeIgnoredFiles(files: Array<string>): Promise<Array<string>> 
   return files.filter(file => !ignoredFiles.has(file));
 }
 
-type GetFileChangesOpts = {
+export type GetFileChangesOpts = {
   file: string,
   baseVersion: string,
   newVersion: string,
@@ -159,7 +159,7 @@ type GetFileChangesOpts = {
   date?: string,
 };
 
-function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): [string, string | null] {
+export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): [string, string | null] {
   const fileName = basename(file);
 
   // Unhandled lockfiles do not store a project version. Doing a blind
@@ -211,7 +211,7 @@ function getFileChanges({file, baseVersion, newVersion, replacements, date}: Get
   return [file, newData];
 }
 
-function write(file: string, content: string): void {
+export function write(file: string, content: string): void {
   if (platform() === "win32") {
     try {
       truncateSync(file);
@@ -249,7 +249,7 @@ export function ensureEol(str: string): string {
   return str.endsWith(EOL) ? str : `${str}${EOL}`;
 }
 
-function getGithubToken(): string | null {
+export function getGithubToken(): string | null {
   return process.env.VERSIONS_FORGE_TOKEN ||
          process.env.GITHUB_API_TOKEN ||
          process.env.GITHUB_TOKEN ||
@@ -258,7 +258,7 @@ function getGithubToken(): string | null {
          null;
 }
 
-function getGiteaToken(): string | null {
+export function getGiteaToken(): string | null {
   return process.env.VERSIONS_FORGE_TOKEN ||
          process.env.GITEA_API_TOKEN ||
          process.env.GITEA_AUTH_TOKEN ||
@@ -266,14 +266,14 @@ function getGiteaToken(): string | null {
          null;
 }
 
-type RepoInfo = {
+export type RepoInfo = {
   owner: string;
   repo: string;
   host: string;
   type: "github" | "gitea";
 };
 
-async function getRepoInfo(): Promise<RepoInfo | null> {
+export async function getRepoInfo(): Promise<RepoInfo | null> {
   try {
     const {stdout} = await exec("git", ["remote", "get-url", "origin"]);
     const url = stdout.trim();
@@ -335,7 +335,7 @@ async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: str
   }
 }
 
-function writeResult(result: Result): void {
+export function writeResult(result: Result): void {
   if (result.stdout) stdout.write(ensureEol(result.stdout));
   if (result.stderr) stdout.write(ensureEol(result.stderr));
 }
