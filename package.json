@@ -29,6 +29,6 @@
     "updates": "17.11.2",
     "updates-config-silverwind": "2.0.1",
     "vitest": "4.1.1",
-    "vitest-config-silverwind": "11.1.2"
+    "vitest-config-silverwind": "11.1.3"
   }
 }
