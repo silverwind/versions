@@ -87,7 +87,7 @@ export function incrementSemver(str: string, level: string, preid?: string): str
     // Different preid or no number, replace with new preid
     return `${major}.${minor}.${patch}-${preid}.0`;
   }
-  return str.replace(rePatchVersion, (_, m1, m2, m3) => `${m1}${Number(m2) + 1}${m3}`);
+  throw new Error(`Invalid semver level: ${level}`);
 }
 
 export function findUp(filename: string, dir: string, stopDir?: string): string | null {
@@ -350,7 +350,6 @@ async function main(): Promise<void> {
       dry: {short: "D", type: "boolean"},
       gitless: {short: "g", type: "boolean"},
       help: {short: "h", type: "boolean"},
-      packageless: {short: "P", type: "boolean"},
       prefix: {short: "p", type: "boolean"},
       version: {short: "v", type: "boolean"},
       date: {short: "d", type: "boolean"},

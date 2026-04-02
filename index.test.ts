@@ -351,7 +351,6 @@ test("release", () => withTmpDir(async (tmpDir) => {
   }
 }));
 
-
 test("incrementSemver prerelease", () => {
   expect(incrementSemver("1.0.0", "prerelease", "alpha")).toEqual("1.0.1-alpha.0");
   expect(incrementSemver("1.0.1-beta.0", "prerelease", "beta")).toEqual("1.0.1-beta.1");
@@ -396,7 +395,6 @@ test("findUp", () => withTmpDir(async (tmpDir) => {
   expect(findUp("target.txt", subDir)).toEqual(join(tmpDir, "target.txt"));
   expect(findUp("nonexistent.txt", subDir, tmpDir)).toBeNull();
 }));
-
 
 test("help", async () => {
   const {stdout} = await exec("node", [distPath, "--help"]);
@@ -479,7 +477,6 @@ test("arbitrary lock file is skipped", () => withTmpDir(async (tmpDir) => {
   expect(await readFile(join(tmpDir, "Gemfile.lock"), "utf8")).toEqual("gem 1.0.0");
 }));
 
-
 test("SubprocessError", () => {
   const err = new SubprocessError("failed", "out", "err");
   expect(err.message).toEqual("failed");
@@ -514,8 +511,8 @@ test("uniq", () => {
   expect(uniq([])).toEqual([]);
 });
 
-test("incrementSemver unknown level fallthrough", () => {
-  expect(incrementSemver("1.0.0", "unknown")).toEqual("1.0.1");
+test("incrementSemver unknown level throws", () => {
+  expect(() => incrementSemver("1.0.0", "unknown")).toThrow("Invalid semver level");
 });
 
 test("readVersionFromPackageJson", () => withTmpDir(async (tmpDir) => {
