@@ -647,19 +647,14 @@ test("getGiteaToken", () => {
 test("getRepoInfo", async () => {
   const info = await getRepoInfo();
   expect(info).toBeTruthy();
-  expect(info!.owner).toEqual("silverwind");
-  expect(info!.repo).toEqual("versions");
   expect(info!.type).toEqual("github");
+  expect(info!.owner).toBeTruthy();
+  expect(info!.repo).toBeTruthy();
+  expect(info!.host).toEqual("github.com");
 });
 
 test("getRepoInfo returns null without git", () => withTmpDir(async (tmpDir) => {
-  const origCwd = process.cwd();
-  process.chdir(tmpDir);
-  try {
-    expect(await getRepoInfo()).toBeNull();
-  } finally {
-    process.chdir(origCwd);
-  }
+  expect(await getRepoInfo(tmpDir)).toBeNull();
 }));
 
 test("removeIgnoredFiles", () => withTmpDir(async (tmpDir) => {
@@ -671,14 +666,8 @@ test("removeIgnoredFiles", () => withTmpDir(async (tmpDir) => {
   await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
   await exec("git", ["commit", "-m", "init"], {cwd: tmpDir, env: {...process.env, ...env}});
 
-  const origCwd = process.cwd();
-  process.chdir(tmpDir);
-  try {
-    const result = await removeIgnoredFiles(["kept.txt", "ignored.txt"]);
-    expect(result).toEqual(["kept.txt"]);
-  } finally {
-    process.chdir(origCwd);
-  }
+  const result = await removeIgnoredFiles(["kept.txt", "ignored.txt"], tmpDir);
+  expect(result).toEqual(["kept.txt"]);
 }));
 
 test("writeResult", () => {

@@ -140,10 +140,10 @@ export function readVersionFromPyprojectToml(projectRoot: string): string | null
   return null;
 }
 
-export async function removeIgnoredFiles(files: Array<string>): Promise<Array<string>> {
+export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
   let result: Result;
   try {
-    result = await exec("git", ["check-ignore", "--", ...files]);
+    result = await exec("git", ["check-ignore", "--", ...files], cwd ? {cwd} : undefined);
   } catch {
     return files;
   }
@@ -273,9 +273,9 @@ export type RepoInfo = {
   type: "github" | "gitea";
 };
 
-export async function getRepoInfo(): Promise<RepoInfo | null> {
+export async function getRepoInfo(cwd?: string): Promise<RepoInfo | null> {
   try {
-    const {stdout} = await exec("git", ["remote", "get-url", "origin"]);
+    const {stdout} = await exec("git", ["remote", "get-url", "origin"], cwd ? {cwd} : undefined);
     const url = stdout.trim();
 
     // Parse git URLs: https://host/owner/repo.git or git@host:owner/repo.git
