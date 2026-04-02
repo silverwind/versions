@@ -1,27 +1,14 @@
 import {readFileSync} from "node:fs";
 import {readFile, writeFile, rm, mkdir, mkdtemp} from "node:fs/promises";
-import type {SemverLevel} from "./index.ts";
-import {exec, tomlGetString} from "./utils.ts";
+import {EOL, tmpdir} from "node:os";
 import {join} from "node:path";
-import {tmpdir} from "node:os";
+import {
+  isSemver, incrementSemver, replaceTokens, esc,
+  joinStrings, ensureEol, findUp,
+} from "./index.ts";
+import {exec, tomlGetString, SubprocessError} from "./utils.ts";
 
 const distPath = join(process.cwd(), "dist/index.js");
-
-const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
-const isSemver = (str: string) => semverRe.test(str.replace(/^v/, ""));
-
-function incrementSemver(str: string, level: SemverLevel) {
-  if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
-  if (level === "major") return str.replace(/([0-9]+)\.[0-9]+\.[0-9]+(.*)/, (_, m1, m2) => {
-    return `${Number(m1) + 1}.0.0${m2}`;
-  });
-  if (level === "minor") return str.replace(/([0-9]+\.)([0-9]+)\.[0-9]+(.*)/, (_, m1, m2, m3) => {
-    return `${m1}${Number(m2) + 1}.0${m3}`;
-  });
-  return str.replace(/([0-9]+\.[0-9]+\.)([0-9]+)(.*)/, (_, m1, m2, m3) => {
-    return `${m1}${Number(m2) + 1}${m3}`;
-  });
-}
 
 function getIsolatedGitEnv(tmpDir: string) {
   const isolatedHome = join(tmpDir, ".home");
@@ -68,12 +55,12 @@ test("semver", () => {
   expect(incrementSemver("10.10.10", "patch")).toEqual("10.10.11");
   expect(incrementSemver("10.10.10", "minor")).toEqual("10.11.0");
   expect(incrementSemver("10.10.10", "major")).toEqual("11.0.0");
-  expect(incrementSemver("1.0.0-pre-1.0.0", "patch")).toEqual("1.0.1-pre-1.0.0");
-  expect(incrementSemver("1.0.0-pre-1.0.0", "minor")).toEqual("1.1.0-pre-1.0.0");
-  expect(incrementSemver("1.0.0-pre-1.0.0", "major")).toEqual("2.0.0-pre-1.0.0");
-  expect(incrementSemver("10.10.10-pre-1.0.0", "patch")).toEqual("10.10.11-pre-1.0.0");
-  expect(incrementSemver("10.10.10-pre-1.0.0", "minor")).toEqual("10.11.0-pre-1.0.0");
-  expect(incrementSemver("10.10.10-pre-1.0.0", "major")).toEqual("11.0.0-pre-1.0.0");
+  expect(incrementSemver("1.0.0-pre-1.0.0", "patch")).toEqual("1.0.1");
+  expect(incrementSemver("1.0.0-pre-1.0.0", "minor")).toEqual("1.1.0");
+  expect(incrementSemver("1.0.0-pre-1.0.0", "major")).toEqual("2.0.0");
+  expect(incrementSemver("10.10.10-pre-1.0.0", "patch")).toEqual("10.10.11");
+  expect(incrementSemver("10.10.10-pre-1.0.0", "minor")).toEqual("10.11.0");
+  expect(incrementSemver("10.10.10-pre-1.0.0", "major")).toEqual("11.0.0");
 });
 
 test("versions", () => withTmpDir(async (tmpDir) => {
@@ -360,3 +347,160 @@ test("release", () => withTmpDir(async (tmpDir) => {
     expect(err.output).toMatch(/401|403/);
   }
 }));
+
+
+test("incrementSemver prerelease", () => {
+  expect(incrementSemver("1.0.0", "prerelease", "alpha")).toEqual("1.0.1-alpha.0");
+  expect(incrementSemver("1.0.1-beta.0", "prerelease", "beta")).toEqual("1.0.1-beta.1");
+  expect(incrementSemver("2.0.0-alpha.5", "prerelease", "rc")).toEqual("2.0.0-rc.0");
+  expect(incrementSemver("1.0.0", "patch", "alpha")).toEqual("1.0.1-alpha.0");
+  expect(incrementSemver("1.0.0", "minor", "beta")).toEqual("1.1.0-beta.0");
+  expect(incrementSemver("1.0.0", "major", "rc")).toEqual("2.0.0-rc.0");
+  expect(() => incrementSemver("1.0.0", "prerelease")).toThrow("prerelease requires --preid option");
+  expect(() => incrementSemver("invalid", "patch")).toThrow("Invalid semver");
+});
+
+test("replaceTokens", () => {
+  expect(replaceTokens("version _VER_", "2.3.4")).toEqual("version 2.3.4");
+  expect(replaceTokens("v_MAJOR_._MINOR_._PATCH_", "2.3.4")).toEqual("v2.3.4");
+  expect(replaceTokens("_VER_ _MAJOR_ _MINOR_ _PATCH_", "10.20.30")).toEqual("10.20.30 10 20 30");
+  expect(replaceTokens("no tokens", "1.0.0")).toEqual("no tokens");
+});
+
+test("esc", () => {
+  expect(esc("1.0.0")).toEqual("1\\.0\\.0");
+  expect(esc("a|b")).toEqual("a\\|b");
+  expect(esc("abc")).toEqual("abc");
+  expect(esc("")).toEqual("");
+});
+
+test("joinStrings", () => {
+  expect(joinStrings(["a", "b", "c"], "\n")).toEqual("a\nb\nc");
+  expect(joinStrings(["a", undefined, "c"], "\n")).toEqual("a\nc");
+  expect(joinStrings([undefined, undefined], "\n")).toEqual("");
+  expect(joinStrings(["  a  "], "\n")).toEqual("a");
+});
+
+test("ensureEol", () => {
+  expect(ensureEol("text")).toEqual(`text${EOL}`);
+  expect(ensureEol(`text${EOL}`)).toEqual(`text${EOL}`);
+});
+
+test("findUp", () => withTmpDir(async (tmpDir) => {
+  const subDir = join(tmpDir, "a", "b");
+  await mkdir(subDir, {recursive: true});
+  await writeFile(join(tmpDir, "target.txt"), "found");
+  expect(findUp("target.txt", subDir)).toEqual(join(tmpDir, "target.txt"));
+  expect(findUp("nonexistent.txt", subDir, tmpDir)).toBeNull();
+}));
+
+
+test("help", async () => {
+  const {stdout} = await exec("node", [distPath, "--help"]);
+  expect(stdout).toContain("usage: versions");
+  expect(stdout).toContain("--replace");
+});
+
+test("no args prints help", async () => {
+  const {stdout} = await exec("node", [distPath]);
+  expect(stdout).toContain("usage: versions");
+});
+
+test("dry mode", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["commit", "-m", "init"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  const {stdout} = await exec("node", [distPath, "--dry", "patch", "testfile.txt"], {
+    cwd: tmpDir, env: {...process.env, ...env},
+  });
+  expect(stdout).toContain("Would create new tag and commit: 1.0.1");
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+}));
+
+test("prefix", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["commit", "-m", "init"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  const {stdout} = await exec("node", [distPath, "--dry", "--prefix", "patch", "testfile.txt"], {
+    cwd: tmpDir, env: {...process.env, ...env},
+  });
+  expect(stdout).toContain("Would create new tag and commit: v1.0.1");
+}));
+
+test("replace", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0\ncopyright YEAR_PLACEHOLDER");
+  await exec("node", [distPath, "--gitless", "--base", "1.0.0", "-r", "s#YEAR_PLACEHOLDER#_VER_#", "patch", "testfile.txt"], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1\ncopyright 1.0.1");
+}));
+
+test("command", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+  await exec("node", [distPath, "--gitless", "--base", "1.0.0", "-c", "echo hello > marker.txt", "patch", "testfile.txt"], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+  expect(await readFile(join(tmpDir, "marker.txt"), "utf8")).toContain("hello");
+}));
+
+test("package-lock.json", () => withTmpDir(async (tmpDir) => {
+  const lockData = {
+    name: "test",
+    version: "1.0.0",
+    lockfileVersion: 3,
+    packages: {"": {name: "test", version: "1.0.0"}, "node_modules/dep": {version: "2.0.0"}},
+  };
+  await writeFile(join(tmpDir, "package-lock.json"), JSON.stringify(lockData, null, 2));
+  await exec("node", [distPath, "--gitless", "--base", "1.0.0", "patch", "package-lock.json"], {cwd: tmpDir});
+
+  const result = JSON.parse(await readFile(join(tmpDir, "package-lock.json"), "utf8"));
+  expect(result.version).toEqual("1.0.1");
+  expect(result.packages[""].version).toEqual("1.0.1");
+  expect(result.packages["node_modules/dep"].version).toEqual("2.0.0");
+}));
+
+test("go.sum is skipped", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "go.sum"), "content with 1.0.0");
+  await exec("node", [distPath, "--gitless", "--base", "1.0.0", "patch", "go.sum"], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "go.sum"), "utf8")).toEqual("content with 1.0.0");
+}));
+
+test("arbitrary lock file is skipped", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "Gemfile.lock"), "gem 1.0.0");
+  await exec("node", [distPath, "--gitless", "--base", "1.0.0", "patch", "Gemfile.lock"], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "Gemfile.lock"), "utf8")).toEqual("gem 1.0.0");
+}));
+
+
+test("SubprocessError", () => {
+  const err = new SubprocessError("failed", "out", "err");
+  expect(err.message).toEqual("failed");
+  expect(err.stdout).toEqual("out");
+  expect(err.stderr).toEqual("err");
+  expect(err.output).toEqual("err\nout");
+  expect(err.name).toEqual("SubprocessError");
+
+  const errNoOutput = new SubprocessError("failed");
+  expect(errNoOutput.output).toEqual("");
+});
+
+test("exec error", async () => {
+  await expect(exec("false", [])).rejects.toThrow();
+  try {
+    await exec("false", []);
+  } catch (err) {
+    expect(err).toBeInstanceOf(SubprocessError);
+  }
+});
+
+test("tomlGetString edge cases", () => {
+  expect(tomlGetString("", "project", "version")).toBeUndefined();
+  expect(tomlGetString("# comment\n[project]\nversion = '1.0.0'", "project", "version")).toEqual("1.0.0");
+  expect(tomlGetString("[project]\nname = 'test'", "project", "version")).toBeUndefined();
+  expect(tomlGetString("[other]\nversion = '1.0.0'", "project", "version")).toBeUndefined();
+});

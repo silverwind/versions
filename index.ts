@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {SubprocessError, type Result, exec, tomlGetString} from "./utils.ts";
 import {parseArgs} from "node:util";
-import {basename, dirname, join, relative} from "node:path";
+import {basename, dirname, join, relative, resolve} from "node:path";
 import {cwd, exit, stdout} from "node:process";
 import {EOL, platform} from "node:os";
 import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
@@ -25,11 +25,11 @@ const reNewline = /\r?\n/;
 const reDatePattern = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
 
-function esc(str: string): string {
+export function esc(str: string): string {
   return str.replace(reEscapeChars, "\\$&");
 }
 
-function isSemver(str: string): boolean {
+export function isSemver(str: string): boolean {
   return reSemver.test(str.replace(reVersionPrefix, ""));
 }
 
@@ -37,7 +37,7 @@ function uniq<T extends Array<any>>(arr: T): T {
   return Array.from(new Set(arr)) as T;
 }
 
-function replaceTokens(str: string, newVersion: string): string {
+export function replaceTokens(str: string, newVersion: string): string {
   const [major, minor, patch] = newVersion.split(".");
   return str
     .replace(reVerToken, newVersion)
@@ -46,7 +46,7 @@ function replaceTokens(str: string, newVersion: string): string {
     .replace(rePatchToken, patch);
 }
 
-function incrementSemver(str: string, level: string, preid?: string): string {
+export function incrementSemver(str: string, level: string, preid?: string): string {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
   if (level === "major") {
     const newVer = str.replace(reMajorVersion, (_, m1) => `${Number(m1) + 1}.0.0`);
@@ -90,7 +90,7 @@ function incrementSemver(str: string, level: string, preid?: string): string {
   return str.replace(rePatchVersion, (_, m1, m2, m3) => `${m1}${Number(m2) + 1}${m3}`);
 }
 
-function findUp(filename: string, dir: string, stopDir?: string): string | null {
+export function findUp(filename: string, dir: string, stopDir?: string): string | null {
   const path = join(dir, filename);
 
   try {
@@ -225,7 +225,7 @@ function write(file: string, content: string): void {
 }
 
 // join strings, ignoring falsy values and trimming the result
-function joinStrings(strings: Array<string | undefined>, separator: string): string {
+export function joinStrings(strings: Array<string | undefined>, separator: string): string {
   const arr: Array<string> = [];
   for (const string of strings) {
     if (!string) continue;
@@ -245,7 +245,7 @@ function end(err?: Error | string | void): void {
   exit(err ? 1 : 0);
 }
 
-function ensureEol(str: string): string {
+export function ensureEol(str: string): string {
   return str.endsWith(EOL) ? str : `${str}${EOL}`;
 }
 
@@ -582,4 +582,6 @@ async function main(): Promise<void> {
   }
 }
 
-main().then(end).catch(end);
+if (import.meta.filename === resolve(process.argv[1] ?? "")) {
+  main().then(end).catch(end);
+}
