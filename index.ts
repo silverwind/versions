@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {SubprocessError, type Result, exec, tomlGetString} from "./utils.ts";
+import {SubprocessError, type Result, exec, reNewline, tomlGetString} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {cwd, exit, stdout} from "node:process";
@@ -21,7 +21,6 @@ const reMinorVersion = /([0-9]+\.)([0-9]+)\.[0-9]+(.*)/;
 const rePatchVersion = /([0-9]+\.[0-9]+\.)([0-9]+)(.*)/;
 const rePrereleaseVersion = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?/;
 const rePrereleaseIdNum = /^([a-zA-Z0-9-]+)\.(\d+)$/;
-const reNewline = /\r?\n/;
 const reDatePattern = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
 
@@ -406,6 +405,7 @@ async function main(): Promise<void> {
   const gitDir = findUp(".git", pwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
   if (!projectRoot) projectRoot = pwd;
+  const repoInfoPromise = (!args.gitless && args.release) ? getRepoInfo() : null;
 
   // obtain old version
   let baseVersion: string = "";
@@ -483,9 +483,29 @@ async function main(): Promise<void> {
     }
   }
 
+  const msgs = (args.message || []).filter(msg => typeof msg === "string");
+  const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
+
   // start background tasks early (before file processing and custom command)
-  const repoInfoPromise = (!args.gitless && args.release) ? getRepoInfo() : null;
   const filesToAddPromise = (!args.gitless && !args.all && files.length) ? removeIgnoredFiles(files) : null;
+  const changelogPromise = (!args.gitless && !args.dry) ? (async () => {
+    let range = "";
+    const tagExists = await exec("git", ["rev-parse", "--verify", `refs/tags/${tagName}`]).then(() => true, () => false);
+    if (tagExists) {
+      range = `${tagName}..HEAD`;
+    } else if (cachedDescribeTag) {
+      range = `${cachedDescribeTag}..HEAD`;
+    }
+    try {
+      const logArgs = ["log"];
+      if (range) logArgs.push(range);
+      // https://git-scm.com/docs/pretty-formats
+      const {stdout} = await exec("git", [...logArgs, `--pretty=format:* %s (%aN)`]);
+      return stdout?.length ? stdout : undefined;
+    } catch {
+      return undefined;
+    }
+  })() : null;
 
   if (files.length) {
     // verify files exist
@@ -512,31 +532,11 @@ async function main(): Promise<void> {
   }
   if (args.gitless) return; // nothing else to do
 
-  const msgs = (args.message || []).filter(msg => typeof msg === "string");
-  const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
-
-  let range = "";
-  {
-    const tagExists = await exec("git", ["rev-parse", "--verify", `refs/tags/${tagName}`]).then(() => true, () => false);
-    if (tagExists) {
-      range = `${tagName}..HEAD`;
-    } else if (cachedDescribeTag) {
-      range = `${cachedDescribeTag}..HEAD`;
-    }
-  }
-
-  let changelog: string | undefined;
-  try {
-    const args = ["log"];
-    if (range) args.push(range);
-    // https://git-scm.com/docs/pretty-formats
-    const {stdout} = await exec("git", [...args, `--pretty=format:* %s (%aN)`]);
-    if (stdout?.length) changelog = stdout;
-  } catch {}
-
   if (args.dry) {
     return console.info(`Would create new tag and commit: ${tagName}`);
   }
+
+  const changelog = await changelogPromise!;
 
   // create commit
   const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");

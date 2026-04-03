@@ -23,9 +23,12 @@ type ExecOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
+export const reNewline = /\r?\n/;
+
 export function tomlGetString(content: string, section: string, key: string): string | undefined {
   let inSection = false;
-  for (const line of content.split(/\r?\n/)) {
+  const keyRe = new RegExp(`^${key}\\s*=\\s*["']([^"']+)["']`);
+  for (const line of content.split(reNewline)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed[0] === "#") continue;
     if (trimmed[0] === "[") {
@@ -34,7 +37,7 @@ export function tomlGetString(content: string, section: string, key: string): st
       continue;
     }
     if (inSection) {
-      const m = new RegExp(`^${key}\\s*=\\s*["']([^"']+)["']`).exec(trimmed);
+      const m = keyRe.exec(trimmed);
       if (m) return m[1];
     }
   }
