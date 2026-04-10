@@ -32,10 +32,6 @@ export function isSemver(str: string): boolean {
   return reSemver.test(str.replace(reVersionPrefix, ""));
 }
 
-export function uniq<T extends Array<any>>(arr: T): T {
-  return Array.from(new Set(arr)) as T;
-}
-
 export function replaceTokens(str: string, newVersion: string): string {
   const [major, minor, patch] = newVersion.split(".");
   return str
@@ -225,12 +221,7 @@ export function write(file: string, content: string): void {
 
 // join strings, ignoring falsy values and trimming the result
 export function joinStrings(strings: Array<string | undefined>, separator: string): string {
-  const arr: Array<string> = [];
-  for (const string of strings) {
-    if (!string) continue;
-    arr.push(string);
-  }
-  return arr.join(separator).trim();
+  return strings.filter(Boolean).join(separator).trim();
 }
 
 function end(err?: Error | string | void): void {
@@ -242,10 +233,6 @@ function end(err?: Error | string | void): void {
     console.info(err);
   }
   exit(err ? 1 : 0);
-}
-
-export function ensureEol(str: string): string {
-  return str.endsWith(EOL) ? str : `${str}${EOL}`;
 }
 
 export function getGithubToken(): string | null {
@@ -307,7 +294,7 @@ async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: str
     name: tagName,
     body,
     draft: false,
-    prerelease: rePrereleaseVersion.test(tagName) && tagName.includes("-"),
+    prerelease: tagName.includes("-"),
   };
 
   const headers: Record<string, string> = {
@@ -335,8 +322,8 @@ async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: str
 }
 
 export function writeResult(result: Result): void {
-  if (result.stdout) stdout.write(ensureEol(result.stdout));
-  if (result.stderr) stdout.write(ensureEol(result.stderr));
+  if (result.stdout) stdout.write(result.stdout.endsWith(EOL) ? result.stdout : `${result.stdout}${EOL}`);
+  if (result.stderr) stdout.write(result.stderr.endsWith(EOL) ? result.stderr : `${result.stderr}${EOL}`);
 }
 
 async function main(): Promise<void> {
@@ -362,7 +349,7 @@ async function main(): Promise<void> {
   });
   const args = result.values;
   let [level, ...files] = result.positionals;
-  files = uniq(files);
+  files = Array.from(new Set(files));
 
   if (args.version) {
     console.info(pkg.version || "0.0.0");
@@ -517,13 +504,9 @@ async function main(): Promise<void> {
     }
 
     // update files
-    const todo: Array<[string, string | null]> = [];
     for (const file of files) {
-      todo.push(getFileChanges({file, baseVersion, newVersion, replacements, date}));
-    }
-
-    for (const [file, newData] of todo) {
-      if (newData !== null) write(file, newData);
+      const [filePath, newData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
+      if (newData !== null) write(filePath, newData);
     }
   }
 
@@ -564,20 +547,12 @@ async function main(): Promise<void> {
     }
 
     const releaseBody = changelog || tagName;
-
-    if (repoInfo.type === "github") {
-      const token = getGithubToken();
-      if (!token) {
-        throw new Error("GitHub release requested but no token found in environment");
-      }
-      await createForgeRelease(repoInfo, tagName, releaseBody, token);
-    } else if (repoInfo.type === "gitea") {
-      const token = getGiteaToken();
-      if (!token) {
-        throw new Error("Gitea release requested but no token found in environment");
-      }
-      await createForgeRelease(repoInfo, tagName, releaseBody, token);
+    const forgeName = repoInfo.type === "github" ? "GitHub" : "Gitea";
+    const token = repoInfo.type === "github" ? getGithubToken() : getGiteaToken();
+    if (!token) {
+      throw new Error(`${forgeName} release requested but no token found in environment`);
     }
+    await createForgeRelease(repoInfo, tagName, releaseBody, token);
   }
 }
 

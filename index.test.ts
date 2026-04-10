@@ -1,10 +1,10 @@
 import {readFileSync} from "node:fs";
 import {readFile, writeFile, rm, mkdir, mkdtemp} from "node:fs/promises";
-import {EOL, tmpdir} from "node:os";
+import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {
-  isSemver, incrementSemver, replaceTokens, esc, uniq,
-  joinStrings, ensureEol, findUp, getFileChanges, write,
+  isSemver, incrementSemver, replaceTokens, esc,
+  joinStrings, findUp, getFileChanges, write,
   readVersionFromPackageJson, readVersionFromPyprojectToml,
   removeIgnoredFiles, getGithubToken, getGiteaToken,
   getRepoInfo, writeResult,
@@ -383,11 +383,6 @@ test("joinStrings", () => {
   expect(joinStrings(["  a  "], "\n")).toEqual("a");
 });
 
-test("ensureEol", () => {
-  expect(ensureEol("text")).toEqual(`text${EOL}`);
-  expect(ensureEol(`text${EOL}`)).toEqual(`text${EOL}`);
-});
-
 test("findUp", () => withTmpDir(async (tmpDir) => {
   const subDir = join(tmpDir, "a", "b");
   await mkdir(subDir, {recursive: true});
@@ -503,12 +498,6 @@ test("tomlGetString edge cases", () => {
   expect(tomlGetString("# comment\n[project]\nversion = '1.0.0'", "project", "version")).toEqual("1.0.0");
   expect(tomlGetString("[project]\nname = 'test'", "project", "version")).toBeUndefined();
   expect(tomlGetString("[other]\nversion = '1.0.0'", "project", "version")).toBeUndefined();
-});
-
-test("uniq", () => {
-  expect(uniq([1, 2, 2, 3])).toEqual([1, 2, 3]);
-  expect(uniq(["a", "b", "a"])).toEqual(["a", "b"]);
-  expect(uniq([])).toEqual([]);
 });
 
 test("incrementSemver unknown level throws", () => {
