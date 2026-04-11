@@ -6,13 +6,15 @@ export class SubprocessError extends Error {
   stdout: string;
   stderr: string;
   output: string;
+  exitCode: number | null;
 
-  constructor(message: string, stdout = "", stderr = "") {
+  constructor(message: string, stdout = "", stderr = "", exitCode: number | null = null) {
     super(message);
     this.name = "SubprocessError";
     this.stdout = stdout;
     this.stderr = stderr;
     this.output = [stderr, stdout].filter(Boolean).join("\n");
+    this.exitCode = exitCode;
   }
 }
 
@@ -48,7 +50,7 @@ export function exec(file: string, args: readonly string[], options?: ExecOption
   return new Promise((resolve, reject) => {
     const child = execFileCb(file, args as string[], {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env}, (error, stdout, stderr) => {
       if (error) {
-        reject(new SubprocessError(error.message.split(/\r?\n/)[0], stdout, stderr));
+        reject(new SubprocessError(error.message.split(/\r?\n/)[0], stdout, stderr, typeof error.code === "number" ? error.code : null));
       } else {
         resolve({stdout: stdout.trimEnd(), stderr: stderr.trimEnd()});
       }

@@ -288,7 +288,7 @@ export async function getRepoInfo(cwd?: string): Promise<RepoInfo | null> {
   }
 }
 
-async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<void> {
+export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<void> {
   const apiUrl = repoInfo.type === "github" ?
     `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/releases` :
     `https://${repoInfo.host}/api/v1/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
@@ -303,14 +303,19 @@ async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: str
 
   let lastError: Error | undefined;
   for (const token of tokens) {
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": repoInfo.type === "github" ? `Bearer ${token}` : `token ${token}`,
-      },
-      body: releaseBody,
-    });
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": repoInfo.type === "github" ? `Bearer ${token}` : `token ${token}`,
+        },
+        body: releaseBody,
+      });
+    } catch (err: any) {
+      throw new Error(`Failed to create release: ${err.cause?.message || err.message || "Unknown error"}`);
+    }
 
     if (response.ok) {
       const result = await response.json();
@@ -378,7 +383,7 @@ async function main(): Promise<void> {
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
-    -R, --release         Create a GitHub or Gitea release with the changelog as body
+    -R, --release         Create a GitHub or Gitea release, push commit and tag to origin
     -v, --version         Print the version
     -h, --help            Print this help
 
@@ -455,9 +460,12 @@ async function main(): Promise<void> {
   // convert paths to relative
   files = files.map(file => relative(pwd, file));
 
-  // validate prerelease requirements
+  // validate flag combinations
   if (level === "prerelease" && !args.preid) {
     return end(new Error("prerelease requires --preid option"));
+  }
+  if (args.gitless && args.release) {
+    return end(new Error("--gitless and --release are mutually exclusive"));
   }
 
   // set new version
@@ -553,6 +561,14 @@ async function main(): Promise<void> {
     if (!repoInfo) {
       throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
     }
+
+    // push commit and tag before creating release so the forge uses the existing tag
+    const {stdout: branchOut} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const branch = branchOut.trim();
+    if (branch === "HEAD") {
+      throw new Error("Cannot create release from detached HEAD");
+    }
+    writeResult(await exec("git", ["push", "origin", branch, tagName]));
 
     const releaseBody = changelog || tagName;
     const forgeName = repoInfo.type === "github" ? "GitHub" : "Gitea";
