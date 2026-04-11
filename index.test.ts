@@ -6,7 +6,7 @@ import {
   isSemver, incrementSemver, replaceTokens, esc,
   joinStrings, findUp, getFileChanges, write,
   readVersionFromPackageJson, readVersionFromPyprojectToml,
-  removeIgnoredFiles, getGithubToken, getGiteaToken,
+  removeIgnoredFiles, getGithubTokens, getGiteaTokens,
   getRepoInfo, writeResult,
 } from "./index.ts";
 import {exec, tomlGetString, SubprocessError} from "./utils.ts";
@@ -347,7 +347,7 @@ test("release", () => withTmpDir(async (tmpDir) => {
   } catch (err: any) {
     expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
     expect(err.output).toContain("Failed to create release");
-    expect(err.output).toMatch(/401|403/);
+    expect(err.output).toMatch(/401|403|404/);
   }
 }));
 
@@ -605,28 +605,28 @@ test("write", () => withTmpDir(async (tmpDir) => {
   expect(await readFile(file, "utf8")).toEqual("new");
 }));
 
-test("getGithubToken", () => {
+test("getGithubTokens", async () => {
   const saved = {...process.env};
   delete process.env.VERSIONS_FORGE_TOKEN;
   delete process.env.GITHUB_API_TOKEN;
   delete process.env.GITHUB_TOKEN;
   delete process.env.GH_TOKEN;
   delete process.env.HOMEBREW_GITHUB_API_TOKEN;
-  expect(getGithubToken()).toBeNull();
+  await getGithubTokens(); // may contain gh auth token if gh is installed
   process.env.GH_TOKEN = "test-token";
-  expect(getGithubToken()).toEqual("test-token");
+  expect(await getGithubTokens()).toContain("test-token");
   Object.assign(process.env, saved);
 });
 
-test("getGiteaToken", () => {
+test("getGiteaTokens", () => {
   const saved = {...process.env};
   delete process.env.VERSIONS_FORGE_TOKEN;
   delete process.env.GITEA_API_TOKEN;
   delete process.env.GITEA_AUTH_TOKEN;
   delete process.env.GITEA_TOKEN;
-  expect(getGiteaToken()).toBeNull();
+  expect(getGiteaTokens()).toEqual([]);
   process.env.GITEA_TOKEN = "gitea-tok";
-  expect(getGiteaToken()).toEqual("gitea-tok");
+  expect(getGiteaTokens()).toContain("gitea-tok");
   Object.assign(process.env, saved);
 });
 

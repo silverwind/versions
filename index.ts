@@ -235,21 +235,25 @@ function end(err?: Error | string | void): void {
   exit(err ? 1 : 0);
 }
 
-export function getGithubToken(): string | null {
-  return process.env.VERSIONS_FORGE_TOKEN ||
-         process.env.GITHUB_API_TOKEN ||
-         process.env.GITHUB_TOKEN ||
-         process.env.GH_TOKEN ||
-         process.env.HOMEBREW_GITHUB_API_TOKEN ||
-         null;
+function getEnvTokens(names: string[]): string[] {
+  const tokens: string[] = [];
+  for (const name of names) {
+    if (process.env[name]) tokens.push(process.env[name]);
+  }
+  return Array.from(new Set(tokens));
 }
 
-export function getGiteaToken(): string | null {
-  return process.env.VERSIONS_FORGE_TOKEN ||
-         process.env.GITEA_API_TOKEN ||
-         process.env.GITEA_AUTH_TOKEN ||
-         process.env.GITEA_TOKEN ||
-         null;
+export async function getGithubTokens(): Promise<string[]> {
+  const tokens = getEnvTokens(["VERSIONS_FORGE_TOKEN", "GITHUB_API_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"]);
+  try {
+    const {stdout} = await exec("gh", ["auth", "token"]);
+    if (stdout) tokens.push(stdout.trim());
+  } catch {}
+  return Array.from(new Set(tokens));
+}
+
+export function getGiteaTokens(): string[] {
+  return getEnvTokens(["VERSIONS_FORGE_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN"]);
 }
 
 export type RepoInfo = {
@@ -284,41 +288,45 @@ export async function getRepoInfo(cwd?: string): Promise<RepoInfo | null> {
   }
 }
 
-async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, token: string): Promise<void> {
+async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<void> {
   const apiUrl = repoInfo.type === "github" ?
     `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/releases` :
     `https://${repoInfo.host}/api/v1/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
 
-  const releaseData = {
+  const releaseBody = JSON.stringify({
     tag_name: tagName,
     name: tagName,
     body,
     draft: false,
     prerelease: tagName.includes("-"),
-  };
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Authorization": repoInfo.type === "github" ? `Bearer ${token}` : `token ${token}`,
-  };
-
-  const response = await fetch(apiUrl, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(releaseData),
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to create release: ${response.status} ${response.statusText}\n${errorText}`);
-  }
+  let lastError: Error | undefined;
+  for (const token of tokens) {
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": repoInfo.type === "github" ? `Bearer ${token}` : `token ${token}`,
+      },
+      body: releaseBody,
+    });
 
-  const result = await response.json();
-  if (result.html_url) {
-    console.info(`Created release: ${result.html_url}`);
-  } else {
-    console.info("Created release");
+    if (response.ok) {
+      const result = await response.json();
+      if (result.html_url) {
+        console.info(`Created release: ${result.html_url}`);
+      } else {
+        console.info("Created release");
+      }
+      return;
+    }
+
+    const errorText = await response.text();
+    lastError = new Error(`Failed to create release: ${response.status} ${response.statusText}\n${errorText}`);
+    if (response.status !== 401 && response.status !== 403) throw lastError;
   }
+  throw lastError ?? new Error("No tokens provided");
 }
 
 export function writeResult(result: Result): void {
@@ -548,11 +556,11 @@ async function main(): Promise<void> {
 
     const releaseBody = changelog || tagName;
     const forgeName = repoInfo.type === "github" ? "GitHub" : "Gitea";
-    const token = repoInfo.type === "github" ? getGithubToken() : getGiteaToken();
-    if (!token) {
+    const tokens = repoInfo.type === "github" ? await getGithubTokens() : getGiteaTokens();
+    if (!tokens.length) {
       throw new Error(`${forgeName} release requested but no token found in environment`);
     }
-    await createForgeRelease(repoInfo, tagName, releaseBody, token);
+    await createForgeRelease(repoInfo, tagName, releaseBody, tokens);
   }
 }
 
