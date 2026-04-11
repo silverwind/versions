@@ -240,7 +240,7 @@ function getEnvTokens(names: string[]): string[] {
   for (const name of names) {
     if (process.env[name]) tokens.push(process.env[name]);
   }
-  return Array.from(new Set(tokens));
+  return tokens;
 }
 
 export async function getGithubTokens(): Promise<string[]> {
@@ -253,7 +253,7 @@ export async function getGithubTokens(): Promise<string[]> {
 }
 
 export function getGiteaTokens(): string[] {
-  return getEnvTokens(["VERSIONS_FORGE_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN"]);
+  return Array.from(new Set(getEnvTokens(["VERSIONS_FORGE_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN"])));
 }
 
 export type RepoInfo = {
