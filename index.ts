@@ -405,7 +405,16 @@ async function main(): Promise<void> {
   const gitDir = findUp(".git", pwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
   if (!projectRoot) projectRoot = pwd;
-  const repoInfoPromise = (!args.gitless && args.release) ? getRepoInfo() : null;
+  const releasePrep = (!args.gitless && args.release) ? (() => {
+    const repoInfo = getRepoInfo();
+    return {
+      repoInfo,
+      tokens: repoInfo.then(info => {
+        if (!info) return [];
+        return info.type === "github" ? getGithubTokens() : getGiteaTokens();
+      }),
+    };
+  })() : null;
 
   // obtain old version
   let baseVersion: string = "";
@@ -475,7 +484,7 @@ async function main(): Promise<void> {
   if (args.replace?.length) {
     const replace = args.replace.filter(arg => typeof arg === "string");
     for (const replaceStr of replace) {
-      let [_, re, replacement, flags] = (reReplaceString.exec(replaceStr) || []);
+      let [, re, replacement, flags] = (reReplaceString.exec(replaceStr) || []);
 
       if (!re || !replacement) {
         end(new Error(`Invalid replace string: ${replaceStr}`));
@@ -535,14 +544,14 @@ async function main(): Promise<void> {
     return console.info(`Would create new tag and commit: ${tagName}`);
   }
 
-  const changelog = await changelogPromise!;
+  const changelog = (await changelogPromise) ?? undefined;
 
   // create commit
   const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
   if (args.all) {
     writeResult(await exec("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
   } else {
-    const filesToAdd = filesToAddPromise ? await filesToAddPromise : [];
+    const filesToAdd = (await filesToAddPromise) ?? [];
     if (filesToAdd.length) {
       writeResult(await exec("git", ["commit", "-i", "-F", "-", "--", ...filesToAdd], {stdin: {string: commitMsg}}));
     } else {
@@ -556,23 +565,20 @@ async function main(): Promise<void> {
   writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
 
   // create release if requested
-  if (args.release) {
-    const repoInfo = await repoInfoPromise!;
+  if (releasePrep) {
+    const repoInfo = await releasePrep.repoInfo;
     if (!repoInfo) {
       throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
     }
 
-    // push commit and tag before creating release so the forge uses the existing tag
     const {stdout: branchOut} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
     const branch = branchOut.trim();
-    if (branch === "HEAD") {
-      throw new Error("Cannot create release from detached HEAD");
-    }
+    if (branch === "HEAD") throw new Error("Cannot create release from detached HEAD");
     writeResult(await exec("git", ["push", "origin", branch, tagName]));
 
     const releaseBody = changelog || tagName;
     const forgeName = repoInfo.type === "github" ? "GitHub" : "Gitea";
-    const tokens = repoInfo.type === "github" ? await getGithubTokens() : getGiteaTokens();
+    const tokens = await releasePrep.tokens;
     if (!tokens.length) {
       throw new Error(`${forgeName} release requested but no token found in environment`);
     }
