@@ -49,16 +49,16 @@ publish: node_modules
 	pnpm publish --no-git-checks
 
 .PHONY: patch
-patch: node_modules lint test
-	pnpm exec versions -R patch package.json
+patch: node_modules lint build test
+	./dist/index.js -R patch package.json
 	git push -u --tags origin master
 
 .PHONY: minor
-minor: node_modules lint test
-	pnpm exec versions -R minor package.json
+minor: node_modules lint build test
+	./dist/index.js -R minor package.json
 	git push -u --tags origin master
 
 .PHONY: major
-major: node_modules lint test
-	pnpm exec versions -R major package.json
+major: node_modules lint build test
+	./dist/index.js -R major package.json
 	git push -u --tags origin master
