@@ -14,8 +14,24 @@ import {exec, tomlGetString, SubprocessError} from "./utils.ts";
 
 const distPath = join(process.cwd(), "dist/index.js");
 
+// bun's vitest-compat `vi` lacks stubGlobal/unstubAllGlobals, so fall back to manual restore.
+const stubbedGlobals = new Map<string, unknown>();
+function stubGlobal(name: string, value: unknown) {
+  if (typeof vi.stubGlobal === "function") {
+    vi.stubGlobal(name, value);
+  } else {
+    if (!stubbedGlobals.has(name)) stubbedGlobals.set(name, (globalThis as any)[name]);
+    (globalThis as any)[name] = value;
+  }
+}
+
 afterEach(() => {
-  vi.unstubAllGlobals();
+  if (typeof vi.unstubAllGlobals === "function") {
+    vi.unstubAllGlobals();
+  } else {
+    for (const [name, value] of stubbedGlobals) (globalThis as any)[name] = value;
+    stubbedGlobals.clear();
+  }
 });
 
 async function createBareRemote(tmpDir: string): Promise<string> {
@@ -46,7 +62,7 @@ async function withTmpDir(fn: (tmpDir: string) => Promise<void>): Promise<void> 
   try {
     await fn(tmpDir);
   } finally {
-    await rm(tmpDir, {recursive: true, force: true});
+    await rm(tmpDir, {recursive: true, force: true, maxRetries: 10, retryDelay: 100});
   }
 }
 
@@ -340,7 +356,7 @@ snapshots:
 
 test("createForgeRelease github success", async () => {
   const mock = vi.fn(() => Promise.resolve(Response.json({html_url: "https://github.com/o/r/releases/tag/1.0.1"}, {status: 201})));
-  vi.stubGlobal("fetch", mock);
+  stubGlobal("fetch", mock);
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
   await createForgeRelease(info, "1.0.1", "changelog", ["gh-token"]);
   expect(mock).toHaveBeenCalledOnce();
@@ -357,7 +373,7 @@ test("createForgeRelease github success", async () => {
 
 test("createForgeRelease gitea success", async () => {
   const mock = vi.fn(() => Promise.resolve(Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/2.0.0"}, {status: 201})));
-  vi.stubGlobal("fetch", mock);
+  stubGlobal("fetch", mock);
   const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
   await createForgeRelease(info, "2.0.0", "notes", ["gitea-tok"]);
   expect(mock).toHaveBeenCalledOnce();
@@ -368,7 +384,7 @@ test("createForgeRelease gitea success", async () => {
 
 test("createForgeRelease prerelease tag", async () => {
   const mock = vi.fn(() => Promise.resolve(Response.json({}, {status: 201})));
-  vi.stubGlobal("fetch", mock);
+  stubGlobal("fetch", mock);
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
   await createForgeRelease(info, "1.0.0-beta.1", "body", ["tok"]);
   expect(JSON.parse((mock.mock.calls[0] as unknown as [string, any])[1].body).prerelease).toEqual(true);
@@ -378,26 +394,26 @@ test.each([[401, "Unauthorized"], [403, "Forbidden"]])("createForgeRelease token
   const mock = vi.fn()
     .mockResolvedValueOnce(new Response(text, {status}))
     .mockImplementation(() => Promise.resolve(Response.json({html_url: "https://github.com/o/r/releases/tag/1.0.0"}, {status: 201})));
-  vi.stubGlobal("fetch", mock);
+  stubGlobal("fetch", mock);
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
   await createForgeRelease(info, "1.0.0", "body", ["bad-token", "good-token"]);
   expect(mock).toHaveBeenCalledTimes(2);
 });
 
 test("createForgeRelease throws on non-auth error", async () => {
-  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Validation failed", {status: 422, statusText: "Unprocessable Entity"}))));
+  stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Validation failed", {status: 422, statusText: "Unprocessable Entity"}))));
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
   await expect(createForgeRelease(info, "1.0.0", "body", ["tok"])).rejects.toThrow("422");
 });
 
 test("createForgeRelease throws when all tokens fail", async () => {
-  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Unauthorized", {status: 401, statusText: "Unauthorized"}))));
+  stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Unauthorized", {status: 401, statusText: "Unauthorized"}))));
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
   await expect(createForgeRelease(info, "1.0.0", "body", ["tok1", "tok2"])).rejects.toThrow("401");
 });
 
 test("createForgeRelease network error includes cause", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(
+  stubGlobal("fetch", vi.fn().mockRejectedValue(
     Object.assign(new TypeError("fetch failed"), {cause: new Error("getaddrinfo ENOTFOUND example.com")}),
   ));
   const info: RepoInfo = {owner: "o", repo: "r", host: "example.com", type: "gitea"};
@@ -405,7 +421,7 @@ test("createForgeRelease network error includes cause", async () => {
 });
 
 test("createForgeRelease no html_url in response", async () => {
-  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({id: 1}, {status: 201}))));
+  stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({id: 1}, {status: 201}))));
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
   await createForgeRelease(info, "1.0.0", "body", ["tok"]);
 });
