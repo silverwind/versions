@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {SubprocessError, type Result, exec, reNewline, tomlGetString} from "./utils.ts";
+import {SubprocessError, type Result, colorize, exec, logVerbose, reNewline, setVerbose, tomlGetString} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {cwd, exit, stdout} from "node:process";
@@ -304,6 +304,7 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
   let lastError: Error | undefined;
   for (const token of tokens) {
     let response: Response;
+    logVerbose(`${colorize("POST", "magenta")} ${apiUrl}`);
     try {
       response = await fetch(apiUrl, {
         method: "POST",
@@ -316,6 +317,7 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
     } catch (err: any) {
       throw new Error(`Failed to create release: ${err.cause?.message || err.message || "Unknown error"}`);
     }
+    logVerbose(`${colorize(String(response.status), response.ok ? "green" : "red")} ${apiUrl}`);
 
     if (response.ok) {
       const result = await response.json();
@@ -330,6 +332,7 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
     const errorText = await response.text();
     lastError = new Error(`Failed to create release: ${response.status} ${response.statusText}\n${errorText}`);
     if (response.status !== 401 && response.status !== 403) throw lastError;
+    logVerbose(`auth failed (${response.status}), trying next token`);
   }
   throw lastError ?? new Error("No tokens provided");
 }
@@ -358,11 +361,14 @@ async function main(): Promise<void> {
       replace: {short: "r", type: "string", multiple: true},
       message: {short: "m", type: "string", multiple: true},
       preid: {short: "i", type: "string"},
+      verbose: {short: "V", type: "boolean"},
     },
   });
   const args = result.values;
   let [level, ...files] = result.positionals;
   files = Array.from(new Set(files));
+
+  setVerbose(Boolean(args.verbose));
 
   if (args.version) {
     console.info(pkg.version || "0.0.0");
@@ -384,6 +390,7 @@ async function main(): Promise<void> {
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
     -R, --release         Create a GitHub or Gitea release, push commit and tag to origin
+    -V, --verbose         Print verbose output to stderr
     -v, --version         Print the version
     -h, --help            Print this help
 
@@ -419,6 +426,7 @@ async function main(): Promise<void> {
   // obtain old version
   let baseVersion: string = "";
   let cachedDescribeTag: string = "";
+  let baseSource: string = "";
   if (!args.base) {
     let stdout: string = "";
     if (!args.gitless) {
@@ -428,6 +436,7 @@ async function main(): Promise<void> {
         cachedDescribeTag = result.stdout.trim();
         if (isSemver(cachedDescribeTag)) {
           baseVersion = cachedDescribeTag.replace(reVersionPrefix, "");
+          baseSource = "git describe";
         }
       } catch {}
       // Fall back to full tag list if describe didn't yield a semver tag
@@ -438,25 +447,33 @@ async function main(): Promise<void> {
         for (const tag of stdout.split(reNewline).map(v => v.trim()).filter(Boolean)) {
           if (isSemver(tag)) {
             baseVersion = tag.replace(reVersionPrefix, "");
+            baseSource = "git tag list";
             break;
           }
         }
       }
     }
     if (!baseVersion) {
-      // Try to get version from package.json first, then pyproject.toml as fallback
-      // package.json takes precedence for JavaScript/TypeScript projects
-      baseVersion = readVersionFromPackageJson(projectRoot) || readVersionFromPyprojectToml(projectRoot) || "";
+      baseVersion = readVersionFromPackageJson(projectRoot) || "";
+      if (baseVersion) {
+        baseSource = "package.json";
+      } else {
+        baseVersion = readVersionFromPyprojectToml(projectRoot) || "";
+        if (baseVersion) baseSource = "pyproject.toml";
+      }
       if (!baseVersion && args.gitless) {
         return end(new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`));
       }
       if (!baseVersion) {
         baseVersion = "0.0.0";
+        baseSource = "default";
       }
     }
   } else {
     baseVersion = String(args.base);
+    baseSource = "--base";
   }
+  logVerbose(`base version ${baseVersion} from ${baseSource}`);
 
   // chop off "v"
   if (baseVersion.startsWith("v")) baseVersion = baseVersion.substring(1);
@@ -479,6 +496,7 @@ async function main(): Promise<void> {
 
   // set new version
   const newVersion = incrementSemver(baseVersion, level, typeof args.preid === "string" ? args.preid : undefined);
+  logVerbose(`new version ${newVersion}`);
 
   const replacements: Array<{re: RegExp, replacement: string}> = [];
   if (args.replace?.length) {
@@ -531,16 +549,26 @@ async function main(): Promise<void> {
     // update files
     for (const file of files) {
       const [filePath, newData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
-      if (newData !== null) write(filePath, newData);
+      if (newData !== null) {
+        logVerbose(`writing ${filePath}`);
+        write(filePath, newData);
+      } else {
+        logVerbose(`skipping ${file} (unhandled lockfile)`);
+      }
     }
   }
 
   if (typeof args.command === "string") {
+    logVerbose(`running command: ${args.command}`);
     writeResult(await exec(args.command, [], {shell: true}));
   }
-  if (args.gitless) return; // nothing else to do
+  if (args.gitless) {
+    logVerbose("gitless — skipping commit, tag, and release");
+    return;
+  }
 
   if (args.dry) {
+    logVerbose("dry run — skipping commit and tag");
     return console.info(`Would create new tag and commit: ${tagName}`);
   }
 
@@ -582,6 +610,7 @@ async function main(): Promise<void> {
     if (!tokens.length) {
       throw new Error(`${forgeName} release requested but no token found in environment`);
     }
+    logVerbose(`creating ${forgeName} release for ${tagName} (${tokens.length} token${tokens.length === 1 ? "" : "s"} to try)`);
     await createForgeRelease(repoInfo, tagName, releaseBody, tokens);
   }
 }

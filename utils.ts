@@ -1,6 +1,35 @@
 import {execFile as execFileCb} from "node:child_process";
+import {stderr} from "node:process";
+import {styleText} from "node:util";
 
 export type Result = {stdout: string; stderr: string};
+
+let verbose = false;
+const useColor = stderr.isTTY;
+
+export function setVerbose(value: boolean): void {
+  verbose = value;
+}
+
+const pad = (value: number, len = 2) => String(value).padStart(len, "0");
+
+function timestamp(): string {
+  const date = new Date();
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+}
+
+export function logVerbose(message: string): void {
+  if (!verbose) return;
+  console.error(`${timestamp()} ${message}`);
+}
+
+export function colorize(text: string, color: "magenta" | "green" | "red"): string {
+  return useColor ? styleText(color, text) : text;
+}
+
+function quoteArg(arg: string): string {
+  return /[\s"']/.test(arg) ? JSON.stringify(arg) : arg;
+}
 
 export class SubprocessError extends Error {
   stdout: string;
@@ -47,6 +76,7 @@ export function tomlGetString(content: string, section: string, key: string): st
 }
 
 export function exec(file: string, args: readonly string[], options?: ExecOptions): Promise<Result> {
+  if (verbose) logVerbose(`$ ${args.length ? `${file} ${args.map(quoteArg).join(" ")}` : file}`);
   return new Promise((resolve, reject) => {
     const child = execFileCb(file, args as string[], {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env}, (error, stdout, stderr) => {
       if (error) {

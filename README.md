@@ -27,6 +27,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
     -R, --release         Create a GitHub or Gitea release with the changelog as body
+    -V, --verbose         Print verbose output to stderr
     -v, --version         Print the version
     -h, --help            Print this help
 
