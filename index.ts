@@ -561,81 +561,160 @@ async function main(): Promise<void> {
     }
   })() : null;
 
-  if (files.length) {
-    // verify files exist
-    for (const file of files) {
-      const stats = statSync(file);
-      if (!stats.isFile() && !stats.isSymbolicLink()) {
-        throw new Error(`${file} is not a file`);
+  // rollback callbacks registered as side-effecting actions succeed; drained in reverse on any failure
+  // so the working tree, local refs, and remote refs return to their pre-run state.
+  const rollbacks: Array<() => Promise<void> | void> = [];
+
+  try {
+    if (files.length) {
+      // verify files exist
+      for (const file of files) {
+        const stats = statSync(file);
+        if (!stats.isFile() && !stats.isSymbolicLink()) {
+          throw new Error(`${file} is not a file`);
+        }
+      }
+
+      // update files
+      const originals = new Map<string, string>();
+      rollbacks.push(() => {
+        for (const [file, content] of originals) write(file, content);
+      });
+      for (const file of files) {
+        const [filePath, newData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
+        if (newData !== null) {
+          if (!originals.has(filePath)) originals.set(filePath, readFileSync(filePath, "utf8"));
+          logVerbose(`writing ${filePath}`);
+          write(filePath, newData);
+        } else {
+          logVerbose(`skipping ${file} (unhandled lockfile)`);
+        }
       }
     }
 
-    // update files
-    for (const file of files) {
-      const [filePath, newData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
-      if (newData !== null) {
-        logVerbose(`writing ${filePath}`);
-        write(filePath, newData);
-      } else {
-        logVerbose(`skipping ${file} (unhandled lockfile)`);
-      }
+    if (typeof args.command === "string") {
+      logVerbose(`running command: ${args.command}`);
+      writeResult(await exec(args.command, [], {shell: true}));
     }
-  }
+    if (args.gitless) {
+      logVerbose("gitless — skipping commit, tag, and release");
+      return;
+    }
 
-  if (typeof args.command === "string") {
-    logVerbose(`running command: ${args.command}`);
-    writeResult(await exec(args.command, [], {shell: true}));
-  }
-  if (args.gitless) {
-    logVerbose("gitless — skipping commit, tag, and release");
-    return;
-  }
+    if (args.dry) {
+      logVerbose("dry run — skipping commit and tag");
+      return console.info(`Would create new tag and commit: ${tagName}`);
+    }
 
-  if (args.dry) {
-    logVerbose("dry run — skipping commit and tag");
-    return console.info(`Would create new tag and commit: ${tagName}`);
-  }
+    const changelog = (await changelogPromise) ?? undefined;
 
-  const changelog = (await changelogPromise) ?? undefined;
+    // snapshot pre-commit index so rollback restores user's staged hunks byte-for-byte
+    // (a plain --soft reset would leave our just-committed changes staged in the index)
+    const preIndexTreeOid = await exec("git", ["write-tree"]).then(r => r.stdout.trim()).catch(() => null);
 
-  // create commit
-  const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
-  if (args.all) {
-    writeResult(await exec("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
-  } else {
-    const filesToAdd = (await filesToAddPromise) ?? [];
-    if (filesToAdd.length) {
-      writeResult(await exec("git", ["commit", "-i", "-F", "-", "--", ...filesToAdd], {stdin: {string: commitMsg}}));
+    const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
+    if (args.all) {
+      writeResult(await exec("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
     } else {
-      writeResult(await exec("git", ["commit", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
+      const filesToAdd = (await filesToAddPromise) ?? [];
+      if (filesToAdd.length) {
+        writeResult(await exec("git", ["commit", "-i", "-F", "-", "--", ...filesToAdd], {stdin: {string: commitMsg}}));
+      } else {
+        writeResult(await exec("git", ["commit", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
+      }
     }
-  }
+    rollbacks.push(async () => {
+      const hasParent = await exec("git", ["rev-parse", "HEAD^"]).then(() => true, () => false);
+      if (hasParent) await exec("git", ["reset", "--soft", "HEAD^"]);
+      else await exec("git", ["update-ref", "-d", "HEAD"]);
+      if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
+    });
 
-  // create tag
-  const tagMsg = joinStrings([...msgs, changelog], "\n\n");
-  // adding explicit -a here seems to make git no longer sign the tag
-  writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
+    const tagRef = `refs/tags/${tagName}`;
+    // capture the prior local tag (if any) since `git tag -f` overwrites it
+    const priorLocalTagOid = await exec("git", ["rev-parse", "--verify", tagRef])
+      .then(r => r.stdout.trim()).catch(() => null);
 
-  // push commit and tag
-  if (!args["no-push"]) {
-    writeResult(await exec("git", ["push", pushRemote, pushBranch, tagName]));
-  }
+    const tagMsg = joinStrings([...msgs, changelog], "\n\n");
+    // adding explicit -a here seems to make git no longer sign the tag
+    writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
+    rollbacks.push(async () => {
+      // update-ref preserves the prior tag's type (annotated vs lightweight); `tag -f <oid>`
+      // would always create a lightweight tag pointing at the prior tag-object OID.
+      if (priorLocalTagOid) await exec("git", ["update-ref", tagRef, priorLocalTagOid]);
+      else await exec("git", ["tag", "-d", tagName]);
+    });
 
-  // create release if requested
-  if (releasePrep) {
-    const repoInfo = await releasePrep.repoInfo;
-    if (!repoInfo) {
-      throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
+    if (!args["no-push"]) {
+      const branchRef = `refs/heads/${pushBranch}`;
+      // resolve the push URL explicitly because ls-remote uses the fetch URL by default,
+      // which can differ from the push URL (e.g. github.com fetch + local bare push).
+      let probedRemoteState = false;
+      let remoteBranchOldOid: string | null = null;
+      let remoteTagOldOid: string | null = null;
+      try {
+        const {stdout: pushUrl} = await exec("git", ["remote", "get-url", "--push", pushRemote]);
+        const {stdout} = await exec("git", ["ls-remote", pushUrl.trim(), branchRef, tagRef]);
+        for (const line of stdout.split(reNewline)) {
+          const [oid, ref] = line.split(/\s+/);
+          if (ref === branchRef) remoteBranchOldOid = oid;
+          else if (ref === tagRef) remoteTagOldOid = oid;
+        }
+        probedRemoteState = true;
+      } catch {}
+
+      writeResult(await exec("git", ["push", pushRemote, pushBranch, tagName]));
+      const pushedHeadOid = (await exec("git", ["rev-parse", "HEAD"])).stdout.trim();
+
+      if (probedRemoteState) {
+        // --force-with-lease guards against concurrent pushes overwriting work
+        rollbacks.push(async () => {
+          if (remoteBranchOldOid) {
+            await exec("git", ["push", `--force-with-lease=${branchRef}:${pushedHeadOid}`, pushRemote, `${remoteBranchOldOid}:${branchRef}`]);
+          } else {
+            await exec("git", ["push", pushRemote, `:${branchRef}`]);
+          }
+        });
+        rollbacks.push(async () => {
+          if (remoteTagOldOid) {
+            await exec("git", ["push", "--force", pushRemote, `${remoteTagOldOid}:${tagRef}`]);
+          } else {
+            await exec("git", ["push", pushRemote, `:${tagRef}`]);
+          }
+        });
+      } else {
+        // probe failed — guessing the prior remote state could destroy refs we don't own
+        rollbacks.push(() => {
+          console.error(`rollback skipped: could not capture remote state for ${pushRemote} before push; verify branch ${pushBranch} and tag ${tagName} manually`);
+        });
+      }
     }
 
-    const releaseBody = changelog || tagName;
-    const forgeName = repoInfo.type === "github" ? "GitHub" : "Gitea";
-    const tokens = await releasePrep.tokens;
-    if (!tokens.length) {
-      throw new Error(`${forgeName} release requested but no token found in environment`);
+    // create release if requested
+    if (releasePrep) {
+      const repoInfo = await releasePrep.repoInfo;
+      if (!repoInfo) {
+        throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
+      }
+
+      const releaseBody = changelog || tagName;
+      const forgeName = repoInfo.type === "github" ? "GitHub" : "Gitea";
+      const tokens = await releasePrep.tokens;
+      if (!tokens.length) {
+        throw new Error(`${forgeName} release requested but no token found in environment`);
+      }
+      logVerbose(`creating ${forgeName} release for ${tagName} (${tokens.length} token${tokens.length === 1 ? "" : "s"} to try)`);
+      await createForgeRelease(repoInfo, tagName, releaseBody, tokens);
     }
-    logVerbose(`creating ${forgeName} release for ${tagName} (${tokens.length} token${tokens.length === 1 ? "" : "s"} to try)`);
-    await createForgeRelease(repoInfo, tagName, releaseBody, tokens);
+  } catch (err) {
+    for (const rollback of rollbacks.reverse()) {
+      try {
+        await rollback();
+      } catch (cleanupErr: any) {
+        console.error(`rollback failed: ${cleanupErr.message}`);
+      }
+    }
+    throw err;
   }
 }
 

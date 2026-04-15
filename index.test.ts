@@ -66,6 +66,22 @@ async function withTmpDir(fn: (tmpDir: string) => Promise<void>): Promise<void> 
   }
 }
 
+// initial commit, github fetch URL with local bare push, tag 1.0.0. Caller must have written
+// any tracked files into tmpDir before invocation since this stages everything via `git add .`.
+async function setupReleaseRepo(tmpDir: string, fetchUrl: string = "https://github.com/o/r.git"): Promise<{env: ReturnType<typeof getIsolatedGitEnv>, bareDir: string}> {
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  const bareDir = await createBareRemote(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  await exec("git", ["add", "."], opts);
+  await exec("git", ["commit", "-m", "Initial commit"], opts);
+  await exec("git", ["remote", "add", "origin", fetchUrl], opts);
+  await exec("git", ["remote", "set-url", "--push", "origin", bareDir], opts);
+  await exec("git", ["push", "origin", "master"], opts);
+  await exec("git", ["tag", "1.0.0"], opts);
+  return {env, bareDir};
+}
+
 test("version", async () => {
   const {version: expected} = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8"));
   const {stdout} = await exec("node", [distPath, "-v"]);
@@ -462,94 +478,90 @@ test("--gitless and --release are mutually exclusive", async () => {
   }
 });
 
-test("release integration - github push and tag", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+test("rollback - github forge failure reverts local + remote", () => withTmpDir(async (tmpDir) => {
+  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+  await writeFile(join(tmpDir, "package.json"), pkgContent);
 
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
-  const bareDir = await createBareRemote(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-  // github.com fetch URL for type detection, local bare for push
-  await exec("git", ["remote", "add", "origin", "https://github.com/owner/repo.git"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "set-url", "--push", "origin", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["push", "origin", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {env, bareDir} = await setupReleaseRepo(tmpDir, "https://github.com/owner/repo.git");
 
-  // versions will push to local bare (via push URL) then try api.github.com (which fails with fake token)
+  const {stdout: preLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: preRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+
+  // forge release fails (api.github.com returns 404 for owner/repo), triggering full rollback
   try {
     await exec("node", [distPath, "--release", "patch", "package.json"], {
       cwd: tmpDir,
       env: {...process.env, GITHUB_TOKEN: "fake-token", ...env},
     });
+    throw new Error("should have thrown");
   } catch (err: any) {
     expect(err).toBeInstanceOf(SubprocessError);
     expect(err.exitCode).toEqual(1);
   }
 
-  // verify local tag was created
-  const {stdout: tags} = await exec("git", ["tag", "--list"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(tags.trim().split("\n").filter(Boolean).sort()).toEqual(["1.0.0", "1.0.1"]);
-  // verify tag was pushed to bare remote
+  // local: tag deleted, HEAD restored, file restored, working tree + index clean
+  const {stdout: localTags} = await exec("git", ["tag", "--list"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(localTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
+  const {stdout: postLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(postLocalHead.trim()).toEqual(preLocalHead.trim());
+  expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
+  const {stdout: localStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(localStatus.trim()).toEqual("");
+
+  // remote: tag deleted, branch HEAD restored
   const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
-  expect(remoteTags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
-  // verify commit was pushed
-  const {stdout: localHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
-  const {stdout: remoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
-  expect(remoteHead.trim()).toEqual(localHead.trim());
+  expect(remoteTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
+  const {stdout: postRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+  expect(postRemoteHead.trim()).toEqual(preRemoteHead.trim());
 }));
 
-test("release integration - gitea push and tag", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+test("rollback - gitea forge failure reverts local + remote", () => withTmpDir(async (tmpDir) => {
+  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+  await writeFile(join(tmpDir, "package.json"), pkgContent);
 
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
-  const bareDir = await createBareRemote(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-  // gitea fetch URL for type detection, local bare for push
-  await exec("git", ["remote", "add", "origin", "https://gitea.example.com/owner/repo.git"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "set-url", "--push", "origin", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["push", "origin", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {env, bareDir} = await setupReleaseRepo(tmpDir, "https://gitea.example.com/owner/repo.git");
 
-  // versions will push to local bare then try gitea API (which fails - no such host)
+  const {stdout: preLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: preRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+
+  // gitea.example.com doesn't resolve → forge fails → rollback runs
   try {
     await exec("node", [distPath, "--release", "patch", "package.json"], {
       cwd: tmpDir,
       env: {...process.env, GITEA_TOKEN: "fake-token", ...env},
     });
+    throw new Error("should have thrown");
   } catch (err: any) {
     expect(err).toBeInstanceOf(SubprocessError);
     expect(err.exitCode).toEqual(1);
   }
 
-  // verify local tag was created
-  const {stdout: tags} = await exec("git", ["tag", "--list"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(tags.trim().split("\n").filter(Boolean).sort()).toEqual(["1.0.0", "1.0.1"]);
-  // verify tag was pushed to bare remote
+  const {stdout: localTags} = await exec("git", ["tag", "--list"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(localTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
+  const {stdout: postLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(postLocalHead.trim()).toEqual(preLocalHead.trim());
+  expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
+  const {stdout: localStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(localStatus.trim()).toEqual("");
+
   const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
-  expect(remoteTags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
+  expect(remoteTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
+  const {stdout: postRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+  expect(postRemoteHead.trim()).toEqual(preRemoteHead.trim());
 }));
 
-test("release integration - tag already exists on remote (different commit)", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+test("rollback - push failure reverts local commit, tag, and file", () => withTmpDir(async (tmpDir) => {
+  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+  await writeFile(join(tmpDir, "package.json"), pkgContent);
 
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
-  const bareDir = await createBareRemote(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "add", "origin", "https://github.com/o/r.git"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "set-url", "--push", "origin", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["push", "origin", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {env, bareDir} = await setupReleaseRepo(tmpDir);
 
-  // pre-create tag 1.0.1 on bare remote pointing to a DIFFERENT commit (simulates immutable/conflicting tag)
-  const {stdout: oldHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
-  await exec("git", ["tag", "1.0.1", oldHead.trim()], {cwd: bareDir});
+  // pre-create tag 1.0.1 on bare remote pointing to a different commit so push fails
+  const {stdout: oldRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+  await exec("git", ["tag", "1.0.1", oldRemoteHead.trim()], {cwd: bareDir});
 
-  // versions creates a new commit then tries to push tag 1.0.1 which conflicts
+  const {stdout: preLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+
   try {
     await exec("node", [distPath, "--release", "patch", "package.json"], {
       cwd: tmpDir,
@@ -560,6 +572,192 @@ test("release integration - tag already exists on remote (different commit)", ()
     expect(err).toBeInstanceOf(SubprocessError);
     expect(err.exitCode).toEqual(1);
   }
+
+  // local tag was never created
+  const {stdout: localTags} = await exec("git", ["tag", "--list"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(localTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
+  // commit was reset
+  const {stdout: postLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(postLocalHead.trim()).toEqual(preLocalHead.trim());
+  // file restored
+  expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
+  // working tree + index clean
+  const {stdout: status} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(status.trim()).toEqual("");
+}));
+
+test("rollback - -c failure restores file writes (gitless)", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
+
+  try {
+    await exec("node", [distPath, "--gitless", "--base", "1.0.0", "-c", "exit 1", "patch", "testfile.txt"], {cwd: tmpDir});
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+  }
+
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.0");
+}));
+
+test("rollback - -c failure restores multiple file writes", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "a.txt"), "v 1.0.0 a");
+  await writeFile(join(tmpDir, "b.txt"), "v 1.0.0 b");
+
+  try {
+    await exec("node", [distPath, "--gitless", "--base", "1.0.0", "-c", "exit 1", "patch", "a.txt", "b.txt"], {cwd: tmpDir});
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+  }
+
+  expect(await readFile(join(tmpDir, "a.txt"), "utf8")).toEqual("v 1.0.0 a");
+  expect(await readFile(join(tmpDir, "b.txt"), "utf8")).toEqual("v 1.0.0 b");
+}));
+
+test("rollback - -c failure leaves no commit or tag in git mode", () => withTmpDir(async (tmpDir) => {
+  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+  await writeFile(join(tmpDir, "package.json"), pkgContent);
+
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  const {stdout: preHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  try {
+    await exec("node", [distPath, "--no-push", "-c", "exit 1", "patch", "package.json"], {
+      cwd: tmpDir, env: {...process.env, ...env},
+    });
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+  }
+
+  expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
+  // -c runs before commit/tag, so neither should exist
+  const {stdout: tags} = await exec("git", ["tag", "--list"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(tags.trim().split("\n").filter(Boolean)).toEqual(["1.0.0"]);
+  const {stdout: postHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(postHead.trim()).toEqual(preHead.trim());
+}));
+
+test("rollback - prior local tag is restored to its original target", () => withTmpDir(async (tmpDir) => {
+  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+  await writeFile(join(tmpDir, "package.json"), pkgContent);
+
+  const {env} = await setupReleaseRepo(tmpDir);
+
+  // pre-existing local tag 1.0.1 at the initial commit
+  const {stdout: initialOid} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["tag", "1.0.1"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const priorTagOid = initialOid.trim();
+
+  // forge release fails after push, triggering rollback that must restore (not delete) the prior tag
+  try {
+    await exec("node", [distPath, "--release", "patch", "package.json"], {
+      cwd: tmpDir,
+      env: {...process.env, GITHUB_TOKEN: "fake-token", ...env},
+    });
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+  }
+
+  const {stdout: postTagOid} = await exec("git", ["rev-parse", "refs/tags/1.0.1"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(postTagOid.trim()).toEqual(priorTagOid);
+}));
+
+test("rollback - prior annotated tag stays annotated after restore", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+
+  const {env} = await setupReleaseRepo(tmpDir);
+
+  // pre-existing ANNOTATED tag 1.0.1 — `tag -f <oid>` would silently downgrade to lightweight on rollback
+  await exec("git", ["tag", "-a", "1.0.1", "-m", "annotated"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: priorType} = await exec("git", ["cat-file", "-t", "refs/tags/1.0.1"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(priorType.trim()).toEqual("tag");
+
+  try {
+    await exec("node", [distPath, "--release", "patch", "package.json"], {
+      cwd: tmpDir,
+      env: {...process.env, GITHUB_TOKEN: "fake-token", ...env},
+    });
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+  }
+
+  const {stdout: postType} = await exec("git", ["cat-file", "-t", "refs/tags/1.0.1"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(postType.trim()).toEqual("tag");
+}));
+
+test("rollback - user's pre-existing staged hunks survive", () => withTmpDir(async (tmpDir) => {
+  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+  await writeFile(join(tmpDir, "package.json"), pkgContent);
+  await writeFile(join(tmpDir, "other.txt"), "before");
+
+  const {env} = await setupReleaseRepo(tmpDir);
+
+  // user has pre-staged a hunk on an unrelated file
+  await writeFile(join(tmpDir, "other.txt"), "user staged change");
+  await exec("git", ["add", "other.txt"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: preStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(preStatus.trim()).toEqual("M  other.txt");
+
+  try {
+    await exec("node", [distPath, "--release", "patch", "package.json"], {
+      cwd: tmpDir,
+      env: {...process.env, GITHUB_TOKEN: "fake-token", ...env},
+    });
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+  }
+
+  // after rollback: other.txt is still staged with the user's change, package.json untouched
+  const {stdout: postStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(postStatus.trim()).toEqual("M  other.txt");
+  expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
+}));
+
+test("rollback - partial staged hunks and staged additions survive byte-for-byte", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "tracked.txt"), "base\n");
+
+  const {env} = await setupReleaseRepo(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  // partial staged hunk: index has "base + staged hunk", working tree has more on top.
+  // a plain --soft reset would leave our committed package.json bump in the index here too,
+  // overwriting the staged hunk with a 1.0.1 entry; only read-tree restores it byte-for-byte.
+  await writeFile(join(tmpDir, "tracked.txt"), "base\nstaged hunk\n");
+  await exec("git", ["add", "tracked.txt"], opts);
+  await writeFile(join(tmpDir, "tracked.txt"), "base\nstaged hunk\nworktree only\n");
+
+  // staged addition: a brand new file the user staged (`A  new.txt`)
+  await writeFile(join(tmpDir, "new.txt"), "new content\n");
+  await exec("git", ["add", "new.txt"], opts);
+
+  const {stdout: preStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts);
+  const {stdout: preStaged} = await exec("git", ["diff", "--cached"], opts);
+  const preTracked = await readFile(join(tmpDir, "tracked.txt"), "utf8");
+
+  try {
+    await exec("node", [distPath, "--release", "patch", "package.json"], {
+      ...opts, env: {...opts.env, GITHUB_TOKEN: "fake-token"},
+    });
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+  }
+
+  const {stdout: postStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts);
+  expect(postStatus).toEqual(preStatus);
+  const {stdout: postStaged} = await exec("git", ["diff", "--cached"], opts);
+  expect(postStaged).toEqual(preStaged);
+  expect(await readFile(join(tmpDir, "tracked.txt"), "utf8")).toEqual(preTracked);
 }));
 
 test("default push - pushes commit and tag without --release", () => withTmpDir(async (tmpDir) => {
@@ -648,20 +846,22 @@ test("--remote with --release uses that remote for forge detection", () => withT
   await exec("git", ["push", "upstream", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
   await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
 
-  // fails at api.github.com call (fake token) — but only gets there if forge detection used upstream
+  // forge call to api.github.com fails (fake token + non-existent repo); the error proves the
+  // upstream URL was used. If --remote was ignored, getRepoInfo would return null for file:///
+  // and the error would be "Could not determine repository type" instead.
+  let err: any;
   try {
     await exec("node", [distPath, "--remote", "upstream", "--release", "patch", "package.json"], {
       cwd: tmpDir,
       env: {...process.env, GITHUB_TOKEN: "fake-token", ...env},
     });
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-    expect(err.exitCode).toEqual(1);
+  } catch (caught: any) {
+    err = caught;
   }
-
-  // confirm push landed on upstream (not origin)
-  const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
-  expect(remoteTags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
+  expect(err).toBeInstanceOf(SubprocessError);
+  expect(err.exitCode).toEqual(1);
+  expect(err.output).toContain("Failed to create release");
+  expect(err.output).not.toContain("Could not determine repository type");
 }));
 
 test("--branch pushes specified branch", () => withTmpDir(async (tmpDir) => {
