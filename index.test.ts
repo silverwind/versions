@@ -25,6 +25,10 @@ function stubGlobal(name: string, value: unknown) {
   }
 }
 
+beforeAll(() => {
+  vi.spyOn(console, "info").mockImplementation(() => {});
+});
+
 afterEach(() => {
   if (typeof vi.unstubAllGlobals === "function") {
     vi.unstubAllGlobals();
