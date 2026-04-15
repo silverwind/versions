@@ -1,7 +1,7 @@
 {
   "name": "versions",
   "version": "15.0.0",
-  "description": "CLI to flexibly increment a project's version",
+  "description": "CLI to increment a project's version and optionally publish release to Github/Gitea",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/versions",
   "license": "BSD-2-Clause",
