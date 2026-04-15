@@ -27,6 +27,9 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
     -R, --release         Create a GitHub or Gitea release with the changelog as body
+    -n, --no-push         Skip pushing commit and tag
+    -o, --remote <name>   Git remote to push to. Default is "origin"
+    -B, --branch <name>   Git branch to push. Default is the current branch
     -V, --verbose         Print verbose output to stderr
     -v, --version         Print the version
     -h, --help            Print this help
@@ -54,9 +57,13 @@ To automatically sign commits and tags created by `versions` with GPG add this t
   gpgSign = if-asked
 ```
 
+## Pushing
+
+By default, `versions` pushes the commit and tag to `origin` after creating them. Pass `--no-push` to skip the push and keep changes local. Use `--remote` and `--branch` to override the target remote and branch.
+
 ## Creating releases
 
-When using the `--release` option, `versions` will automatically create a GitHub or Gitea release after creating the tag. The release body will contain the same changelog as the commit message.
+When using the `--release` option, `versions` will automatically create a GitHub or Gitea release after pushing the tag. The release body will contain the same changelog as the commit message. `--release` requires the push and is incompatible with `--no-push`.
 
 The tool will automatically detect whether you're using GitHub or Gitea based on your git remote URL.
 
