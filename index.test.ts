@@ -562,6 +562,127 @@ test("release integration - tag already exists on remote (different commit)", ()
   }
 }));
 
+test("default push - pushes commit and tag without --release", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  const bareDir = await createBareRemote(tmpDir);
+  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["remote", "add", "origin", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["push", "origin", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  await exec("node", [distPath, "patch", "package.json"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  const {stdout: localHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: remoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+  expect(remoteHead.trim()).toEqual(localHead.trim());
+  const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
+  expect(remoteTags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
+}));
+
+test("--no-push skips push", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  const bareDir = await createBareRemote(tmpDir);
+  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["remote", "add", "origin", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["push", "origin", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  const {stdout: remoteHeadBefore} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+
+  await exec("node", [distPath, "--no-push", "patch", "package.json"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  const {stdout: remoteHeadAfter} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+  expect(remoteHeadAfter.trim()).toEqual(remoteHeadBefore.trim());
+  const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
+  expect(remoteTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
+}));
+
+test("--no-push and --release are mutually exclusive", async () => {
+  try {
+    await exec("node", [distPath, "--no-push", "--release", "--base", "1.0.0", "patch"]);
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+    expect(err.exitCode).toEqual(1);
+  }
+});
+
+test("--remote pushes to custom remote", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  const bareDir = await createBareRemote(tmpDir);
+  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["remote", "add", "upstream", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["push", "upstream", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  await exec("node", [distPath, "--remote", "upstream", "patch", "package.json"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
+  expect(remoteTags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
+}));
+
+test("--remote with --release uses that remote for forge detection", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  const bareDir = await createBareRemote(tmpDir);
+  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
+  // origin has no forge URL, upstream points at github.com — release must follow --remote
+  await exec("git", ["remote", "add", "origin", "file:///nowhere"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["remote", "add", "upstream", "https://github.com/owner/repo.git"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["remote", "set-url", "--push", "upstream", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["push", "upstream", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  // fails at api.github.com call (fake token) — but only gets there if forge detection used upstream
+  try {
+    await exec("node", [distPath, "--remote", "upstream", "--release", "patch", "package.json"], {
+      cwd: tmpDir,
+      env: {...process.env, GITHUB_TOKEN: "fake-token", ...env},
+    });
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+    expect(err.exitCode).toEqual(1);
+  }
+
+  // confirm push landed on upstream (not origin)
+  const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
+  expect(remoteTags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
+}));
+
+test("--branch pushes specified branch", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+
+  await initGitRepo(tmpDir);
+  const env = getIsolatedGitEnv(tmpDir);
+  const bareDir = await createBareRemote(tmpDir);
+  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["remote", "add", "origin", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["push", "origin", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["checkout", "-b", "release"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  await exec("node", [distPath, "--branch", "release", "patch", "package.json"], {cwd: tmpDir, env: {...process.env, ...env}});
+
+  const {stdout: remoteBranches} = await exec("git", ["branch", "--list"], {cwd: bareDir});
+  expect(remoteBranches).toContain("release");
+}));
+
 test("incrementSemver prerelease", () => {
   expect(incrementSemver("1.0.0", "prerelease", "alpha")).toEqual("1.0.1-alpha.0");
   expect(incrementSemver("1.0.1-beta.0", "prerelease", "beta")).toEqual("1.0.1-beta.1");

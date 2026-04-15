@@ -263,9 +263,9 @@ export type RepoInfo = {
   type: "github" | "gitea";
 };
 
-export async function getRepoInfo(cwd?: string): Promise<RepoInfo | null> {
+export async function getRepoInfo(cwd?: string, remote: string = "origin"): Promise<RepoInfo | null> {
   try {
-    const {stdout} = await exec("git", ["remote", "get-url", "origin"], cwd ? {cwd} : undefined);
+    const {stdout} = await exec("git", ["remote", "get-url", remote], cwd ? {cwd} : undefined);
     const url = stdout.trim();
 
     // Parse git URLs: https://host/owner/repo.git or git@host:owner/repo.git
@@ -356,6 +356,9 @@ async function main(): Promise<void> {
       version: {short: "v", type: "boolean"},
       date: {short: "d", type: "boolean"},
       release: {short: "R", type: "boolean"},
+      "no-push": {short: "n", type: "boolean"},
+      remote: {short: "o", type: "string"},
+      branch: {short: "B", type: "string"},
       base: {short: "b", type: "string"},
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
@@ -389,7 +392,10 @@ async function main(): Promise<void> {
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Do not create a tag or commit, just print what would be done
-    -R, --release         Create a GitHub or Gitea release, push commit and tag to origin
+    -R, --release         Create a GitHub or Gitea release with the changelog as body
+    -n, --no-push         Skip pushing commit and tag
+    -o, --remote <name>   Git remote to push to. Default is "origin"
+    -B, --branch <name>   Git branch to push. Default is the current branch
     -V, --verbose         Print verbose output to stderr
     -v, --version         Print the version
     -h, --help            Print this help
@@ -412,8 +418,9 @@ async function main(): Promise<void> {
   const gitDir = findUp(".git", pwd);
   let projectRoot = gitDir ? dirname(gitDir) : null;
   if (!projectRoot) projectRoot = pwd;
+  const pushRemote = typeof args.remote === "string" ? args.remote : "origin";
   const releasePrep = (!args.gitless && args.release) ? (() => {
-    const repoInfo = getRepoInfo();
+    const repoInfo = getRepoInfo(undefined, pushRemote);
     return {
       repoInfo,
       tokens: repoInfo.then(info => {
@@ -492,6 +499,23 @@ async function main(): Promise<void> {
   }
   if (args.gitless && args.release) {
     return end(new Error("--gitless and --release are mutually exclusive"));
+  }
+  if (args["no-push"] && args.release) {
+    return end(new Error("--no-push and --release are mutually exclusive"));
+  }
+
+  // resolve push branch early so detached HEAD fails before commit/tag
+  let pushBranch: string = "";
+  if (!args.gitless && !args.dry && !args["no-push"]) {
+    if (typeof args.branch === "string") {
+      pushBranch = args.branch;
+    } else {
+      const {stdout: branchOut} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+      pushBranch = branchOut.trim();
+      if (pushBranch === "HEAD") {
+        return end(new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push."));
+      }
+    }
   }
 
   // set new version
@@ -592,17 +616,17 @@ async function main(): Promise<void> {
   // adding explicit -a here seems to make git no longer sign the tag
   writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
 
+  // push commit and tag
+  if (!args["no-push"]) {
+    writeResult(await exec("git", ["push", pushRemote, pushBranch, tagName]));
+  }
+
   // create release if requested
   if (releasePrep) {
     const repoInfo = await releasePrep.repoInfo;
     if (!repoInfo) {
       throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
     }
-
-    const {stdout: branchOut} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
-    const branch = branchOut.trim();
-    if (branch === "HEAD") throw new Error("Cannot create release from detached HEAD");
-    writeResult(await exec("git", ["push", "origin", branch, tagName]));
 
     const releaseBody = changelog || tagName;
     const forgeName = repoInfo.type === "github" ? "GitHub" : "Gitea";
