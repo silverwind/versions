@@ -193,8 +193,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
   }
 
   if (date) {
-    const re = reDatePattern;
-    newData = newData.replace(re, (_, p1, p2) => `${p1}${date}${p2}`);
+    newData = newData.replace(reDatePattern, (_, p1, p2) => `${p1}${date}${p2}`);
   }
 
   if (replacements?.length) {
@@ -225,26 +224,20 @@ export function joinStrings(strings: Array<string | undefined>, separator: strin
 }
 
 function end(err?: Error | string | void): void {
-  if (err instanceof SubprocessError) {
-    console.info(`${err.message}\n${err.output}`);
-  } else if (err instanceof Error) {
-    console.info(String(err.stack || err.message || err).trim());
-  } else if (err) {
-    console.info(err);
+  if (err) {
+    console.info(err instanceof SubprocessError ? `${err.message}\n${err.output}` :
+      err instanceof Error ? String(err.stack || err.message || err).trim() :
+        err);
   }
   exit(err ? 1 : 0);
 }
 
-function getEnvTokens(names: string[]): string[] {
-  const tokens: string[] = [];
-  for (const name of names) {
-    if (process.env[name]) tokens.push(process.env[name]);
-  }
-  return tokens;
+function envTokens(names: string[]): string[] {
+  return names.map(n => process.env[n]).filter(Boolean) as string[];
 }
 
 export async function getGithubTokens(): Promise<string[]> {
-  const tokens = getEnvTokens(["VERSIONS_FORGE_TOKEN", "GITHUB_API_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"]);
+  const tokens = envTokens(["VERSIONS_FORGE_TOKEN", "GITHUB_API_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"]);
   try {
     const {stdout} = await exec("gh", ["auth", "token"]);
     if (stdout) tokens.push(stdout.trim());
@@ -253,7 +246,7 @@ export async function getGithubTokens(): Promise<string[]> {
 }
 
 export function getGiteaTokens(): string[] {
-  return Array.from(new Set(getEnvTokens(["VERSIONS_FORGE_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN"])));
+  return Array.from(new Set(envTokens(["VERSIONS_FORGE_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN"])));
 }
 
 export type RepoInfo = {
@@ -289,9 +282,9 @@ export async function getRepoInfo(cwd?: string, remote: string = "origin"): Prom
 }
 
 export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<void> {
-  const apiUrl = repoInfo.type === "github" ?
-    `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/releases` :
-    `https://${repoInfo.host}/api/v1/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
+  const isGithub = repoInfo.type === "github";
+  const apiHost = isGithub ? "api.github.com" : `${repoInfo.host}/api/v1`;
+  const apiUrl = `https://${apiHost}/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
 
   const releaseBody = JSON.stringify({
     tag_name: tagName,
@@ -310,7 +303,7 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": repoInfo.type === "github" ? `Bearer ${token}` : `token ${token}`,
+          "Authorization": isGithub ? `Bearer ${token}` : `token ${token}`,
         },
         body: releaseBody,
       });
@@ -338,8 +331,9 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
 }
 
 export function writeResult(result: Result): void {
-  if (result.stdout) stdout.write(result.stdout.endsWith(EOL) ? result.stdout : `${result.stdout}${EOL}`);
-  if (result.stderr) stdout.write(result.stderr.endsWith(EOL) ? result.stderr : `${result.stderr}${EOL}`);
+  for (const s of [result.stdout, result.stderr]) {
+    if (s) stdout.write(s.endsWith(EOL) ? s : `${s}${EOL}`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -374,7 +368,7 @@ async function main(): Promise<void> {
   setVerbose(Boolean(args.verbose));
 
   if (args.version) {
-    console.info(pkg.version || "0.0.0");
+    console.info(pkg.version);
     end();
   }
 
@@ -409,15 +403,11 @@ async function main(): Promise<void> {
     end();
   }
 
-  let date = "";
-  if (args.date) {
-    date = (new Date()).toISOString().substring(0, 10);
-  }
+  const date = args.date ? new Date().toISOString().substring(0, 10) : "";
 
   const pwd = cwd();
   const gitDir = findUp(".git", pwd);
-  let projectRoot = gitDir ? dirname(gitDir) : null;
-  if (!projectRoot) projectRoot = pwd;
+  const projectRoot = gitDir ? dirname(gitDir) : pwd;
   const pushRemote = typeof args.remote === "string" ? args.remote : "origin";
   const releasePrep = (!args.gitless && args.release) ? (() => {
     const repoInfo = getRepoInfo(undefined, pushRemote);
@@ -451,12 +441,10 @@ async function main(): Promise<void> {
         try {
           ({stdout} = await exec("git", ["tag", "--list", "--sort=-creatordate"]));
         } catch {}
-        for (const tag of stdout.split(reNewline).map(v => v.trim()).filter(Boolean)) {
-          if (isSemver(tag)) {
-            baseVersion = tag.replace(reVersionPrefix, "");
-            baseSource = "git tag list";
-            break;
-          }
+        const tag = stdout.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
+        if (tag) {
+          baseVersion = tag.replace(reVersionPrefix, "");
+          baseSource = "git tag list";
         }
       }
     }
@@ -613,16 +601,16 @@ async function main(): Promise<void> {
     const preIndexTreeOid = await exec("git", ["write-tree"]).then(r => r.stdout.trim()).catch(() => null);
 
     const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
+    let commitArgs: string[];
     if (args.all) {
-      writeResult(await exec("git", ["commit", "-a", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
+      commitArgs = ["commit", "-a", "--allow-empty", "-F", "-"];
     } else {
       const filesToAdd = (await filesToAddPromise) ?? [];
-      if (filesToAdd.length) {
-        writeResult(await exec("git", ["commit", "-i", "-F", "-", "--", ...filesToAdd], {stdin: {string: commitMsg}}));
-      } else {
-        writeResult(await exec("git", ["commit", "--allow-empty", "-F", "-"], {stdin: {string: commitMsg}}));
-      }
+      commitArgs = filesToAdd.length ?
+        ["commit", "-i", "-F", "-", "--", ...filesToAdd] :
+        ["commit", "--allow-empty", "-F", "-"];
     }
+    writeResult(await exec("git", commitArgs, {stdin: {string: commitMsg}}));
     rollbacks.push(async () => {
       const hasParent = await exec("git", ["rev-parse", "HEAD^"]).then(() => true, () => false);
       if (hasParent) await exec("git", ["reset", "--soft", "HEAD^"]);
