@@ -4,7 +4,7 @@ import {parseArgs} from "node:util";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {cwd, exit, stdout} from "node:process";
 import {EOL, platform} from "node:os";
-import {readFileSync, writeFileSync, accessSync, truncateSync, statSync} from "node:fs";
+import {readFileSync, writeFileSync, accessSync, truncateSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
 
 export type SemverLevel = "patch" | "minor" | "major" | "prerelease";
@@ -154,13 +154,13 @@ export type GetFileChangesOpts = {
   date?: string,
 };
 
-export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): [string, string | null] {
+export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): [string, string | null, string | null] {
   const fileName = basename(file);
 
   // Unhandled lockfiles do not store a project version. Doing a blind
   // search-and-replace would corrupt dependency versions.
   if ((/lock/i.test(fileName) || fileName === "go.sum") && fileName !== "package-lock.json" && fileName !== "uv.lock") {
-    return [file, null];
+    return [file, null, null];
   }
 
   const oldData = readFileSync(file, "utf8");
@@ -202,7 +202,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     }
   }
 
-  return [file, newData];
+  return [file, newData, oldData];
 }
 
 export function write(file: string, content: string): void {
@@ -420,12 +420,27 @@ async function main(): Promise<void> {
     };
   })() : null;
 
-  // obtain old version
-  let baseVersion: string = "";
-  let cachedDescribeTag: string = "";
-  let baseSource: string = "";
-  if (!args.base) {
-    let stdout: string = "";
+  // convert paths to relative
+  files = files.map(file => relative(pwd, file));
+
+  // validate flag combinations
+  if (level === "prerelease" && !args.preid) {
+    return end(new Error("prerelease requires --preid option"));
+  }
+  if (args.gitless && args.release) {
+    return end(new Error("--gitless and --release are mutually exclusive"));
+  }
+  if (args["no-push"] && args.release) {
+    return end(new Error("--no-push and --release are mutually exclusive"));
+  }
+
+  const baseVersionPromise = (async (): Promise<{baseVersion: string, baseSource: string, cachedDescribeTag: string}> => {
+    let baseVersion = "";
+    let baseSource = "";
+    let cachedDescribeTag = "";
+    if (args.base) {
+      return {baseVersion: String(args.base), baseSource: "--base", cachedDescribeTag};
+    }
     if (!args.gitless) {
       // Try git describe first (O(depth) vs O(n·log n) for full tag list)
       try {
@@ -438,6 +453,7 @@ async function main(): Promise<void> {
       } catch {}
       // Fall back to full tag list if describe didn't yield a semver tag
       if (!baseVersion) {
+        let stdout = "";
         try {
           ({stdout} = await exec("git", ["tag", "--list", "--sort=-creatordate"]));
         } catch {}
@@ -456,54 +472,35 @@ async function main(): Promise<void> {
         baseVersion = readVersionFromPyprojectToml(projectRoot) || "";
         if (baseVersion) baseSource = "pyproject.toml";
       }
-      if (!baseVersion && args.gitless) {
-        return end(new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`));
-      }
-      if (!baseVersion) {
+      if (!baseVersion && !args.gitless) {
         baseVersion = "0.0.0";
         baseSource = "default";
       }
     }
-  } else {
-    baseVersion = String(args.base);
-    baseSource = "--base";
+    return {baseVersion, baseSource, cachedDescribeTag};
+  })();
+
+  // resolve push branch early so detached HEAD fails before commit/tag
+  const pushBranchPromise = (!args.gitless && !args.dry && !args["no-push"]) ? (async () => {
+    if (typeof args.branch === "string") return args.branch;
+    const {stdout: branchOut} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    return branchOut.trim();
+  })() : Promise.resolve("");
+
+  let {baseVersion, baseSource, cachedDescribeTag} = await baseVersionPromise;
+  if (args.gitless && !baseVersion) {
+    return end(new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`));
   }
   logVerbose(`base version ${baseVersion} from ${baseSource}`);
 
-  // chop off "v"
   if (baseVersion.startsWith("v")) baseVersion = baseVersion.substring(1);
-
-  // validate old version
   if (!isSemver(baseVersion)) {
     throw new Error(`Invalid base version: ${baseVersion}`);
   }
 
-  // convert paths to relative
-  files = files.map(file => relative(pwd, file));
-
-  // validate flag combinations
-  if (level === "prerelease" && !args.preid) {
-    return end(new Error("prerelease requires --preid option"));
-  }
-  if (args.gitless && args.release) {
-    return end(new Error("--gitless and --release are mutually exclusive"));
-  }
-  if (args["no-push"] && args.release) {
-    return end(new Error("--no-push and --release are mutually exclusive"));
-  }
-
-  // resolve push branch early so detached HEAD fails before commit/tag
-  let pushBranch: string = "";
-  if (!args.gitless && !args.dry && !args["no-push"]) {
-    if (typeof args.branch === "string") {
-      pushBranch = args.branch;
-    } else {
-      const {stdout: branchOut} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
-      pushBranch = branchOut.trim();
-      if (pushBranch === "HEAD") {
-        return end(new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push."));
-      }
-    }
+  const pushBranch = await pushBranchPromise;
+  if (pushBranch === "HEAD") {
+    return end(new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push."));
   }
 
   // set new version
@@ -555,23 +552,15 @@ async function main(): Promise<void> {
 
   try {
     if (files.length) {
-      // verify files exist
-      for (const file of files) {
-        const stats = statSync(file);
-        if (!stats.isFile() && !stats.isSymbolicLink()) {
-          throw new Error(`${file} is not a file`);
-        }
-      }
-
       // update files
       const originals = new Map<string, string>();
       rollbacks.push(() => {
         for (const [file, content] of originals) write(file, content);
       });
       for (const file of files) {
-        const [filePath, newData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
+        const [filePath, newData, oldData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
         if (newData !== null) {
-          if (!originals.has(filePath)) originals.set(filePath, readFileSync(filePath, "utf8"));
+          if (!originals.has(filePath)) originals.set(filePath, oldData!);
           logVerbose(`writing ${filePath}`);
           write(filePath, newData);
         } else {

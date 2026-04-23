@@ -64,7 +64,9 @@ export function tomlGetString(content: string, section: string, key: string): st
     if (!trimmed || trimmed[0] === "#") continue;
     if (trimmed[0] === "[") {
       const m = /^\[([^[\]]+)\]/.exec(trimmed);
-      inSection = m ? m[1].trim() === section : false;
+      const matches = m ? m[1].trim() === section : false;
+      if (inSection && !matches) return undefined;
+      inSection = matches;
       continue;
     }
     if (inSection) {
