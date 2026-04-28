@@ -5,6 +5,17 @@
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/versions",
   "license": "BSD-2-Clause",
+  "keywords": [
+    "version",
+    "semver",
+    "bump",
+    "release",
+    "cli",
+    "git",
+    "github",
+    "gitea",
+    "changelog"
+  ],
   "bin": "dist/index.js",
   "type": "module",
   "sideEffects": false,
