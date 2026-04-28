@@ -2,102 +2,72 @@
 import {SubprocessError, type Result, colorize, exec, logVerbose, reNewline, setVerbose, tomlGetString} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative, resolve} from "node:path";
-import {cwd, exit, stdout} from "node:process";
-import {EOL, platform} from "node:os";
+import {cwd, exit, platform, stdout} from "node:process";
 import {readFileSync, writeFileSync, accessSync, truncateSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
 
 export type SemverLevel = "patch" | "minor" | "major" | "prerelease";
 
+const EOL = platform === "win32" ? "\r\n" : "\n";
 const reEscapeChars = /[|\\{}()[\]^$+*?.-]/g;
 const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
-const reVersionPrefix = /^v/;
-const reVerToken = /_VER_/g;
-const reMajorToken = /_MAJOR_/g;
-const reMinorToken = /_MINOR_/g;
-const rePatchToken = /_PATCH_/g;
-const reMajorVersion = /([0-9]+)\.[0-9]+\.[0-9]+(.*)/;
-const reMinorVersion = /([0-9]+\.)([0-9]+)\.[0-9]+(.*)/;
-const rePatchVersion = /([0-9]+\.[0-9]+\.)([0-9]+)(.*)/;
 const rePrereleaseVersion = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?/;
 const rePrereleaseIdNum = /^([a-zA-Z0-9-]+)\.(\d+)$/;
 const reDatePattern = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
+
+function stripV(str: string): string {
+  return str[0] === "v" ? str.slice(1) : str;
+}
 
 export function esc(str: string): string {
   return str.replace(reEscapeChars, "\\$&");
 }
 
 export function isSemver(str: string): boolean {
-  return reSemver.test(str.replace(reVersionPrefix, ""));
+  return reSemver.test(stripV(str));
 }
 
 export function replaceTokens(str: string, newVersion: string): string {
   const [major, minor, patch] = newVersion.split(".");
   return str
-    .replace(reVerToken, newVersion)
-    .replace(reMajorToken, major)
-    .replace(reMinorToken, minor)
-    .replace(rePatchToken, patch);
+    .replaceAll("_VER_", newVersion)
+    .replaceAll("_MAJOR_", major)
+    .replaceAll("_MINOR_", minor)
+    .replaceAll("_PATCH_", patch);
 }
 
 export function incrementSemver(str: string, level: string, preid?: string): string {
   if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
-  if (level === "major") {
-    const newVer = str.replace(reMajorVersion, (_, m1) => `${Number(m1) + 1}.0.0`);
-    return preid ? `${newVer}-${preid}.0` : newVer;
-  }
-  if (level === "minor") {
-    const newVer = str.replace(reMinorVersion, (_, m1, m2) => `${m1}${Number(m2) + 1}.0`);
-    return preid ? `${newVer}-${preid}.0` : newVer;
-  }
-  if (level === "patch") {
-    const newVer = str.replace(rePatchVersion, (_, m1, m2) => `${m1}${Number(m2) + 1}`);
-    return preid ? `${newVer}-${preid}.0` : newVer;
-  }
+  const [, majStr, minStr, patStr, prerelease] = rePrereleaseVersion.exec(stripV(str))!;
+  const major = Number(majStr), minor = Number(minStr), patch = Number(patStr);
+  const tail = preid ? `-${preid}.0` : "";
+
+  if (level === "major") return `${major + 1}.0.0${tail}`;
+  if (level === "minor") return `${major}.${minor + 1}.0${tail}`;
+  if (level === "patch") return `${major}.${minor}.${patch + 1}${tail}`;
   if (level === "prerelease") {
     if (!preid) throw new Error("prerelease requires --preid option");
-
-    // Check if current version has a prerelease
-    const match = rePrereleaseVersion.exec(str);
-    if (!match) throw new Error(`Invalid semver: ${str}`);
-
-    const [, major, minor, patch, prerelease] = match;
-
-    if (!prerelease) {
-      // No prerelease, increment patch and add prerelease
-      return `${major}.${minor}.${Number(patch) + 1}-${preid}.0`;
+    if (!prerelease) return `${major}.${minor}.${patch + 1}-${preid}.0`;
+    const idNum = rePrereleaseIdNum.exec(prerelease);
+    if (idNum?.[1] === preid) {
+      return `${major}.${minor}.${patch}-${preid}.${Number(idNum[2]) + 1}`;
     }
-
-    // Has prerelease, check if it matches the requested preid
-    const prereleaseMatch = rePrereleaseIdNum.exec(prerelease);
-    if (prereleaseMatch) {
-      const [, currentPreid, preNum] = prereleaseMatch;
-      if (currentPreid === preid) {
-        // Same preid, increment the number
-        return `${major}.${minor}.${patch}-${preid}.${Number(preNum) + 1}`;
-      }
-    }
-
-    // Different preid or no number, replace with new preid
     return `${major}.${minor}.${patch}-${preid}.0`;
   }
   throw new Error(`Invalid semver level: ${level}`);
 }
 
 export function findUp(filename: string, dir: string, stopDir?: string): string | null {
-  const path = join(dir, filename);
-
-  try {
-    accessSync(path);
-    return path;
-  } catch {}
-
-  const parent = dirname(dir);
-  if ((stopDir && path === stopDir) || parent === dir) {
-    return null;
-  } else {
-    return findUp(filename, parent, stopDir);
+  while (true) {
+    const path = join(dir, filename);
+    try {
+      accessSync(path);
+      return path;
+    } catch {}
+    const parent = dirname(dir);
+    if ((stopDir && path === stopDir) || parent === dir) return null;
+    dir = parent;
   }
 }
 
@@ -109,7 +79,7 @@ export function readVersionFromPackageJson(projectRoot: string): string | null {
     const content = readFileSync(packageJsonPath, "utf8");
     const pkg = JSON.parse(content);
     if (pkg.version && isSemver(pkg.version)) {
-      return pkg.version.replace(reVersionPrefix, "");
+      return stripV(pkg.version);
     }
   } catch {}
 
@@ -124,11 +94,11 @@ export function readVersionFromPyprojectToml(projectRoot: string): string | null
     const content = readFileSync(pyprojectPath, "utf8");
     const projectVersion = tomlGetString(content, "project", "version");
     if (projectVersion && isSemver(projectVersion)) {
-      return projectVersion.replace(reVersionPrefix, "");
+      return stripV(projectVersion);
     }
     const poetryVersion = tomlGetString(content, "tool.poetry", "version");
     if (poetryVersion && isSemver(poetryVersion)) {
-      return poetryVersion.replace(reVersionPrefix, "");
+      return stripV(poetryVersion);
     }
   } catch {}
 
@@ -206,7 +176,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
 }
 
 export function write(file: string, content: string): void {
-  if (platform() === "win32") {
+  if (platform === "win32") {
     try {
       truncateSync(file);
       writeFileSync(file, content, {flag: "r+"});
@@ -226,7 +196,7 @@ export function joinStrings(strings: Array<string | undefined>, separator: strin
 function end(err?: Error | string | void): void {
   if (err) {
     console.info(err instanceof SubprocessError ? `${err.message}\n${err.output}` :
-      err instanceof Error ? String(err.stack || err.message || err).trim() :
+      err instanceof Error ? (err.stack || err.message).trim() :
         err);
   }
   exit(err ? 1 : 0);
@@ -447,7 +417,7 @@ async function main(): Promise<void> {
         const result = await exec("git", ["describe", "--tags", "--abbrev=0"]);
         cachedDescribeTag = result.stdout.trim();
         if (isSemver(cachedDescribeTag)) {
-          baseVersion = cachedDescribeTag.replace(reVersionPrefix, "");
+          baseVersion = stripV(cachedDescribeTag);
           baseSource = "git describe";
         }
       } catch {}
@@ -459,7 +429,7 @@ async function main(): Promise<void> {
         } catch {}
         const tag = stdout.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
         if (tag) {
-          baseVersion = tag.replace(reVersionPrefix, "");
+          baseVersion = stripV(tag);
           baseSource = "git tag list";
         }
       }
@@ -493,7 +463,7 @@ async function main(): Promise<void> {
   }
   logVerbose(`base version ${baseVersion} from ${baseSource}`);
 
-  if (baseVersion.startsWith("v")) baseVersion = baseVersion.substring(1);
+  baseVersion = stripV(baseVersion);
   if (!isSemver(baseVersion)) {
     throw new Error(`Invalid base version: ${baseVersion}`);
   }
