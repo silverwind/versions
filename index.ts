@@ -13,7 +13,7 @@ const reEscapeChars = /[|\\{}()[\]^$+*?.-]/g;
 const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const rePrereleaseVersion = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?/;
 const rePrereleaseIdNum = /^([a-zA-Z0-9-]+)\.(\d+)$/;
-const reDatePattern = /([^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$)/g;
+const reDatePattern = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/g;
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
 
 function stripV(str: string): string {
@@ -66,7 +66,7 @@ export function findUp(filename: string, dir: string, stopDir?: string): string 
       return path;
     } catch {}
     const parent = dirname(dir);
-    if ((stopDir && path === stopDir) || parent === dir) return null;
+    if ((stopDir && dir === stopDir) || parent === dir) return null;
     dir = parent;
   }
 }
@@ -136,18 +136,18 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     newData = oldData.replace(/(^version ?= ?["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)/gm,
       (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (fileName === "uv.lock") {
-    // uv.lock lists all packages; locate the project's own entry via pyproject name
     const projStr = readFileSync(file.replace(/uv\.lock$/, "pyproject.toml"), "utf8");
-    const name = tomlGetString(projStr, "project", "name")!;
-    const re = new RegExp(`(\\[\\[package\\]\\]\r?\n.+${esc(name)}.+\r?\nversion = ").+?(")`);
-    newData = oldData.replace(re, (_m, p1, p2) => `${p1}${newVersion}${p2}`);
+    const name = tomlGetString(projStr, "project", "name") ?? tomlGetString(projStr, "tool.poetry", "name");
+    if (!name) throw new Error(`Could not determine project name from pyproject.toml for ${file}`);
+    const re = new RegExp(`(\\[\\[package\\]\\]\r?\nname = "${esc(name)}"\r?\nversion = ").+?(")`);
+    newData = oldData.replace(re, `$1${newVersion}$2`);
   } else {
     const re = new RegExp(esc(baseVersion), "g");
     newData = oldData.replace(re, newVersion);
   }
 
   if (date) {
-    newData = newData.replace(reDatePattern, (_, p1, p2) => `${p1}${date}${p2}`);
+    newData = newData.replace(reDatePattern, date);
   }
 
   if (replacements?.length) {
@@ -216,9 +216,9 @@ export async function getRepoInfo(cwd?: string, remote: string = "origin"): Prom
     const {stdout} = await exec("git", ["remote", "get-url", remote], {cwd});
     const url = stdout.trim();
 
-    // Parse git URLs: https://host/owner/repo.git or git@host:owner/repo.git
-    const httpsMatch = /https:\/\/([^/]+)\/([^/]+)\/([^/.]+)/.exec(url);
-    const sshMatch = /git@([^:]+):([^/]+)\/([^/.]+)/.exec(url);
+    // Parse git URLs: https://[user[:pass]@]host/owner/repo[.git][/] or git@host:owner/repo[.git][/]
+    const httpsMatch = /^https:\/\/(?:[^@/]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?\/?$/.exec(url);
+    const sshMatch = /^git@([^:]+):([^/]+)\/(.+?)(?:\.git)?\/?$/.exec(url);
 
     const match = httpsMatch || sshMatch;
     if (match) {
