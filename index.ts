@@ -71,44 +71,32 @@ export function findUp(filename: string, dir: string, stopDir?: string): string 
   }
 }
 
-export function readVersionFromPackageJson(projectRoot: string): string | null {
-  const packageJsonPath = findUp("package.json", projectRoot);
-  if (!packageJsonPath) return null;
-
+function readVersionFile(filename: string, dir: string, parse: (content: string) => string | undefined): string | null {
+  const path = findUp(filename, dir);
+  if (!path) return null;
   try {
-    const content = readFileSync(packageJsonPath, "utf8");
-    const pkg = JSON.parse(content);
-    if (pkg.version && isSemver(pkg.version)) {
-      return stripV(pkg.version);
-    }
+    const v = parse(readFileSync(path, "utf8"));
+    if (v && isSemver(v)) return stripV(v);
   } catch {}
-
   return null;
 }
 
+export function readVersionFromPackageJson(projectRoot: string): string | null {
+  return readVersionFile("package.json", projectRoot, content => JSON.parse(content).version);
+}
+
 export function readVersionFromPyprojectToml(projectRoot: string): string | null {
-  const pyprojectPath = findUp("pyproject.toml", projectRoot);
-  if (!pyprojectPath) return null;
-
-  try {
-    const content = readFileSync(pyprojectPath, "utf8");
-    const projectVersion = tomlGetString(content, "project", "version");
-    if (projectVersion && isSemver(projectVersion)) {
-      return stripV(projectVersion);
-    }
-    const poetryVersion = tomlGetString(content, "tool.poetry", "version");
-    if (poetryVersion && isSemver(poetryVersion)) {
-      return stripV(poetryVersion);
-    }
-  } catch {}
-
-  return null;
+  return readVersionFile("pyproject.toml", projectRoot, content => {
+    const project = tomlGetString(content, "project", "version");
+    if (project && isSemver(project)) return project;
+    return tomlGetString(content, "tool.poetry", "version");
+  });
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
   let result: Result;
   try {
-    result = await exec("git", ["check-ignore", "--", ...files], cwd ? {cwd} : undefined);
+    result = await exec("git", ["check-ignore", "--", ...files], {cwd});
   } catch {
     return files;
   }
@@ -127,8 +115,7 @@ export type GetFileChangesOpts = {
 export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): [string, string | null, string | null] {
   const fileName = basename(file);
 
-  // Unhandled lockfiles do not store a project version. Doing a blind
-  // search-and-replace would corrupt dependency versions.
+  // unhandled lockfiles: blind search-and-replace would corrupt dependency versions
   if ((/lock/i.test(fileName) || fileName === "go.sum") && fileName !== "package-lock.json" && fileName !== "uv.lock") {
     return [file, null, null];
   }
@@ -140,8 +127,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     newData = oldData.replace(/("version":[^]*?")\d+\.\d+\.\d+(?:[^"\d][^"]*)?(")/,
       (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (fileName === "package-lock.json") {
-    // special case for package-lock.json which contains a lot of version
-    // strings which make regexp replacement risky.
+    // regex replace would corrupt nested dependency versions
     const lockFile = JSON.parse(oldData);
     if (lockFile.version) lockFile.version = newVersion; // v1 and v2
     if (lockFile?.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
@@ -150,9 +136,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     newData = oldData.replace(/(^version ?= ?["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)/gm,
       (_, p1, p2) => `${p1}${newVersion}${p2}`);
   } else if (fileName === "uv.lock") {
-    // uv.lock is a tricky case because it lists all packages and the current package. we parse pyproject.toml
-    // to obtain the current package name and then search for that name in uv.lock and replace the version
-    // on the next line which luckily is possible because of static ordering.
+    // uv.lock lists all packages; locate the project's own entry via pyproject name
     const projStr = readFileSync(file.replace(/uv\.lock$/, "pyproject.toml"), "utf8");
     const name = tomlGetString(projStr, "project", "name")!;
     const re = new RegExp(`(\\[\\[package\\]\\]\r?\n.+${esc(name)}.+\r?\nversion = ").+?(")`);
@@ -194,29 +178,30 @@ export function joinStrings(strings: Array<string | undefined>, separator: strin
 }
 
 function end(err?: Error | string | void): void {
-  if (err) {
-    console.info(err instanceof SubprocessError ? `${err.message}\n${err.output}` :
-      err instanceof Error ? (err.stack || err.message).trim() :
-        err);
-  }
-  exit(err ? 1 : 0);
+  if (!err) return exit(0);
+  const msg = err instanceof SubprocessError ? `${err.message}\n${err.output}` :
+    err instanceof Error ? (err.stack || err.message).trim() :
+      err;
+  console.error(msg);
+  exit(1);
 }
 
 function envTokens(names: string[]): string[] {
-  return names.map(n => process.env[n]).filter(Boolean) as string[];
+  return Array.from(new Set(names.map(n => process.env[n]).filter(Boolean) as string[]));
 }
 
 export async function getGithubTokens(): Promise<string[]> {
-  const tokens = envTokens(["VERSIONS_FORGE_TOKEN", "GITHUB_API_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"]);
+  const tokens = new Set(envTokens(["VERSIONS_FORGE_TOKEN", "GITHUB_API_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"]));
   try {
     const {stdout} = await exec("gh", ["auth", "token"]);
-    if (stdout) tokens.push(stdout.trim());
+    const t = stdout.trim();
+    if (t) tokens.add(t);
   } catch {}
-  return Array.from(new Set(tokens));
+  return Array.from(tokens);
 }
 
 export function getGiteaTokens(): string[] {
-  return Array.from(new Set(envTokens(["VERSIONS_FORGE_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN"])));
+  return envTokens(["VERSIONS_FORGE_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN"]);
 }
 
 export type RepoInfo = {
@@ -228,7 +213,7 @@ export type RepoInfo = {
 
 export async function getRepoInfo(cwd?: string, remote: string = "origin"): Promise<RepoInfo | null> {
   try {
-    const {stdout} = await exec("git", ["remote", "get-url", remote], cwd ? {cwd} : undefined);
+    const {stdout} = await exec("git", ["remote", "get-url", remote], {cwd});
     const url = stdout.trim();
 
     // Parse git URLs: https://host/owner/repo.git or git@host:owner/repo.git
@@ -379,21 +364,12 @@ async function main(): Promise<void> {
   const gitDir = findUp(".git", pwd);
   const projectRoot = gitDir ? dirname(gitDir) : pwd;
   const pushRemote = typeof args.remote === "string" ? args.remote : "origin";
-  const releasePrep = (!args.gitless && args.release) ? (() => {
-    const repoInfo = getRepoInfo(undefined, pushRemote);
-    return {
-      repoInfo,
-      tokens: repoInfo.then(info => {
-        if (!info) return [];
-        return info.type === "github" ? getGithubTokens() : getGiteaTokens();
-      }),
-    };
-  })() : null;
+  const repoInfoPromise = (!args.gitless && args.release) ? getRepoInfo(undefined, pushRemote) : null;
+  const tokensPromise = repoInfoPromise?.then(info =>
+    !info ? [] : info.type === "github" ? getGithubTokens() : getGiteaTokens());
 
-  // convert paths to relative
   files = files.map(file => relative(pwd, file));
 
-  // validate flag combinations
   if (level === "prerelease" && !args.preid) {
     return end(new Error("prerelease requires --preid option"));
   }
@@ -404,24 +380,23 @@ async function main(): Promise<void> {
     return end(new Error("--no-push and --release are mutually exclusive"));
   }
 
-  const baseVersionPromise = (async (): Promise<{baseVersion: string, baseSource: string, cachedDescribeTag: string}> => {
+  const baseVersionPromise = (async (): Promise<{baseVersion: string, baseSource: string, describeTag: string}> => {
     let baseVersion = "";
     let baseSource = "";
-    let cachedDescribeTag = "";
+    let describeTag = "";
     if (args.base) {
-      return {baseVersion: String(args.base), baseSource: "--base", cachedDescribeTag};
+      return {baseVersion: String(args.base), baseSource: "--base", describeTag};
     }
     if (!args.gitless) {
-      // Try git describe first (O(depth) vs O(n·log n) for full tag list)
+      // git describe is O(depth); tag list is O(n log n)
       try {
         const result = await exec("git", ["describe", "--tags", "--abbrev=0"]);
-        cachedDescribeTag = result.stdout.trim();
-        if (isSemver(cachedDescribeTag)) {
-          baseVersion = stripV(cachedDescribeTag);
+        describeTag = result.stdout.trim();
+        if (isSemver(describeTag)) {
+          baseVersion = stripV(describeTag);
           baseSource = "git describe";
         }
       } catch {}
-      // Fall back to full tag list if describe didn't yield a semver tag
       if (!baseVersion) {
         let stdout = "";
         try {
@@ -447,7 +422,7 @@ async function main(): Promise<void> {
         baseSource = "default";
       }
     }
-    return {baseVersion, baseSource, cachedDescribeTag};
+    return {baseVersion, baseSource, describeTag};
   })();
 
   // resolve push branch early so detached HEAD fails before commit/tag
@@ -457,7 +432,7 @@ async function main(): Promise<void> {
     return branchOut.trim();
   })() : Promise.resolve("");
 
-  let {baseVersion, baseSource, cachedDescribeTag} = await baseVersionPromise;
+  let {baseVersion, baseSource, describeTag} = await baseVersionPromise;
   if (args.gitless && !baseVersion) {
     return end(new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`));
   }
@@ -473,7 +448,6 @@ async function main(): Promise<void> {
     return end(new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push."));
   }
 
-  // set new version
   const newVersion = incrementSemver(baseVersion, level, typeof args.preid === "string" ? args.preid : undefined);
   logVerbose(`new version ${newVersion}`);
 
@@ -495,15 +469,14 @@ async function main(): Promise<void> {
   const msgs = (args.message || []).filter(msg => typeof msg === "string");
   const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
 
-  // start background tasks early (before file processing and custom command)
   const filesToAddPromise = (!args.gitless && !args.all && files.length) ? removeIgnoredFiles(files) : null;
   const changelogPromise = (!args.gitless && !args.dry) ? (async () => {
     let range = "";
     const tagExists = await exec("git", ["rev-parse", "--verify", `refs/tags/${tagName}`]).then(() => true, () => false);
     if (tagExists) {
       range = `${tagName}..HEAD`;
-    } else if (cachedDescribeTag) {
-      range = `${cachedDescribeTag}..HEAD`;
+    } else if (describeTag) {
+      range = `${describeTag}..HEAD`;
     }
     try {
       const logArgs = ["log"];
@@ -515,14 +488,31 @@ async function main(): Promise<void> {
       return undefined;
     }
   })() : null;
+  // probe remote refs in parallel with file processing and commit; ls-remote needs the push URL
+  // explicitly (defaults to fetch URL, which can differ for github.com fetch + local bare push).
+  const branchRef = `refs/heads/${pushBranch}`;
+  const tagRef = `refs/tags/${tagName}`;
+  const remoteProbePromise = (!args.gitless && !args.dry && !args["no-push"]) ? (async () => {
+    try {
+      const {stdout: pushUrl} = await exec("git", ["remote", "get-url", "--push", pushRemote]);
+      const {stdout} = await exec("git", ["ls-remote", pushUrl.trim(), branchRef, tagRef]);
+      let branch: string | null = null, tag: string | null = null;
+      for (const line of stdout.split(reNewline)) {
+        const [oid, ref] = line.split(/\s+/);
+        if (ref === branchRef) branch = oid;
+        else if (ref === tagRef) tag = oid;
+      }
+      return {branch, tag, ok: true as const};
+    } catch {
+      return {branch: null, tag: null, ok: false as const};
+    }
+  })() : null;
 
-  // rollback callbacks registered as side-effecting actions succeed; drained in reverse on any failure
-  // so the working tree, local refs, and remote refs return to their pre-run state.
+  // drained in reverse on failure to restore working tree, local refs, and remote refs
   const rollbacks: Array<() => Promise<void> | void> = [];
 
   try {
     if (files.length) {
-      // update files
       const originals = new Map<string, string>();
       rollbacks.push(() => {
         for (const [file, content] of originals) write(file, content);
@@ -555,8 +545,7 @@ async function main(): Promise<void> {
 
     const changelog = (await changelogPromise) ?? undefined;
 
-    // snapshot pre-commit index so rollback restores user's staged hunks byte-for-byte
-    // (a plain --soft reset would leave our just-committed changes staged in the index)
+    // preserve user's staged hunks on rollback (--soft would leave our changes staged)
     const preIndexTreeOid = await exec("git", ["write-tree"]).then(r => r.stdout.trim()).catch(() => null);
 
     const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
@@ -577,7 +566,6 @@ async function main(): Promise<void> {
       if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
     });
 
-    const tagRef = `refs/tags/${tagName}`;
     // capture the prior local tag (if any) since `git tag -f` overwrites it
     const priorLocalTagOid = await exec("git", ["rev-parse", "--verify", tagRef])
       .then(r => r.stdout.trim()).catch(() => null);
@@ -587,44 +575,29 @@ async function main(): Promise<void> {
     writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
     rollbacks.push(async () => {
       // update-ref preserves the prior tag's type (annotated vs lightweight); `tag -f <oid>`
-      // would always create a lightweight tag pointing at the prior tag-object OID.
+      // would create a lightweight tag pointing at the prior tag-object OID.
       if (priorLocalTagOid) await exec("git", ["update-ref", tagRef, priorLocalTagOid]);
       else await exec("git", ["tag", "-d", tagName]);
     });
 
     if (!args["no-push"]) {
-      const branchRef = `refs/heads/${pushBranch}`;
-      // resolve the push URL explicitly because ls-remote uses the fetch URL by default,
-      // which can differ from the push URL (e.g. github.com fetch + local bare push).
-      let probedRemoteState = false;
-      let remoteBranchOldOid: string | null = null;
-      let remoteTagOldOid: string | null = null;
-      try {
-        const {stdout: pushUrl} = await exec("git", ["remote", "get-url", "--push", pushRemote]);
-        const {stdout} = await exec("git", ["ls-remote", pushUrl.trim(), branchRef, tagRef]);
-        for (const line of stdout.split(reNewline)) {
-          const [oid, ref] = line.split(/\s+/);
-          if (ref === branchRef) remoteBranchOldOid = oid;
-          else if (ref === tagRef) remoteTagOldOid = oid;
-        }
-        probedRemoteState = true;
-      } catch {}
+      const probe = await remoteProbePromise!;
 
       writeResult(await exec("git", ["push", pushRemote, pushBranch, tagName]));
       const pushedHeadOid = (await exec("git", ["rev-parse", "HEAD"])).stdout.trim();
 
-      if (probedRemoteState) {
+      if (probe.ok) {
         // --force-with-lease guards against concurrent pushes overwriting work
         rollbacks.push(async () => {
-          if (remoteBranchOldOid) {
-            await exec("git", ["push", `--force-with-lease=${branchRef}:${pushedHeadOid}`, pushRemote, `${remoteBranchOldOid}:${branchRef}`]);
+          if (probe.branch) {
+            await exec("git", ["push", `--force-with-lease=${branchRef}:${pushedHeadOid}`, pushRemote, `${probe.branch}:${branchRef}`]);
           } else {
             await exec("git", ["push", pushRemote, `:${branchRef}`]);
           }
         });
         rollbacks.push(async () => {
-          if (remoteTagOldOid) {
-            await exec("git", ["push", "--force", pushRemote, `${remoteTagOldOid}:${tagRef}`]);
+          if (probe.tag) {
+            await exec("git", ["push", "--force", pushRemote, `${probe.tag}:${tagRef}`]);
           } else {
             await exec("git", ["push", pushRemote, `:${tagRef}`]);
           }
@@ -637,21 +610,18 @@ async function main(): Promise<void> {
       }
     }
 
-    // create release if requested
-    if (releasePrep) {
-      const repoInfo = await releasePrep.repoInfo;
+    if (repoInfoPromise) {
+      const repoInfo = await repoInfoPromise;
       if (!repoInfo) {
         throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
       }
-
-      const releaseBody = changelog || tagName;
       const forgeName = repoInfo.type === "github" ? "GitHub" : "Gitea";
-      const tokens = await releasePrep.tokens;
+      const tokens = await tokensPromise!;
       if (!tokens.length) {
         throw new Error(`${forgeName} release requested but no token found in environment`);
       }
       logVerbose(`creating ${forgeName} release for ${tagName} (${tokens.length} token${tokens.length === 1 ? "" : "s"} to try)`);
-      await createForgeRelease(repoInfo, tagName, releaseBody, tokens);
+      await createForgeRelease(repoInfo, tagName, changelog || tagName, tokens);
     }
   } catch (err) {
     for (const rollback of rollbacks.reverse()) {
