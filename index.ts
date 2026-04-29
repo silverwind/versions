@@ -108,7 +108,7 @@ export type GetFileChangesOpts = {
   file: string,
   baseVersion: string,
   newVersion: string,
-  replacements?: Array<{re: RegExp | string, replacement: string}>,
+  replacements?: Array<{re: RegExp, replacement: string}>,
   date?: string,
 };
 
@@ -371,13 +371,13 @@ async function main(): Promise<void> {
   files = files.map(file => relative(pwd, file));
 
   if (level === "prerelease" && !args.preid) {
-    return end(new Error("prerelease requires --preid option"));
+    throw new Error("prerelease requires --preid option");
   }
   if (args.gitless && args.release) {
-    return end(new Error("--gitless and --release are mutually exclusive"));
+    throw new Error("--gitless and --release are mutually exclusive");
   }
   if (args["no-push"] && args.release) {
-    return end(new Error("--no-push and --release are mutually exclusive"));
+    throw new Error("--no-push and --release are mutually exclusive");
   }
 
   const baseVersionPromise = (async (): Promise<{baseVersion: string, baseSource: string, describeTag: string}> => {
@@ -385,10 +385,11 @@ async function main(): Promise<void> {
     let baseSource = "";
     let describeTag = "";
     if (args.base) {
-      return {baseVersion: String(args.base), baseSource: "--base", describeTag};
+      const raw = String(args.base);
+      if (!isSemver(raw)) throw new Error(`Invalid base version: ${raw}`);
+      return {baseVersion: stripV(raw), baseSource: "--base", describeTag};
     }
     if (!args.gitless) {
-      // git describe is O(depth); tag list is O(n log n)
       try {
         const result = await exec("git", ["describe", "--tags", "--abbrev=0"]);
         describeTag = result.stdout.trim();
@@ -432,20 +433,15 @@ async function main(): Promise<void> {
     return branchOut.trim();
   })() : Promise.resolve("");
 
-  let {baseVersion, baseSource, describeTag} = await baseVersionPromise;
+  const {baseVersion, baseSource, describeTag} = await baseVersionPromise;
   if (args.gitless && !baseVersion) {
-    return end(new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`));
+    throw new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`);
   }
   logVerbose(`base version ${baseVersion} from ${baseSource}`);
 
-  baseVersion = stripV(baseVersion);
-  if (!isSemver(baseVersion)) {
-    throw new Error(`Invalid base version: ${baseVersion}`);
-  }
-
   const pushBranch = await pushBranchPromise;
   if (pushBranch === "HEAD") {
-    return end(new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push."));
+    throw new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push.");
   }
 
   const newVersion = incrementSemver(baseVersion, level, typeof args.preid === "string" ? args.preid : undefined);
@@ -458,7 +454,7 @@ async function main(): Promise<void> {
       let [, re, replacement, flags] = (reReplaceString.exec(replaceStr) || []);
 
       if (!re || !replacement) {
-        end(new Error(`Invalid replace string: ${replaceStr}`));
+        throw new Error(`Invalid replace string: ${replaceStr}`);
       }
 
       replacement = replaceTokens(replacement, newVersion);
@@ -546,7 +542,10 @@ async function main(): Promise<void> {
     const changelog = (await changelogPromise) ?? undefined;
 
     // preserve user's staged hunks on rollback (--soft would leave our changes staged)
-    const preIndexTreeOid = await exec("git", ["write-tree"]).then(r => r.stdout.trim()).catch(() => null);
+    const [preIndexTreeOid, priorLocalTagOid] = await Promise.all([
+      exec("git", ["write-tree"]).then(r => r.stdout.trim()).catch(() => null),
+      exec("git", ["rev-parse", "--verify", tagRef]).then(r => r.stdout.trim()).catch(() => null),
+    ]);
 
     const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
     let commitArgs: string[];
@@ -566,10 +565,6 @@ async function main(): Promise<void> {
       if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
     });
 
-    // capture the prior local tag (if any) since `git tag -f` overwrites it
-    const priorLocalTagOid = await exec("git", ["rev-parse", "--verify", tagRef])
-      .then(r => r.stdout.trim()).catch(() => null);
-
     const tagMsg = joinStrings([...msgs, changelog], "\n\n");
     // adding explicit -a here seems to make git no longer sign the tag
     writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
@@ -582,15 +577,15 @@ async function main(): Promise<void> {
 
     if (!args["no-push"]) {
       const probe = await remoteProbePromise!;
+      const headOid = (await exec("git", ["rev-parse", "HEAD"])).stdout.trim();
 
       writeResult(await exec("git", ["push", pushRemote, pushBranch, tagName]));
-      const pushedHeadOid = (await exec("git", ["rev-parse", "HEAD"])).stdout.trim();
 
       if (probe.ok) {
         // --force-with-lease guards against concurrent pushes overwriting work
         rollbacks.push(async () => {
           if (probe.branch) {
-            await exec("git", ["push", `--force-with-lease=${branchRef}:${pushedHeadOid}`, pushRemote, `${probe.branch}:${branchRef}`]);
+            await exec("git", ["push", `--force-with-lease=${branchRef}:${headOid}`, pushRemote, `${probe.branch}:${branchRef}`]);
           } else {
             await exec("git", ["push", pushRemote, `:${branchRef}`]);
           }
