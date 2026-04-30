@@ -14,6 +14,7 @@ const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d
 const rePrereleaseVersion = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?/;
 const rePrereleaseIdNum = /^([a-zA-Z0-9-]+)\.(\d+)$/;
 const reDatePattern = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/g;
+const reDate = new RegExp(reDatePattern.source);
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
 
 function stripV(str: string): string {
@@ -91,6 +92,56 @@ export function readVersionFromPyprojectToml(projectRoot: string): string | null
     if (project && isSemver(project)) return project;
     return tomlGetString(content, "tool.poetry", "version");
   });
+}
+
+const reHeading = /^(#+)\s+(.*?)\s*$/;
+// Three groups of 2-4 chars from Y/M/D/X/? separated by `-`, `/`, `.`, or whitespace.
+// Covers YYYY-MM-DD, xxxx-xx-xx, ????-??-??, DD-MM-YYYY, YYYY/MM/DD etc.
+const rePlaceholderDate = /[YMDX?]{2,4}[-/. ][YMDX?]{2,4}[-/. ][YMDX?]{2,4}/i;
+
+function findVersionHeading(lines: string[], version: string): {index: number, level: number} | null {
+  // Non-version-char boundaries so "1.2.3" doesn't match "1.2.30" or "1.2.3-rc.1".
+  const re = new RegExp(`(?:^|[^\\d.\\-])v?${esc(stripV(version))}(?:[^\\d.\\-]|$)`, "i");
+  for (let i = 0; i < lines.length; i++) {
+    const m = reHeading.exec(lines[i]);
+    if (m && re.test(m[2])) return {index: i, level: m[1].length};
+  }
+  return null;
+}
+
+// Lenient about heading shape: matches "# 1.2.3", "## v1.2.3", "## [1.2.3]",
+// "## [1.2.3] - 2024-01-15", "## 1.2.3 (2024-01-15)", etc.
+export function readChangelogEntry(content: string, version: string): string | null {
+  const lines = content.split(reNewline);
+  const head = findVersionHeading(lines, version);
+  if (!head) return null;
+
+  let end = lines.length;
+  for (let i = head.index + 1; i < lines.length; i++) {
+    const m = reHeading.exec(lines[i]);
+    if (m && m[1].length <= head.level) {
+      end = i;
+      break;
+    }
+  }
+
+  return lines.slice(head.index + 1, end).join("\n").trim() || null;
+}
+
+export function updateChangelogHeadingDate(content: string, version: string, date: string): string | null {
+  const lines = content.split(reNewline);
+  const head = findVersionHeading(lines, version);
+  if (!head) return null;
+
+  const heading = lines[head.index];
+  if (rePlaceholderDate.test(heading)) {
+    lines[head.index] = heading.replace(rePlaceholderDate, date);
+  } else if (reDate.test(heading)) {
+    return null;
+  } else {
+    lines[head.index] = `${heading.trimEnd()} - ${date}`;
+  }
+  return lines.join("\n");
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
@@ -358,7 +409,8 @@ async function main(): Promise<void> {
     end();
   }
 
-  const date = args.date ? new Date().toISOString().substring(0, 10) : "";
+  const today = new Date().toISOString().substring(0, 10);
+  const date = args.date ? today : "";
 
   const pwd = cwd();
   const gitDir = findUp(".git", pwd);
@@ -465,8 +517,28 @@ async function main(): Promise<void> {
   const msgs = (args.message || []).filter(msg => typeof msg === "string");
   const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
 
-  const filesToAddPromise = (!args.gitless && !args.all && files.length) ? removeIgnoredFiles(files) : null;
+  const changelogInfo = (() => {
+    const path = findUp("CHANGELOG.md", projectRoot);
+    if (!path) return null;
+    let original: string;
+    try {
+      original = readFileSync(path, "utf8");
+    } catch {
+      return null;
+    }
+    const entry = readChangelogEntry(original, newVersion);
+    if (!entry) return null;
+    return {path, entry, original, updated: updateChangelogHeadingDate(original, newVersion, today)};
+  })();
+
+  const allFiles = changelogInfo?.updated ? [...files, relative(pwd, changelogInfo.path)] : files;
+  const filesToAddPromise = (!args.gitless && !args.all && allFiles.length) ? removeIgnoredFiles(allFiles) : null;
   const changelogPromise = (!args.gitless && !args.dry) ? (async () => {
+    if (changelogInfo) {
+      logVerbose(`using changelog entry from ${changelogInfo.path}`);
+      return changelogInfo.entry;
+    }
+
     let range = "";
     const tagExists = await exec("git", ["rev-parse", "--verify", `refs/tags/${tagName}`]).then(() => true, () => false);
     if (tagExists) {
@@ -508,21 +580,26 @@ async function main(): Promise<void> {
   const rollbacks: Array<() => Promise<void> | void> = [];
 
   try {
-    if (files.length) {
-      const originals = new Map<string, string>();
-      rollbacks.push(() => {
-        for (const [file, content] of originals) write(file, content);
-      });
-      for (const file of files) {
-        const [filePath, newData, oldData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
-        if (newData !== null) {
-          if (!originals.has(filePath)) originals.set(filePath, oldData!);
-          logVerbose(`writing ${filePath}`);
-          write(filePath, newData);
-        } else {
-          logVerbose(`skipping ${file} (unhandled lockfile)`);
-        }
+    const originals = new Map<string, string>();
+    rollbacks.push(() => {
+      for (const [file, content] of originals) write(file, content);
+    });
+    for (const file of files) {
+      const [filePath, newData, oldData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
+      if (newData !== null) {
+        if (!originals.has(filePath)) originals.set(filePath, oldData!);
+        logVerbose(`writing ${filePath}`);
+        write(filePath, newData);
+      } else {
+        logVerbose(`skipping ${file} (unhandled lockfile)`);
       }
+    }
+
+    if (changelogInfo?.updated) {
+      const {path, original, updated} = changelogInfo;
+      if (!originals.has(path)) originals.set(path, original);
+      logVerbose(`updating heading date in ${path}`);
+      write(path, updated);
     }
 
     if (typeof args.command === "string") {

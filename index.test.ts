@@ -8,6 +8,7 @@ import {
   readVersionFromPackageJson, readVersionFromPyprojectToml,
   removeIgnoredFiles, getGithubTokens, getGiteaTokens,
   getRepoInfo, writeResult, createForgeRelease,
+  readChangelogEntry, updateChangelogHeadingDate,
   type RepoInfo,
 } from "./index.ts";
 import {exec, tomlGetString, SubprocessError} from "./utils.ts";
@@ -373,6 +374,71 @@ snapshots:
 
   expect(await readFile(join(tmpDir, "pnpm-lock.yaml"), "utf8")).toEqual(lockContent);
 }));
+
+test("readChangelogEntry", () => {
+  const md = `# Changelog
+
+## [Unreleased]
+
+## [1.2.3] - 2024-01-15
+### Added
+- new thing
+
+### Fixed
+- broken thing
+
+## 1.2.2 (2024-01-01)
+- prior
+
+## v1.2.1
+old
+`;
+  expect(readChangelogEntry(md, "1.2.3")).toEqual("### Added\n- new thing\n\n### Fixed\n- broken thing");
+  expect(readChangelogEntry(md, "1.2.2")).toEqual("- prior");
+  expect(readChangelogEntry(md, "1.2.1")).toEqual("old");
+  expect(readChangelogEntry(md, "v1.2.3")).toEqual("### Added\n- new thing\n\n### Fixed\n- broken thing");
+  expect(readChangelogEntry(md, "9.9.9")).toBeNull();
+
+  expect(readChangelogEntry("# 1.0.0\n\nbody\n", "1.0.0")).toEqual("body");
+  expect(readChangelogEntry("# 1.0.0\n\nbody\n", "1.0.10")).toBeNull();
+  expect(readChangelogEntry("## 1.0.0\n## 1.0.1\nb\n", "1.0.0")).toBeNull();
+  expect(readChangelogEntry("## 1.0.0-rc.1\n\nrc\n## 1.0.0\n\nrelease\n", "1.0.0")).toEqual("release");
+  expect(readChangelogEntry("## 1.0.0\n\nrelease\n## 1.0.0-rc.1\n\nrc\n", "1.0.0-rc.1")).toEqual("rc");
+  expect(readChangelogEntry("# Changelog\n\n## 1.0.0\nbody\n", "1.0.0")).toEqual("body");
+  expect(readChangelogEntry("", "1.0.0")).toBeNull();
+});
+
+test("updateChangelogHeadingDate", () => {
+  const today = "2026-04-30";
+
+  expect(updateChangelogHeadingDate("## 1.2.3\n\nbody\n", "1.2.3", today))
+    .toEqual("## 1.2.3 - 2026-04-30\n\nbody\n");
+
+  expect(updateChangelogHeadingDate("## [1.2.3]\n\nbody\n", "1.2.3", today))
+    .toEqual("## [1.2.3] - 2026-04-30\n\nbody\n");
+
+  expect(updateChangelogHeadingDate("## 1.2.3 - YYYY-MM-DD\n\nbody\n", "1.2.3", today))
+    .toEqual("## 1.2.3 - 2026-04-30\n\nbody\n");
+
+  expect(updateChangelogHeadingDate("## [1.2.3] (yyyy-mm-dd)\n\nbody\n", "1.2.3", today))
+    .toEqual("## [1.2.3] (2026-04-30)\n\nbody\n");
+
+  expect(updateChangelogHeadingDate("## 1.2.3 - xxxx-xx-xx\n\nbody\n", "1.2.3", today))
+    .toEqual("## 1.2.3 - 2026-04-30\n\nbody\n");
+
+  expect(updateChangelogHeadingDate("## 1.2.3 - XXXX-XX-XX\n\nbody\n", "1.2.3", today))
+    .toEqual("## 1.2.3 - 2026-04-30\n\nbody\n");
+
+  expect(updateChangelogHeadingDate("## 1.2.3 - DD-MM-YYYY\n\nbody\n", "1.2.3", today))
+    .toEqual("## 1.2.3 - 2026-04-30\n\nbody\n");
+
+  expect(updateChangelogHeadingDate("## 1.2.3 - ????-??-??\n\nbody\n", "1.2.3", today))
+    .toEqual("## 1.2.3 - 2026-04-30\n\nbody\n");
+
+  expect(updateChangelogHeadingDate("## [1.2.3] - 2024-01-15\n\nbody\n", "1.2.3", today)).toBeNull();
+
+  expect(updateChangelogHeadingDate("## 1.0.0\nbody\n", "9.9.9", today)).toBeNull();
+});
 
 test("createForgeRelease github success", async () => {
   const mock = vi.fn(() => Promise.resolve(Response.json({html_url: "https://github.com/o/r/releases/tag/1.0.1"}, {status: 201})));
@@ -1041,6 +1107,62 @@ test("tomlGetString edge cases", () => {
 test("incrementSemver unknown level throws", () => {
   expect(() => incrementSemver("1.0.0", "unknown")).toThrow("Invalid semver level");
 });
+
+test("CHANGELOG.md drives commit body and gets dated heading", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## [1.0.1]\n- Fixed thing X\n- Added thing Y\n\n## 1.0.0\nold stuff\n`);
+
+  const {env} = await setupReleaseRepo(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  await exec("node", [distPath, "--no-push", "patch", "package.json"], opts);
+
+  const today = new Date().toISOString().substring(0, 10);
+  const changelogAfter = await readFile(join(tmpDir, "CHANGELOG.md"), "utf8");
+  expect(changelogAfter).toContain(`## [1.0.1] - ${today}`);
+
+  const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(msg).toContain("- Fixed thing X");
+  expect(msg).toContain("- Added thing Y");
+  // git log fallback (commit subjects) must not leak in
+  expect(msg).not.toContain("Initial commit");
+}));
+
+test("CHANGELOG.md without entry falls back to git log", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## 1.0.0\nold\n`);
+
+  const {env} = await setupReleaseRepo(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  // commit between the tag and HEAD so the git log fallback has something to report
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0", changed: true}, null, 2));
+  await exec("git", ["commit", "-am", "tweak something"], opts);
+
+  await exec("node", [distPath, "--no-push", "patch", "package.json"], opts);
+
+  // unchanged because no entry for 1.0.1
+  expect(await readFile(join(tmpDir, "CHANGELOG.md"), "utf8")).toEqual(`# Changelog\n\n## 1.0.0\nold\n`);
+
+  const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(msg).toContain("tweak something");
+}));
+
+test("CHANGELOG.md with existing date is left alone", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  const original = `# Changelog\n\n## [1.0.1] - 2024-01-15\n- existing entry\n`;
+  await writeFile(join(tmpDir, "CHANGELOG.md"), original);
+
+  const {env} = await setupReleaseRepo(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  await exec("node", [distPath, "--no-push", "patch", "package.json"], opts);
+
+  expect(await readFile(join(tmpDir, "CHANGELOG.md"), "utf8")).toEqual(original);
+
+  const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(msg).toContain("- existing entry");
+}));
 
 test("readVersionFromPackageJson", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "3.2.1"}, null, 2));

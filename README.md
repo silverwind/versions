@@ -61,6 +61,10 @@ To automatically sign commits and tags created by `versions` with GPG add this t
 
 By default, `versions` pushes the commit and tag to `origin` after creating them. Pass `--no-push` to skip the push and keep changes local. Use `--remote` and `--branch` to override the target remote and branch.
 
+## Changelog
+
+If a `CHANGELOG.md` is present at the project root with a heading for the new version, its body is used as the commit message, tag annotation, and release body. Heading matching is lenient — `# 1.2.3`, `## v1.2.3`, `## [1.2.3]`, `## [1.2.3] - 2024-01-15`, `## 1.2.3 (YYYY-MM-DD)` all work. If the heading has no date or a placeholder (`YYYY-MM-DD`, `xxxx-xx-xx`, etc.), it gets rewritten to today's date and included in the commit. With no matching entry, the tool falls back to a `git log` summary.
+
 ## Creating releases
 
 When using the `--release` option, `versions` will automatically create a GitHub or Gitea release after pushing the tag. The release body will contain the same changelog as the commit message. `--release` requires the push and is incompatible with `--no-push`.
