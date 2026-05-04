@@ -287,7 +287,88 @@ export async function getRepoInfo(cwd?: string, remote: string = "origin"): Prom
   }
 }
 
-export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<void> {
+async function forgeFetch(method: string, url: string, authHeader: string, jsonBody?: string): Promise<Response> {
+  logVerbose(`${colorize(method, "magenta")} ${url}`);
+  const init: RequestInit = {method, headers: {Authorization: authHeader}};
+  if (jsonBody !== undefined) {
+    (init.headers as Record<string, string>)["Content-Type"] = "application/json";
+    init.body = jsonBody;
+  }
+  const response = await fetch(url, init);
+  logVerbose(`${colorize(String(response.status), response.ok ? "green" : "red")} ${url}`);
+  return response;
+}
+
+// Thrown by attempt callbacks of withTokens to signal that the next token should be tried.
+class AuthRetryable extends Error {}
+
+async function withTokens<T>(
+  isGithub: boolean,
+  tokens: string[],
+  attempt: (authHeader: string) => Promise<T>,
+): Promise<T> {
+  let lastError: Error | undefined;
+  for (const token of tokens) {
+    const authHeader = isGithub ? `Bearer ${token}` : `token ${token}`;
+    try {
+      return await attempt(authHeader);
+    } catch (err: any) {
+      if (!(err instanceof AuthRetryable)) throw err;
+      lastError = err;
+      logVerbose(`auth failed, trying next token`);
+    }
+  }
+  throw lastError ?? new Error("No tokens provided");
+}
+
+async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName: string): Promise<number> {
+  let listResponse: Response;
+  try {
+    listResponse = await forgeFetch("GET", `${apiUrl}?draft=true&limit=50&per_page=100`, authHeader);
+  } catch (err: any) {
+    throw new Error(`Failed to list releases: ${err.cause?.message || err.message || "Unknown error"}`);
+  }
+  if (!listResponse.ok) {
+    throw new Error(`Failed to list releases: ${listResponse.status} ${listResponse.statusText}\n${await listResponse.text()}`);
+  }
+  const releases = await listResponse.json() as Array<{id: number; tag_name: string; draft: boolean}>;
+  const drafts = releases.filter(r => r.draft && r.tag_name === tagName);
+  for (const draft of drafts) {
+    let deleteResponse: Response;
+    try {
+      deleteResponse = await forgeFetch("DELETE", `${apiUrl}/${draft.id}`, authHeader);
+    } catch (err: any) {
+      throw new Error(`Failed to delete draft release ${draft.id}: ${err.cause?.message || err.message || "Unknown error"}`);
+    }
+    if (!deleteResponse.ok && deleteResponse.status !== 404) {
+      throw new Error(`Failed to delete draft release ${draft.id}: ${deleteResponse.status} ${deleteResponse.statusText}\n${await deleteResponse.text()}`);
+    }
+    console.info(`Deleted stale draft release for ${tagName}`);
+  }
+  return drafts.length;
+}
+
+export type CreatedRelease = {id: number; html_url?: string};
+
+export async function deleteForgeRelease(repoInfo: RepoInfo, releaseId: number, tokens: string[]): Promise<void> {
+  const isGithub = repoInfo.type === "github";
+  const apiHost = isGithub ? "api.github.com" : `${repoInfo.host}/api/v1`;
+  const url = `https://${apiHost}/repos/${repoInfo.owner}/${repoInfo.repo}/releases/${releaseId}`;
+
+  await withTokens(isGithub, tokens, async (authHeader) => {
+    let response: Response;
+    try {
+      response = await forgeFetch("DELETE", url, authHeader);
+    } catch (err: any) {
+      throw new Error(`Failed to delete release ${releaseId}: ${err.cause?.message || err.message || "Unknown error"}`);
+    }
+    if (response.ok || response.status === 404) return;
+    const message = `Failed to delete release ${releaseId}: ${response.status} ${response.statusText}\n${await response.text()}`;
+    throw response.status === 401 || response.status === 403 ? new AuthRetryable(message) : new Error(message);
+  });
+}
+
+export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<CreatedRelease | null> {
   const isGithub = repoInfo.type === "github";
   const apiHost = isGithub ? "api.github.com" : `${repoInfo.host}/api/v1`;
   const apiUrl = `https://${apiHost}/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
@@ -300,40 +381,33 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
     prerelease: tagName.includes("-"),
   });
 
-  let lastError: Error | undefined;
-  for (const token of tokens) {
-    let response: Response;
-    logVerbose(`${colorize("POST", "magenta")} ${apiUrl}`);
+  const post = async (authHeader: string) => {
     try {
-      response = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": isGithub ? `Bearer ${token}` : `token ${token}`,
-        },
-        body: releaseBody,
-      });
+      return await forgeFetch("POST", apiUrl, authHeader, releaseBody);
     } catch (err: any) {
       throw new Error(`Failed to create release: ${err.cause?.message || err.message || "Unknown error"}`);
     }
-    logVerbose(`${colorize(String(response.status), response.ok ? "green" : "red")} ${apiUrl}`);
+  };
+
+  return withTokens(isGithub, tokens, async (authHeader) => {
+    let response = await post(authHeader);
+
+    // Stale draft for the same tag blocks creation: Gitea returns 409 "Release is has no Tag",
+    // GitHub returns 422 "already_exists". Clean up matching drafts and retry once.
+    if (response.status === 409 || response.status === 422) {
+      const cleaned = await deleteMatchingDrafts(apiUrl, authHeader, tagName);
+      if (cleaned > 0) response = await post(authHeader);
+    }
 
     if (response.ok) {
       const result = await response.json();
-      if (result.html_url) {
-        console.info(`Created release: ${result.html_url}`);
-      } else {
-        console.info("Created release");
-      }
-      return;
+      console.info(result.html_url ? `Created release: ${result.html_url}` : "Created release");
+      return typeof result.id === "number" ? {id: result.id, html_url: result.html_url} : null;
     }
 
-    const errorText = await response.text();
-    lastError = new Error(`Failed to create release: ${response.status} ${response.statusText}\n${errorText}`);
-    if (response.status !== 401 && response.status !== 403) throw lastError;
-    logVerbose(`auth failed (${response.status}), trying next token`);
-  }
-  throw lastError ?? new Error("No tokens provided");
+    const message = `Failed to create release: ${response.status} ${response.statusText}\n${await response.text()}`;
+    throw response.status === 401 || response.status === 403 ? new AuthRetryable(message) : new Error(message);
+  });
 }
 
 export function writeResult(result: Result): void {
@@ -693,7 +767,14 @@ async function main(): Promise<void> {
         throw new Error(`${forgeName} release requested but no token found in environment`);
       }
       logVerbose(`creating ${forgeName} release for ${tagName} (${tokens.length} token${tokens.length === 1 ? "" : "s"} to try)`);
-      await createForgeRelease(repoInfo, tagName, changelog || tagName, tokens);
+      const created = await createForgeRelease(repoInfo, tagName, changelog || tagName, tokens);
+      if (created) {
+        // Pushed last so it runs first on rollback (LIFO): deleting the release before the
+        // tag-delete push prevents Gitea from converting the release into a draft.
+        rollbacks.push(async () => {
+          await deleteForgeRelease(repoInfo, created.id, tokens);
+        });
+      }
     }
   } catch (err) {
     for (const rollback of rollbacks.reverse()) {

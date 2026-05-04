@@ -7,7 +7,7 @@ import {
   joinStrings, findUp, getFileChanges, write,
   readVersionFromPackageJson, readVersionFromPyprojectToml,
   removeIgnoredFiles, getGithubTokens, getGiteaTokens,
-  getRepoInfo, writeResult, createForgeRelease,
+  getRepoInfo, writeResult, createForgeRelease, deleteForgeRelease,
   readChangelogEntry, updateChangelogHeadingDate,
   type RepoInfo,
 } from "./index.ts";
@@ -440,16 +440,54 @@ test("updateChangelogHeadingDate", () => {
   expect(updateChangelogHeadingDate("## 1.0.0\nbody\n", "9.9.9", today)).toBeNull();
 });
 
-test("createForgeRelease github success", async () => {
-  const mock = vi.fn(() => Promise.resolve(Response.json({html_url: "https://github.com/o/r/releases/tag/1.0.1"}, {status: 201})));
+function getCalls(mock: ReturnType<typeof vi.fn>) {
+  return mock.mock.calls as unknown as Array<[string, RequestInit | undefined]>;
+}
+
+function postCall(mock: ReturnType<typeof vi.fn>) {
+  const found = getCalls(mock).find(([, init]) => init?.method === "POST");
+  if (!found) throw new Error("no POST call recorded");
+  return found;
+}
+
+function authOf(init: RequestInit | undefined) {
+  return (init?.headers as Record<string, string> | undefined)?.Authorization;
+}
+
+function mockForgePost(create: Response | (() => Response)) {
+  const mock = vi.fn(() => Promise.resolve(typeof create === "function" ? create() : create));
   stubGlobal("fetch", mock);
+  return mock;
+}
+
+// First POST returns conflictStatus; cleanup GET returns drafts; DELETE 204; retry POST returns success.
+function mockForgeConflictThenSuccess(conflictStatus: number, drafts: Array<{id: number; tag_name: string; draft: boolean}>, success: Response) {
+  let postCount = 0;
+  const mock = vi.fn((_url: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    if (method === "POST") {
+      postCount += 1;
+      if (postCount === 1) return Promise.resolve(new Response(`conflict ${conflictStatus}`, {status: conflictStatus, statusText: "Conflict"}));
+      return Promise.resolve(success);
+    }
+    if (method === "GET") return Promise.resolve(Response.json(drafts, {status: 200}));
+    if (method === "DELETE") return Promise.resolve(new Response(null, {status: 204}));
+    throw new Error(`unexpected method ${method}`);
+  });
+  stubGlobal("fetch", mock);
+  return mock;
+}
+
+test("createForgeRelease github success skips cleanup on happy path", async () => {
+  const mock = mockForgePost(Response.json({id: 4242, html_url: "https://github.com/o/r/releases/tag/1.0.1"}, {status: 201}));
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-  await createForgeRelease(info, "1.0.1", "changelog", ["gh-token"]);
+  const created = await createForgeRelease(info, "1.0.1", "changelog", ["gh-token"]);
+  expect(created).toEqual({id: 4242, html_url: "https://github.com/o/r/releases/tag/1.0.1"});
   expect(mock).toHaveBeenCalledOnce();
-  const [url, init] = mock.mock.calls[0] as unknown as [string, any];
+  const [url, init] = postCall(mock);
   expect(url).toEqual("https://api.github.com/repos/o/r/releases");
-  expect(init.headers.Authorization).toEqual("Bearer gh-token");
-  const body = JSON.parse(init.body);
+  expect(authOf(init)).toEqual("Bearer gh-token");
+  const body = JSON.parse(init!.body as string);
   expect(body.tag_name).toEqual("1.0.1");
   expect(body.name).toEqual("1.0.1");
   expect(body.body).toEqual("changelog");
@@ -457,23 +495,27 @@ test("createForgeRelease github success", async () => {
   expect(body.prerelease).toEqual(false);
 });
 
-test("createForgeRelease gitea success", async () => {
-  const mock = vi.fn(() => Promise.resolve(Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/2.0.0"}, {status: 201})));
-  stubGlobal("fetch", mock);
+test("createForgeRelease returns null when response has no numeric id", async () => {
+  mockForgePost(Response.json({html_url: "https://github.com/o/r/releases/tag/1.0.0"}, {status: 201}));
+  const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+  expect(await createForgeRelease(info, "1.0.0", "body", ["tok"])).toBeNull();
+});
+
+test("createForgeRelease gitea success skips cleanup on happy path", async () => {
+  const mock = mockForgePost(Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/2.0.0"}, {status: 201}));
   const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
   await createForgeRelease(info, "2.0.0", "notes", ["gitea-tok"]);
   expect(mock).toHaveBeenCalledOnce();
-  const [url, init] = mock.mock.calls[0] as unknown as [string, any];
+  const [url, init] = postCall(mock);
   expect(url).toEqual("https://gitea.example.com/api/v1/repos/o/r/releases");
-  expect(init.headers.Authorization).toEqual("token gitea-tok");
+  expect(authOf(init)).toEqual("token gitea-tok");
 });
 
 test("createForgeRelease prerelease tag", async () => {
-  const mock = vi.fn(() => Promise.resolve(Response.json({}, {status: 201})));
-  stubGlobal("fetch", mock);
+  const mock = mockForgePost(Response.json({}, {status: 201}));
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
   await createForgeRelease(info, "1.0.0-beta.1", "body", ["tok"]);
-  expect(JSON.parse((mock.mock.calls[0] as unknown as [string, any])[1].body).prerelease).toEqual(true);
+  expect(JSON.parse(postCall(mock)[1]!.body as string).prerelease).toEqual(true);
 });
 
 test.each([[401, "Unauthorized"], [403, "Forbidden"]])("createForgeRelease token fallback on %i", async (status, text) => {
@@ -486,10 +528,10 @@ test.each([[401, "Unauthorized"], [403, "Forbidden"]])("createForgeRelease token
   expect(mock).toHaveBeenCalledTimes(2);
 });
 
-test("createForgeRelease throws on non-auth error", async () => {
-  stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Validation failed", {status: 422, statusText: "Unprocessable Entity"}))));
+test("createForgeRelease throws on non-conflict, non-auth error", async () => {
+  stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Server error", {status: 500, statusText: "Internal Server Error"}))));
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-  await expect(createForgeRelease(info, "1.0.0", "body", ["tok"])).rejects.toThrow("422");
+  await expect(createForgeRelease(info, "1.0.0", "body", ["tok"])).rejects.toThrow("500");
 });
 
 test("createForgeRelease throws when all tokens fail", async () => {
@@ -507,9 +549,177 @@ test("createForgeRelease network error includes cause", async () => {
 });
 
 test("createForgeRelease no html_url in response", async () => {
-  stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({id: 1}, {status: 201}))));
+  mockForgePost(Response.json({id: 1}, {status: 201}));
   const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
   await createForgeRelease(info, "1.0.0", "body", ["tok"]);
+});
+
+test("createForgeRelease cleans up draft on gitea 409 then retries", async () => {
+  const mock = mockForgeConflictThenSuccess(
+    409,
+    [
+      {id: 35141, tag_name: "v1.2.3", draft: true},
+      {id: 35142, tag_name: "v1.2.4", draft: true},
+      {id: 35143, tag_name: "v1.2.3", draft: false},
+    ],
+    Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/v1.2.3"}, {status: 201}),
+  );
+  const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
+  await createForgeRelease(info, "v1.2.3", "notes", ["tok"]);
+
+  const calls = getCalls(mock);
+  const methods = calls.map(([, init]) => init?.method ?? "GET");
+  expect(methods).toEqual(["POST", "GET", "DELETE", "POST"]);
+  const deleteCall = calls.find(([, init]) => init?.method === "DELETE")!;
+  expect(deleteCall[0]).toEqual("https://gitea.example.com/api/v1/repos/o/r/releases/35141");
+});
+
+test("createForgeRelease cleans up draft on gitea 422 then retries", async () => {
+  const mock = mockForgeConflictThenSuccess(
+    422,
+    [{id: 7, tag_name: "v9.9.9", draft: true}],
+    Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/v9.9.9"}, {status: 201}),
+  );
+  const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
+  await createForgeRelease(info, "v9.9.9", "body", ["tok"]);
+
+  const methods = getCalls(mock).map(([, init]) => init?.method ?? "GET");
+  expect(methods).toEqual(["POST", "GET", "DELETE", "POST"]);
+});
+
+test("createForgeRelease cleans up draft on github 422 then retries", async () => {
+  const mock = mockForgeConflictThenSuccess(
+    422,
+    [{id: 99, tag_name: "v1.0.0", draft: true}],
+    Response.json({html_url: "https://github.com/o/r/releases/tag/v1.0.0"}, {status: 201}),
+  );
+  const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+  await createForgeRelease(info, "v1.0.0", "body", ["tok"]);
+
+  const calls = getCalls(mock);
+  const deleteCall = calls.find(([, init]) => init?.method === "DELETE")!;
+  expect(deleteCall[0]).toEqual("https://api.github.com/repos/o/r/releases/99");
+  expect(authOf(deleteCall[1])).toEqual("Bearer tok");
+});
+
+test("createForgeRelease propagates conflict when no matching draft to clean up", async () => {
+  const mock = vi.fn((_url: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    if (method === "POST") return Promise.resolve(new Response("Release is has no Tag", {status: 409, statusText: "Conflict"}));
+    if (method === "GET") return Promise.resolve(Response.json([{id: 1, tag_name: "other-tag", draft: true}], {status: 200}));
+    throw new Error(`unexpected method ${method}`);
+  });
+  stubGlobal("fetch", mock);
+  const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
+  await expect(createForgeRelease(info, "v1.0.0", "body", ["tok"])).rejects.toThrow("409");
+  const methods = getCalls(mock).map(([, init]) => init?.method ?? "GET");
+  expect(methods).toEqual(["POST", "GET"]);
+});
+
+test("createForgeRelease cleans up multiple matching drafts", async () => {
+  const mock = mockForgeConflictThenSuccess(
+    409,
+    [
+      {id: 10, tag_name: "v1.0.0", draft: true},
+      {id: 11, tag_name: "v1.0.0", draft: true},
+    ],
+    Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/v1.0.0"}, {status: 201}),
+  );
+  const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
+  await createForgeRelease(info, "v1.0.0", "body", ["tok"]);
+
+  const deleteCalls = getCalls(mock).filter(([, init]) => init?.method === "DELETE");
+  expect(deleteCalls).toHaveLength(2);
+});
+
+test("createForgeRelease tolerates 404 on draft delete (already gone)", async () => {
+  let postCount = 0;
+  const mock = vi.fn((_url: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    if (method === "POST") {
+      postCount += 1;
+      if (postCount === 1) return Promise.resolve(new Response("conflict", {status: 409, statusText: "Conflict"}));
+      return Promise.resolve(Response.json({}, {status: 201}));
+    }
+    if (method === "GET") return Promise.resolve(Response.json([{id: 5, tag_name: "v1.0.0", draft: true}], {status: 200}));
+    if (method === "DELETE") return Promise.resolve(new Response("not found", {status: 404}));
+    throw new Error(`unexpected method ${method}`);
+  });
+  stubGlobal("fetch", mock);
+  const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+  await createForgeRelease(info, "v1.0.0", "body", ["tok"]);
+  const methods = getCalls(mock).map(([, init]) => init?.method ?? "GET");
+  expect(methods).toEqual(["POST", "GET", "DELETE", "POST"]);
+});
+
+test("createForgeRelease throws if draft delete fails non-404", async () => {
+  stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    if (method === "POST") return Promise.resolve(new Response("conflict", {status: 409, statusText: "Conflict"}));
+    if (method === "GET") return Promise.resolve(Response.json([{id: 5, tag_name: "v1.0.0", draft: true}], {status: 200}));
+    if (method === "DELETE") return Promise.resolve(new Response("server error", {status: 500, statusText: "Internal Server Error"}));
+    throw new Error(`unexpected method ${method}`);
+  }));
+  const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+  await expect(createForgeRelease(info, "v1.0.0", "body", ["tok"])).rejects.toThrow("Failed to delete draft release 5");
+});
+
+test("deleteForgeRelease github DELETEs by id", async () => {
+  const mock = vi.fn(() => Promise.resolve(new Response(null, {status: 204})));
+  stubGlobal("fetch", mock);
+  const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+  await deleteForgeRelease(info, 4242, ["gh-tok"]);
+  expect(mock).toHaveBeenCalledOnce();
+  const [url, init] = mock.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toEqual("https://api.github.com/repos/o/r/releases/4242");
+  expect(init.method).toEqual("DELETE");
+  expect(authOf(init)).toEqual("Bearer gh-tok");
+});
+
+test("deleteForgeRelease gitea DELETEs by id", async () => {
+  const mock = vi.fn(() => Promise.resolve(new Response(null, {status: 204})));
+  stubGlobal("fetch", mock);
+  const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
+  await deleteForgeRelease(info, 35141, ["gitea-tok"]);
+  const [url, init] = mock.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toEqual("https://gitea.example.com/api/v1/repos/o/r/releases/35141");
+  expect(authOf(init)).toEqual("token gitea-tok");
+});
+
+test("deleteForgeRelease tolerates 404", async () => {
+  stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("not found", {status: 404}))));
+  const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+  await deleteForgeRelease(info, 1, ["tok"]);
+});
+
+test("deleteForgeRelease falls back across tokens on 401", async () => {
+  const mock = vi.fn()
+    .mockResolvedValueOnce(new Response("auth", {status: 401, statusText: "Unauthorized"}))
+    .mockResolvedValueOnce(new Response(null, {status: 204}));
+  stubGlobal("fetch", mock);
+  const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+  await deleteForgeRelease(info, 7, ["bad", "good"]);
+  expect(mock).toHaveBeenCalledTimes(2);
+});
+
+test("deleteForgeRelease throws on non-auth error", async () => {
+  stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("server", {status: 500, statusText: "Internal Server Error"}))));
+  const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+  await expect(deleteForgeRelease(info, 1, ["tok"])).rejects.toThrow("500");
+});
+
+test("deleteForgeRelease throws when all tokens fail", async () => {
+  stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("auth", {status: 401, statusText: "Unauthorized"}))));
+  const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+  await expect(deleteForgeRelease(info, 1, ["a", "b"])).rejects.toThrow("401");
+});
+
+test("deleteForgeRelease network error includes cause", async () => {
+  stubGlobal("fetch", vi.fn().mockRejectedValue(
+    Object.assign(new TypeError("fetch failed"), {cause: new Error("getaddrinfo ENOTFOUND example.com")}),
+  ));
+  const info: RepoInfo = {owner: "o", repo: "r", host: "example.com", type: "gitea"};
+  await expect(deleteForgeRelease(info, 1, ["tok"])).rejects.toThrow("getaddrinfo ENOTFOUND example.com");
 });
 
 test("release rejects detached HEAD", () => withTmpDir(async (tmpDir) => {
@@ -930,7 +1140,7 @@ test("--remote with --release uses that remote for forge detection", () => withT
   }
   expect(err).toBeInstanceOf(SubprocessError);
   expect(err.exitCode).toEqual(1);
-  expect(err.output).toContain("Failed to create release");
+  expect(err.output).toMatch(/Failed to (create|list) release/);
   expect(err.output).not.toContain("Could not determine repository type");
 }));
 
