@@ -109,13 +109,7 @@ function findVersionHeading(lines: string[], version: string): {index: number, l
   return null;
 }
 
-// Lenient about heading shape: matches "# 1.2.3", "## v1.2.3", "## [1.2.3]",
-// "## [1.2.3] - 2024-01-15", "## 1.2.3 (2024-01-15)", etc.
-export function readChangelogEntry(content: string, version: string): string | null {
-  const lines = content.split(reNewline);
-  const head = findVersionHeading(lines, version);
-  if (!head) return null;
-
+function extractEntry(lines: string[], head: {index: number, level: number}): string | null {
   let end = lines.length;
   for (let i = head.index + 1; i < lines.length; i++) {
     const m = reHeading.exec(lines[i]);
@@ -124,24 +118,44 @@ export function readChangelogEntry(content: string, version: string): string | n
       break;
     }
   }
-
   return lines.slice(head.index + 1, end).join("\n").trim() || null;
+}
+
+function updateHeadingDateInLines(lines: string[], index: number, date: string): string | null {
+  const heading = lines[index];
+  if (rePlaceholderDate.test(heading)) {
+    lines[index] = heading.replace(rePlaceholderDate, date);
+  } else if (reDate.test(heading)) {
+    return null;
+  } else {
+    lines[index] = `${heading.trimEnd()} - ${date}`;
+  }
+  return lines.join("\n");
+}
+
+// Lenient about heading shape: matches "# 1.2.3", "## v1.2.3", "## [1.2.3]",
+// "## [1.2.3] - 2024-01-15", "## 1.2.3 (2024-01-15)", etc.
+export function readChangelogEntry(content: string, version: string): string | null {
+  const lines = content.split(reNewline);
+  const head = findVersionHeading(lines, version);
+  if (!head) return null;
+  return extractEntry(lines, head);
 }
 
 export function updateChangelogHeadingDate(content: string, version: string, date: string): string | null {
   const lines = content.split(reNewline);
   const head = findVersionHeading(lines, version);
   if (!head) return null;
+  return updateHeadingDateInLines(lines, head.index, date);
+}
 
-  const heading = lines[head.index];
-  if (rePlaceholderDate.test(heading)) {
-    lines[head.index] = heading.replace(rePlaceholderDate, date);
-  } else if (reDate.test(heading)) {
-    return null;
-  } else {
-    lines[head.index] = `${heading.trimEnd()} - ${date}`;
-  }
-  return lines.join("\n");
+function processChangelog(content: string, version: string, date: string): {entry: string, updated: string | null} | null {
+  const lines = content.split(reNewline);
+  const head = findVersionHeading(lines, version);
+  if (!head) return null;
+  const entry = extractEntry(lines, head);
+  if (!entry) return null;
+  return {entry, updated: updateHeadingDateInLines(lines, head.index, date)};
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
@@ -163,12 +177,12 @@ export type GetFileChangesOpts = {
   date?: string,
 };
 
-export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): [string, string | null, string | null] {
+export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): [string | null, string | null] {
   const fileName = basename(file);
 
   // unhandled lockfiles: blind search-and-replace would corrupt dependency versions
   if ((/lock/i.test(fileName) || fileName === "go.sum") && fileName !== "package-lock.json" && fileName !== "uv.lock") {
-    return [file, null, null];
+    return [null, null];
   }
 
   const oldData = readFileSync(file, "utf8");
@@ -207,7 +221,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     }
   }
 
-  return [file, newData, oldData];
+  return [newData, oldData];
 }
 
 export function write(file: string, content: string): void {
@@ -600,9 +614,9 @@ async function main(): Promise<void> {
     } catch {
       return null;
     }
-    const entry = readChangelogEntry(original, newVersion);
-    if (!entry) return null;
-    return {path, entry, original, updated: updateChangelogHeadingDate(original, newVersion, today)};
+    const processed = processChangelog(original, newVersion, today);
+    if (!processed) return null;
+    return {path, original, entry: processed.entry, updated: processed.updated};
   })();
 
   const allFiles = changelogInfo?.updated ? [...files, relative(pwd, changelogInfo.path)] : files;
@@ -659,11 +673,11 @@ async function main(): Promise<void> {
       for (const [file, content] of originals) write(file, content);
     });
     for (const file of files) {
-      const [filePath, newData, oldData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
+      const [newData, oldData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
       if (newData !== null) {
-        if (!originals.has(filePath)) originals.set(filePath, oldData!);
-        logVerbose(`writing ${filePath}`);
-        write(filePath, newData);
+        if (!originals.has(file)) originals.set(file, oldData!);
+        logVerbose(`writing ${file}`);
+        write(file, newData);
       } else {
         logVerbose(`skipping ${file} (unhandled lockfile)`);
       }

@@ -1408,7 +1408,7 @@ test("readVersionFromPyprojectToml returns null", () => withTmpDir(async (tmpDir
 test("getFileChanges package.json", () => withTmpDir(async (tmpDir) => {
   const file = join(tmpDir, "package.json");
   await writeFile(file, JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
-  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1"});
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1"});
   expect(JSON.parse(content!).version).toEqual("1.0.1");
 }));
 
@@ -1416,7 +1416,7 @@ test("getFileChanges package-lock.json", () => withTmpDir(async (tmpDir) => {
   const file = join(tmpDir, "package-lock.json");
   const data = {name: "test", version: "1.0.0", lockfileVersion: 3, packages: {"": {version: "1.0.0"}}};
   await writeFile(file, JSON.stringify(data, null, 2));
-  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
   const result = JSON.parse(content!);
   expect(result.version).toEqual("2.0.0");
   expect(result.packages[""].version).toEqual("2.0.0");
@@ -1425,7 +1425,7 @@ test("getFileChanges package-lock.json", () => withTmpDir(async (tmpDir) => {
 test("getFileChanges pyproject.toml", () => withTmpDir(async (tmpDir) => {
   const file = join(tmpDir, "pyproject.toml");
   await writeFile(file, `[project]\nname = "test"\nversion = "1.0.0"\n`);
-  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.1.0"});
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.1.0"});
   expect(content).toContain(`version = "1.1.0"`);
 }));
 
@@ -1433,35 +1433,35 @@ test("getFileChanges uv.lock", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "pyproject.toml"), `[project]\nname = "myapp"\nversion = "1.0.0"\n`);
   const file = join(tmpDir, "uv.lock");
   await writeFile(file, `[[package]]\nname = "myapp"\nversion = "1.0.0"\n`);
-  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.1.0"});
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.1.0"});
   expect(content).toContain(`version = "1.1.0"`);
 }));
 
 test("getFileChanges generic file", () => withTmpDir(async (tmpDir) => {
   const file = join(tmpDir, "version.txt");
   await writeFile(file, "version 1.0.0 here");
-  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
   expect(content).toEqual("version 2.0.0 here");
 }));
 
 test("getFileChanges lockfile skip", () => withTmpDir(async (tmpDir) => {
   const file = join(tmpDir, "yarn.lock");
   await writeFile(file, "content 1.0.0");
-  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
   expect(content).toBeNull();
 }));
 
 test("getFileChanges with date", () => withTmpDir(async (tmpDir) => {
   const file = join(tmpDir, "changelog.txt");
   await writeFile(file, "version 1.0.0 released 2020-01-01");
-  const [, content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1", date: "2025-06-15"});
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1", date: "2025-06-15"});
   expect(content).toEqual("version 1.0.1 released 2025-06-15");
 }));
 
 test("getFileChanges with replacements", () => withTmpDir(async (tmpDir) => {
   const file = join(tmpDir, "file.txt");
   await writeFile(file, "version 1.0.0 FOO");
-  const [, content] = getFileChanges({
+  const [content] = getFileChanges({
     file, baseVersion: "1.0.0", newVersion: "1.0.1",
     replacements: [{re: /FOO/, replacement: "BAR"}],
   });
