@@ -192,11 +192,10 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
 
   let newData: string;
   if (fileName === "package.json") {
-    // regex replace would corrupt nested "version" fields (overrides, resolutions, scripts.version)
-    const pkg = JSON.parse(oldData);
-    pkg.version = newVersion;
+    // anchor to top-level indent — nested "version" keys (overrides, resolutions, scripts) live deeper
     const indent = /^\{\r?\n([ \t]+)/.exec(oldData)?.[1] ?? "  ";
-    newData = JSON.stringify(pkg, null, indent) + (oldData.endsWith("\n") ? "\n" : "");
+    const re = new RegExp(`(^${esc(indent)}"version"\\s*:\\s*")\\d+\\.\\d+\\.\\d+(?:[^"\\d][^"]*)?(")`, "m");
+    newData = oldData.replace(re, `$1${newVersion}$2`);
   } else if (fileName === "package-lock.json") {
     // regex replace would corrupt nested dependency versions
     const lockFile = JSON.parse(oldData);
