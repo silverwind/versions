@@ -1364,6 +1364,27 @@ test("getFileChanges pyproject.toml", () => withTmpDir(async (tmpDir) => {
   expect(content).toContain(`version = "1.1.0"`);
 }));
 
+test("getFileChanges package.json leaves nested version fields alone", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "package.json");
+  await writeFile(file, JSON.stringify({
+    name: "foo",
+    overrides: {"some-pkg": {version: "1.0.0"}},
+    version: "1.0.0",
+  }, null, 2));
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
+  const parsed = JSON.parse(content!);
+  expect(parsed.version).toEqual("2.0.0");
+  expect(parsed.overrides["some-pkg"].version).toEqual("1.0.0");
+}));
+
+test("getFileChanges pyproject.toml leaves unrelated section version alone", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "pyproject.toml");
+  await writeFile(file, `[project]\nname = "test"\nversion = "1.0.0"\n\n[tool.someplugin]\nversion = "1.0.0"\n`);
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
+  expect(content).toContain(`[project]\nname = "test"\nversion = "2.0.0"`);
+  expect(content).toContain(`[tool.someplugin]\nversion = "1.0.0"`);
+}));
+
 test("getFileChanges uv.lock", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "pyproject.toml"), `[project]\nname = "myapp"\nversion = "1.0.0"\n`);
   const file = join(tmpDir, "uv.lock");

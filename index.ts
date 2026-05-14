@@ -16,6 +16,7 @@ const rePrereleaseIdNum = /^([a-zA-Z0-9-]+)\.(\d+)$/;
 const reDatePattern = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/g;
 const reDate = new RegExp(reDatePattern.source);
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
+const pyprojectVersionSections: readonly string[] = ["project", "tool.poetry"];
 
 function stripV(str: string): string {
   return str[0] === "v" ? str.slice(1) : str;
@@ -88,9 +89,11 @@ export function readVersionFromPackageJson(projectRoot: string): string | null {
 
 export function readVersionFromPyprojectToml(projectRoot: string): string | null {
   return readVersionFile("pyproject.toml", projectRoot, content => {
-    const project = tomlGetString(content, "project", "version");
-    if (project && isSemver(project)) return project;
-    return tomlGetString(content, "tool.poetry", "version");
+    for (const section of pyprojectVersionSections) {
+      const v = tomlGetString(content, section, "version");
+      if (v && isSemver(v)) return v;
+    }
+    return undefined;
   });
 }
 
@@ -189,8 +192,11 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
 
   let newData: string;
   if (fileName === "package.json") {
-    newData = oldData.replace(/("version":[^]*?")\d+\.\d+\.\d+(?:[^"\d][^"]*)?(")/,
-      (_, p1, p2) => `${p1}${newVersion}${p2}`);
+    // regex replace would corrupt nested "version" fields (overrides, resolutions, scripts.version)
+    const pkg = JSON.parse(oldData);
+    pkg.version = newVersion;
+    const indent = /^\{\r?\n([ \t]+)/.exec(oldData)?.[1] ?? "  ";
+    newData = JSON.stringify(pkg, null, indent) + (oldData.endsWith("\n") ? "\n" : "");
   } else if (fileName === "package-lock.json") {
     // regex replace would corrupt nested dependency versions
     const lockFile = JSON.parse(oldData);
@@ -198,8 +204,26 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     if (lockFile?.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
-    newData = oldData.replace(/(^version ?= ?["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)/gm,
-      (_, p1, p2) => `${p1}${newVersion}${p2}`);
+    // scope to [project] / [tool.poetry] — other sections may have unrelated `version` keys
+    const eol = /\r?\n/.exec(oldData)?.[0] ?? "\n";
+    const lines = oldData.split(reNewline);
+    const versionLine = /^(version ?= ?["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)$/;
+    let section: string | null = null;
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      if (!trimmed || trimmed[0] === "#") continue;
+      if (trimmed[0] === "[") {
+        section = /^\[([^[\]]+)\]/.exec(trimmed)?.[1].trim() ?? null;
+        continue;
+      }
+      if (!section || !pyprojectVersionSections.includes(section)) continue;
+      const m = versionLine.exec(lines[i]);
+      if (m) {
+        lines[i] = `${m[1]}${newVersion}${m[2]}`;
+        break;
+      }
+    }
+    newData = lines.join(eol);
   } else if (fileName === "uv.lock") {
     const projStr = readFileSync(file.replace(/uv\.lock$/, "pyproject.toml"), "utf8");
     const name = tomlGetString(projStr, "project", "name") ?? tomlGetString(projStr, "tool.poetry", "name");
@@ -316,6 +340,10 @@ async function forgeFetch(method: string, url: string, authHeader: string, jsonB
 // Thrown by attempt callbacks of withTokens to signal that the next token should be tried.
 class AuthRetryable extends Error {}
 
+function authOrError(status: number, message: string): Error {
+  return status === 401 || status === 403 ? new AuthRetryable(message) : new Error(message);
+}
+
 async function withTokens<T>(
   isGithub: boolean,
   tokens: string[],
@@ -343,7 +371,7 @@ async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName:
     throw new Error(`Failed to list releases: ${err.cause?.message || err.message || "Unknown error"}`);
   }
   if (!listResponse.ok) {
-    throw new Error(`Failed to list releases: ${listResponse.status} ${listResponse.statusText}\n${await listResponse.text()}`);
+    throw authOrError(listResponse.status, `Failed to list releases: ${listResponse.status} ${listResponse.statusText}\n${await listResponse.text()}`);
   }
   const releases = await listResponse.json() as Array<{id: number; tag_name: string; draft: boolean}>;
   const drafts = releases.filter(r => r.draft && r.tag_name === tagName);
@@ -355,7 +383,7 @@ async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName:
       throw new Error(`Failed to delete draft release ${draft.id}: ${err.cause?.message || err.message || "Unknown error"}`);
     }
     if (!deleteResponse.ok && deleteResponse.status !== 404) {
-      throw new Error(`Failed to delete draft release ${draft.id}: ${deleteResponse.status} ${deleteResponse.statusText}\n${await deleteResponse.text()}`);
+      throw authOrError(deleteResponse.status, `Failed to delete draft release ${draft.id}: ${deleteResponse.status} ${deleteResponse.statusText}\n${await deleteResponse.text()}`);
     }
     console.info(`Deleted stale draft release for ${tagName}`);
   }
@@ -377,8 +405,7 @@ export async function deleteForgeRelease(repoInfo: RepoInfo, releaseId: number, 
       throw new Error(`Failed to delete release ${releaseId}: ${err.cause?.message || err.message || "Unknown error"}`);
     }
     if (response.ok || response.status === 404) return;
-    const message = `Failed to delete release ${releaseId}: ${response.status} ${response.statusText}\n${await response.text()}`;
-    throw response.status === 401 || response.status === 403 ? new AuthRetryable(message) : new Error(message);
+    throw authOrError(response.status, `Failed to delete release ${releaseId}: ${response.status} ${response.statusText}\n${await response.text()}`);
   });
 }
 
@@ -419,8 +446,7 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
       return typeof result.id === "number" ? {id: result.id, html_url: result.html_url} : null;
     }
 
-    const message = `Failed to create release: ${response.status} ${response.statusText}\n${await response.text()}`;
-    throw response.status === 401 || response.status === 403 ? new AuthRetryable(message) : new Error(message);
+    throw authOrError(response.status, `Failed to create release: ${response.status} ${response.statusText}\n${await response.text()}`);
   });
 }
 
@@ -619,7 +645,11 @@ async function main(): Promise<void> {
     return {path, original, entry: processed.entry, updated: processed.updated};
   })();
 
-  const allFiles = changelogInfo?.updated ? [...files, relative(pwd, changelogInfo.path)] : files;
+  // generic baseVersion replacement would rewrite prior version headings in CHANGELOG.md
+  const changelogRel = changelogInfo ? relative(pwd, changelogInfo.path) : null;
+  if (changelogRel) files = files.filter(file => file !== changelogRel);
+
+  const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
   const filesToAddPromise = (!args.gitless && !args.all && allFiles.length) ? removeIgnoredFiles(allFiles) : null;
   const changelogPromise = (!args.gitless && !args.dry) ? (async () => {
     if (changelogInfo) {
