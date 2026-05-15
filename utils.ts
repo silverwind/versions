@@ -56,6 +56,10 @@ type ExecOptions = {
 
 export const reNewline = /\r?\n/;
 
+export function detectEol(s: string): string {
+  return /\r?\n/.exec(s)?.[0] ?? "\n";
+}
+
 export function tomlGetString(content: string, section: string, key: string): string | undefined {
   let inSection = false;
   const keyRe = new RegExp(`^${key}\\s*=\\s*["']([^"']+)["']`);

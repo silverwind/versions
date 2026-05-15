@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {SubprocessError, type Result, colorize, exec, logVerbose, reNewline, setVerbose, tomlGetString} from "./utils.ts";
+import {SubprocessError, type Result, colorize, detectEol, exec, logVerbose, reNewline, setVerbose, tomlGetString} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {cwd, exit, platform, stdout} from "node:process";
@@ -124,7 +124,7 @@ function extractEntry(lines: string[], head: {index: number, level: number}): st
   return lines.slice(head.index + 1, end).join("\n").trim() || null;
 }
 
-function updateHeadingDateInLines(lines: string[], index: number, date: string): string | null {
+function updateHeadingDateInLines(lines: string[], index: number, date: string, eol: string): string | null {
   const heading = lines[index];
   if (rePlaceholderDate.test(heading)) {
     lines[index] = heading.replace(rePlaceholderDate, date);
@@ -133,7 +133,7 @@ function updateHeadingDateInLines(lines: string[], index: number, date: string):
   } else {
     lines[index] = `${heading.trimEnd()} - ${date}`;
   }
-  return lines.join("\n");
+  return lines.join(eol);
 }
 
 // Lenient about heading shape: matches "# 1.2.3", "## v1.2.3", "## [1.2.3]",
@@ -149,7 +149,7 @@ export function updateChangelogHeadingDate(content: string, version: string, dat
   const lines = content.split(reNewline);
   const head = findVersionHeading(lines, version);
   if (!head) return null;
-  return updateHeadingDateInLines(lines, head.index, date);
+  return updateHeadingDateInLines(lines, head.index, date, detectEol(content));
 }
 
 function processChangelog(content: string, version: string, date: string): {entry: string, updated: string | null} | null {
@@ -158,7 +158,7 @@ function processChangelog(content: string, version: string, date: string): {entr
   if (!head) return null;
   const entry = extractEntry(lines, head);
   if (!entry) return null;
-  return {entry, updated: updateHeadingDateInLines(lines, head.index, date)};
+  return {entry, updated: updateHeadingDateInLines(lines, head.index, date, detectEol(content))};
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
@@ -184,7 +184,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
   const fileName = basename(file);
 
   // unhandled lockfiles: blind search-and-replace would corrupt dependency versions
-  if ((/lock/i.test(fileName) || fileName === "go.sum") && fileName !== "package-lock.json" && fileName !== "uv.lock") {
+  if ((/(?:^|[.-])lock/i.test(fileName) || fileName === "go.sum") && fileName !== "package-lock.json" && fileName !== "uv.lock") {
     return [null, null];
   }
 
@@ -204,9 +204,9 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
     // scope to [project] / [tool.poetry] — other sections may have unrelated `version` keys
-    const eol = /\r?\n/.exec(oldData)?.[0] ?? "\n";
+    const eol = detectEol(oldData);
     const lines = oldData.split(reNewline);
-    const versionLine = /^(version ?= ?["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)$/;
+    const versionLine = /^(version\s*=\s*["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)$/;
     let section: string | null = null;
     for (let i = 0; i < lines.length; i++) {
       const trimmed = lines[i].trim();
@@ -451,7 +451,7 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
 
 export function writeResult(result: Result): void {
   for (const s of [result.stdout, result.stderr]) {
-    if (s) stdout.write(s.endsWith(EOL) ? s : `${s}${EOL}`);
+    if (s) stdout.write(`${s}${EOL}`);
   }
 }
 
