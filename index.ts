@@ -16,7 +16,7 @@ const rePrereleaseIdNum = /^([a-zA-Z0-9-]+)\.(\d+)$/;
 const reDatePattern = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/g;
 const reDate = new RegExp(reDatePattern.source);
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
-const pyprojectVersionSections: readonly string[] = ["project", "tool.poetry"];
+const pyprojectSections: readonly string[] = ["project", "tool.poetry"];
 
 function stripV(str: string): string {
   return str[0] === "v" ? str.slice(1) : str;
@@ -87,13 +87,18 @@ export function readVersionFromPackageJson(projectRoot: string): string | null {
   return readVersionFile("package.json", projectRoot, content => JSON.parse(content).version);
 }
 
+function pyprojectGet(content: string, key: string): string | undefined {
+  for (const section of pyprojectSections) {
+    const v = tomlGetString(content, section, key);
+    if (v) return v;
+  }
+  return undefined;
+}
+
 export function readVersionFromPyprojectToml(projectRoot: string): string | null {
   return readVersionFile("pyproject.toml", projectRoot, content => {
-    for (const section of pyprojectVersionSections) {
-      const v = tomlGetString(content, section, "version");
-      if (v && isSemver(v)) return v;
-    }
-    return undefined;
+    const v = pyprojectGet(content, "version");
+    return v && isSemver(v) ? v : undefined;
   });
 }
 
@@ -136,29 +141,33 @@ function updateHeadingDateInLines(lines: string[], index: number, date: string, 
   return lines.join(eol);
 }
 
+type ChangelogLocation = {lines: string[], head: {index: number, level: number}, eol: string};
+
+function locateChangelogEntry(content: string, version: string): ChangelogLocation | null {
+  const lines = content.split(reNewline);
+  const head = findVersionHeading(lines, version);
+  if (!head) return null;
+  return {lines, head, eol: detectEol(content)};
+}
+
 // Lenient about heading shape: matches "# 1.2.3", "## v1.2.3", "## [1.2.3]",
 // "## [1.2.3] - 2024-01-15", "## 1.2.3 (2024-01-15)", etc.
 export function readChangelogEntry(content: string, version: string): string | null {
-  const lines = content.split(reNewline);
-  const head = findVersionHeading(lines, version);
-  if (!head) return null;
-  return extractEntry(lines, head);
+  const loc = locateChangelogEntry(content, version);
+  return loc ? extractEntry(loc.lines, loc.head) : null;
 }
 
 export function updateChangelogHeadingDate(content: string, version: string, date: string): string | null {
-  const lines = content.split(reNewline);
-  const head = findVersionHeading(lines, version);
-  if (!head) return null;
-  return updateHeadingDateInLines(lines, head.index, date, detectEol(content));
+  const loc = locateChangelogEntry(content, version);
+  return loc ? updateHeadingDateInLines(loc.lines, loc.head.index, date, loc.eol) : null;
 }
 
 function processChangelog(content: string, version: string, date: string): {entry: string, updated: string | null} | null {
-  const lines = content.split(reNewline);
-  const head = findVersionHeading(lines, version);
-  if (!head) return null;
-  const entry = extractEntry(lines, head);
+  const loc = locateChangelogEntry(content, version);
+  if (!loc) return null;
+  const entry = extractEntry(loc.lines, loc.head);
   if (!entry) return null;
-  return {entry, updated: updateHeadingDateInLines(lines, head.index, date, detectEol(content))};
+  return {entry, updated: updateHeadingDateInLines(loc.lines, loc.head.index, date, loc.eol)};
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
@@ -215,7 +224,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
         section = /^\[([^[\]]+)\]/.exec(trimmed)?.[1].trim() ?? null;
         continue;
       }
-      if (!section || !pyprojectVersionSections.includes(section)) continue;
+      if (!section || !pyprojectSections.includes(section)) continue;
       const m = versionLine.exec(lines[i]);
       if (m) {
         lines[i] = `${m[1]}${newVersion}${m[2]}`;
@@ -225,7 +234,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     newData = lines.join(eol);
   } else if (fileName === "uv.lock") {
     const projStr = readFileSync(file.replace(/uv\.lock$/, "pyproject.toml"), "utf8");
-    const name = tomlGetString(projStr, "project", "name") ?? tomlGetString(projStr, "tool.poetry", "name");
+    const name = pyprojectGet(projStr, "name");
     if (!name) throw new Error(`Could not determine project name from pyproject.toml for ${file}`);
     const re = new RegExp(`(\\[\\[package\\]\\]\r?\nname = "${esc(name)}"\r?\nversion = ").+?(")`);
     newData = oldData.replace(re, `$1${newVersion}$2`);
@@ -324,14 +333,19 @@ export async function getRepoInfo(cwd?: string, remote: string = "origin"): Prom
   }
 }
 
-async function forgeFetch(method: string, url: string, authHeader: string, jsonBody?: string): Promise<Response> {
+async function forgeFetch(method: string, url: string, authHeader: string, label: string, jsonBody?: string): Promise<Response> {
   logVerbose(`${colorize(method, "magenta")} ${url}`);
   const init: RequestInit = {method, headers: {Authorization: authHeader}};
   if (jsonBody !== undefined) {
     (init.headers as Record<string, string>)["Content-Type"] = "application/json";
     init.body = jsonBody;
   }
-  const response = await fetch(url, init);
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (err: any) {
+    throw new Error(`${label}: ${err.cause?.message || err.message || "Unknown error"}`);
+  }
   logVerbose(`${colorize(String(response.status), response.ok ? "green" : "red")} ${url}`);
   return response;
 }
@@ -341,6 +355,16 @@ class AuthRetryable extends Error {}
 
 function authOrError(status: number, message: string): Error {
   return status === 401 || status === 403 ? new AuthRetryable(message) : new Error(message);
+}
+
+function forgeApiBase(repoInfo: RepoInfo): string {
+  const host = repoInfo.type === "github" ? "api.github.com" : `${repoInfo.host}/api/v1`;
+  return `https://${host}/repos/${repoInfo.owner}/${repoInfo.repo}`;
+}
+
+async function ensureOk(response: Response, label: string, allow404 = false): Promise<void> {
+  if (response.ok || (allow404 && response.status === 404)) return;
+  throw authOrError(response.status, `${label}: ${response.status} ${response.statusText}\n${await response.text()}`);
 }
 
 async function withTokens<T>(
@@ -363,27 +387,15 @@ async function withTokens<T>(
 }
 
 async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName: string): Promise<number> {
-  let listResponse: Response;
-  try {
-    listResponse = await forgeFetch("GET", `${apiUrl}?draft=true&limit=50&per_page=100`, authHeader);
-  } catch (err: any) {
-    throw new Error(`Failed to list releases: ${err.cause?.message || err.message || "Unknown error"}`);
-  }
-  if (!listResponse.ok) {
-    throw authOrError(listResponse.status, `Failed to list releases: ${listResponse.status} ${listResponse.statusText}\n${await listResponse.text()}`);
-  }
+  const listLabel = "Failed to list releases";
+  const listResponse = await forgeFetch("GET", `${apiUrl}?draft=true&limit=50&per_page=100`, authHeader, listLabel);
+  await ensureOk(listResponse, listLabel);
   const releases = await listResponse.json() as Array<{id: number; tag_name: string; draft: boolean}>;
   const drafts = releases.filter(r => r.draft && r.tag_name === tagName);
   for (const draft of drafts) {
-    let deleteResponse: Response;
-    try {
-      deleteResponse = await forgeFetch("DELETE", `${apiUrl}/${draft.id}`, authHeader);
-    } catch (err: any) {
-      throw new Error(`Failed to delete draft release ${draft.id}: ${err.cause?.message || err.message || "Unknown error"}`);
-    }
-    if (!deleteResponse.ok && deleteResponse.status !== 404) {
-      throw authOrError(deleteResponse.status, `Failed to delete draft release ${draft.id}: ${deleteResponse.status} ${deleteResponse.statusText}\n${await deleteResponse.text()}`);
-    }
+    const label = `Failed to delete draft release ${draft.id}`;
+    const deleteResponse = await forgeFetch("DELETE", `${apiUrl}/${draft.id}`, authHeader, label);
+    await ensureOk(deleteResponse, label, true);
     console.info(`Deleted stale draft release for ${tagName}`);
   }
   return drafts.length;
@@ -392,27 +404,18 @@ async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName:
 export type CreatedRelease = {id: number; html_url?: string};
 
 export async function deleteForgeRelease(repoInfo: RepoInfo, releaseId: number, tokens: string[]): Promise<void> {
-  const isGithub = repoInfo.type === "github";
-  const apiHost = isGithub ? "api.github.com" : `${repoInfo.host}/api/v1`;
-  const url = `https://${apiHost}/repos/${repoInfo.owner}/${repoInfo.repo}/releases/${releaseId}`;
+  const url = `${forgeApiBase(repoInfo)}/releases/${releaseId}`;
+  const label = `Failed to delete release ${releaseId}`;
 
-  await withTokens(isGithub, tokens, async (authHeader) => {
-    let response: Response;
-    try {
-      response = await forgeFetch("DELETE", url, authHeader);
-    } catch (err: any) {
-      throw new Error(`Failed to delete release ${releaseId}: ${err.cause?.message || err.message || "Unknown error"}`);
-    }
-    if (response.ok || response.status === 404) return;
-    throw authOrError(response.status, `Failed to delete release ${releaseId}: ${response.status} ${response.statusText}\n${await response.text()}`);
+  await withTokens(repoInfo.type === "github", tokens, async (authHeader) => {
+    const response = await forgeFetch("DELETE", url, authHeader, label);
+    await ensureOk(response, label, true);
   });
 }
 
 export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<CreatedRelease | null> {
-  const isGithub = repoInfo.type === "github";
-  const apiHost = isGithub ? "api.github.com" : `${repoInfo.host}/api/v1`;
-  const apiUrl = `https://${apiHost}/repos/${repoInfo.owner}/${repoInfo.repo}/releases`;
-
+  const apiUrl = `${forgeApiBase(repoInfo)}/releases`;
+  const label = "Failed to create release";
   const releaseBody = JSON.stringify({
     tag_name: tagName,
     name: tagName,
@@ -421,15 +424,9 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
     prerelease: tagName.includes("-"),
   });
 
-  const post = async (authHeader: string) => {
-    try {
-      return await forgeFetch("POST", apiUrl, authHeader, releaseBody);
-    } catch (err: any) {
-      throw new Error(`Failed to create release: ${err.cause?.message || err.message || "Unknown error"}`);
-    }
-  };
+  const post = (authHeader: string) => forgeFetch("POST", apiUrl, authHeader, label, releaseBody);
 
-  return withTokens(isGithub, tokens, async (authHeader) => {
+  return withTokens(repoInfo.type === "github", tokens, async (authHeader) => {
     let response = await post(authHeader);
 
     // Stale draft for the same tag blocks creation: Gitea returns 409 "Release is has no Tag",
@@ -439,13 +436,10 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
       if (cleaned > 0) response = await post(authHeader);
     }
 
-    if (response.ok) {
-      const result = await response.json();
-      console.info(result.html_url ? `Created release: ${result.html_url}` : "Created release");
-      return typeof result.id === "number" ? {id: result.id, html_url: result.html_url} : null;
-    }
-
-    throw authOrError(response.status, `Failed to create release: ${response.status} ${response.statusText}\n${await response.text()}`);
+    await ensureOk(response, label);
+    const result = await response.json();
+    console.info(result.html_url ? `Created release: ${result.html_url}` : "Created release");
+    return typeof result.id === "number" ? {id: result.id, html_url: result.html_url} : null;
   });
 }
 
@@ -529,9 +523,10 @@ async function main(): Promise<void> {
   const gitDir = findUp(".git", pwd);
   const projectRoot = gitDir ? dirname(gitDir) : pwd;
   const pushRemote = typeof args.remote === "string" ? args.remote : "origin";
-  const repoInfoPromise = (!args.gitless && args.release) ? getRepoInfo(undefined, pushRemote) : null;
-  const tokensPromise = repoInfoPromise?.then(info =>
-    !info ? [] : info.type === "github" ? getGithubTokens() : getGiteaTokens());
+  const wantRelease = !args.gitless && Boolean(args.release);
+  const repoInfoPromise = wantRelease ? getRepoInfo(undefined, pushRemote) : null;
+  const tokensPromise = wantRelease ? repoInfoPromise!.then(info =>
+    !info ? [] : info.type === "github" ? getGithubTokens() : getGiteaTokens()) : null;
 
   files = files.map(file => relative(pwd, file));
 
@@ -546,49 +541,38 @@ async function main(): Promise<void> {
   }
 
   const baseVersionPromise = (async (): Promise<{baseVersion: string, baseSource: string, describeTag: string}> => {
-    let baseVersion = "";
-    let baseSource = "";
-    let describeTag = "";
     if (args.base) {
       const raw = String(args.base);
       if (!isSemver(raw)) throw new Error(`Invalid base version: ${raw}`);
-      return {baseVersion: stripV(raw), baseSource: "--base", describeTag};
+      return {baseVersion: stripV(raw), baseSource: "--base", describeTag: ""};
     }
+
+    let describeTag = "";
     if (!args.gitless) {
       try {
         const result = await exec("git", ["describe", "--tags", "--abbrev=0"]);
         describeTag = result.stdout.trim();
         if (isSemver(describeTag)) {
-          baseVersion = stripV(describeTag);
-          baseSource = "git describe";
+          return {baseVersion: stripV(describeTag), baseSource: "git describe", describeTag};
         }
       } catch {}
-      if (!baseVersion) {
-        let stdout = "";
-        try {
-          ({stdout} = await exec("git", ["tag", "--list", "--sort=-creatordate"]));
-        } catch {}
+
+      try {
+        const {stdout} = await exec("git", ["tag", "--list", "--sort=-creatordate"]);
         const tag = stdout.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
-        if (tag) {
-          baseVersion = stripV(tag);
-          baseSource = "git tag list";
-        }
-      }
+        if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", describeTag};
+      } catch {}
     }
-    if (!baseVersion) {
-      baseVersion = readVersionFromPackageJson(projectRoot) || "";
-      if (baseVersion) {
-        baseSource = "package.json";
-      } else {
-        baseVersion = readVersionFromPyprojectToml(projectRoot) || "";
-        if (baseVersion) baseSource = "pyproject.toml";
-      }
-      if (!baseVersion && !args.gitless) {
-        baseVersion = "0.0.0";
-        baseSource = "default";
-      }
-    }
-    return {baseVersion, baseSource, describeTag};
+
+    const pkgVer = readVersionFromPackageJson(projectRoot);
+    if (pkgVer) return {baseVersion: pkgVer, baseSource: "package.json", describeTag};
+
+    const pyVer = readVersionFromPyprojectToml(projectRoot);
+    if (pyVer) return {baseVersion: pyVer, baseSource: "pyproject.toml", describeTag};
+
+    if (!args.gitless) return {baseVersion: "0.0.0", baseSource: "default", describeTag};
+
+    return {baseVersion: "", baseSource: "", describeTag};
   })();
 
   // resolve push branch early so detached HEAD fails before commit/tag
@@ -628,7 +612,7 @@ async function main(): Promise<void> {
   }
 
   const msgs = (args.message || []).filter(msg => typeof msg === "string");
-  const tagName = args["prefix"] ? `v${newVersion}` : newVersion;
+  const tagName = args.prefix ? `v${newVersion}` : newVersion;
 
   const changelogInfo = (() => {
     const path = findUp("CHANGELOG.md", projectRoot);
@@ -799,8 +783,8 @@ async function main(): Promise<void> {
       }
     }
 
-    if (repoInfoPromise) {
-      const repoInfo = await repoInfoPromise;
+    if (wantRelease) {
+      const repoInfo = await repoInfoPromise!;
       if (!repoInfo) {
         throw new Error("Could not determine repository type from git remote. Only GitHub and Gitea repositories are supported for release creation.");
       }

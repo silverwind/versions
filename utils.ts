@@ -5,7 +5,6 @@ import {styleText} from "node:util";
 export type Result = {stdout: string; stderr: string};
 
 let verbose = false;
-const useColor = stderr.isTTY;
 
 export function setVerbose(value: boolean): void {
   verbose = value;
@@ -24,7 +23,7 @@ export function logVerbose(message: string): void {
 }
 
 export function colorize(text: string, color: "magenta" | "green" | "red"): string {
-  return useColor ? styleText(color, text) : text;
+  return styleText(color, text, {stream: stderr});
 }
 
 function quoteArg(arg: string): string {
@@ -57,7 +56,7 @@ type ExecOptions = {
 export const reNewline = /\r?\n/;
 
 export function detectEol(s: string): string {
-  return /\r?\n/.exec(s)?.[0] ?? "\n";
+  return reNewline.exec(s)?.[0] ?? "\n";
 }
 
 export function tomlGetString(content: string, section: string, key: string): string | undefined {
@@ -84,7 +83,7 @@ export function exec(file: string, args: readonly string[], options?: ExecOption
   return new Promise((resolve, reject) => {
     const child = execFileCb(file, args as string[], {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env}, (error, stdout, stderr) => {
       if (error) {
-        reject(new SubprocessError(error.message.split(/\r?\n/)[0], stdout, stderr, typeof error.code === "number" ? error.code : null));
+        reject(new SubprocessError(error.message.split(reNewline)[0], stdout, stderr, typeof error.code === "number" ? error.code : null));
       } else {
         resolve({stdout: stdout.trimEnd(), stderr: stderr.trimEnd()});
       }
