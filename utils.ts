@@ -54,28 +54,50 @@ type ExecOptions = {
 };
 
 export const reNewline = /\r?\n/;
+const reTomlSection = /^\[([^[\]]+)\]/;
 
 export function detectEol(s: string): string {
   return reNewline.exec(s)?.[0] ?? "\n";
 }
 
-export function tomlGetString(content: string, section: string, key: string): string | undefined {
-  let inSection = false;
-  const keyRe = new RegExp(`^${key}\\s*=\\s*["']([^"']+)["']`);
-  for (const line of content.split(reNewline)) {
-    const trimmed = line.trim();
+type TomlVisitor = (line: string, lineIndex: number, lines: string[]) => boolean | void;
+
+function visitTomlSection(content: string, sections: readonly string[], visit: TomlVisitor): string[] {
+  const lines = content.split(reNewline);
+  let section: string | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
     if (!trimmed || trimmed[0] === "#") continue;
     if (trimmed[0] === "[") {
-      const m = /^\[([^[\]]+)\]/.exec(trimmed);
-      inSection = m ? m[1].trim() === section : false;
+      section = reTomlSection.exec(trimmed)?.[1].trim() ?? null;
       continue;
     }
-    if (inSection) {
-      const m = keyRe.exec(trimmed);
-      if (m) return m[1];
-    }
+    if (section && sections.includes(section) && visit(lines[i], i, lines)) break;
   }
-  return undefined;
+  return lines;
+}
+
+export function tomlGetString(content: string, section: string, key: string): string | undefined {
+  const keyRe = new RegExp(`^${key}\\s*=\\s*["']([^"']+)["']`);
+  let value: string | undefined;
+  visitTomlSection(content, [section], line => {
+    const m = keyRe.exec(line.trim());
+    if (!m) return false;
+    value = m[1];
+    return true;
+  });
+  return value;
+}
+
+export function tomlReplaceFirst(content: string, sections: readonly string[], lineRe: RegExp, replacement: string): string {
+  let changed = false;
+  const lines = visitTomlSection(content, sections, (line, i, ls) => {
+    if (!lineRe.test(line)) return false;
+    ls[i] = line.replace(lineRe, replacement);
+    changed = true;
+    return true;
+  });
+  return changed ? lines.join(detectEol(content)) : content;
 }
 
 export function exec(file: string, args: readonly string[], options?: ExecOptions): Promise<Result> {

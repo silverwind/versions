@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {SubprocessError, type Result, colorize, detectEol, exec, logVerbose, reNewline, setVerbose, tomlGetString} from "./utils.ts";
+import {SubprocessError, type Result, colorize, detectEol, exec, logVerbose, reNewline, setVerbose, tomlGetString, tomlReplaceFirst} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {cwd, exit, platform, stdout} from "node:process";
@@ -17,6 +17,8 @@ const reDatePattern = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/g;
 const reDate = new RegExp(reDatePattern.source);
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
 const pyprojectSections: readonly string[] = ["project", "tool.poetry"];
+const handledLockfiles = new Set(["package-lock.json", "uv.lock"]);
+const reLockfileName = /(?:^|[.-])lock/i;
 
 function stripV(str: string): string {
   return str[0] === "v" ? str.slice(1) : str;
@@ -96,10 +98,42 @@ function pyprojectGet(content: string, key: string): string | undefined {
 }
 
 export function readVersionFromPyprojectToml(projectRoot: string): string | null {
-  return readVersionFile("pyproject.toml", projectRoot, content => {
-    const v = pyprojectGet(content, "version");
-    return v && isSemver(v) ? v : undefined;
-  });
+  return readVersionFile("pyproject.toml", projectRoot, content => pyprojectGet(content, "version"));
+}
+
+type BaseVersion = {baseVersion: string, baseSource: string, describeTag: string};
+
+async function resolveBaseVersion(base: string | undefined, gitless: boolean, projectRoot: string): Promise<BaseVersion> {
+  if (base) {
+    if (!isSemver(base)) throw new Error(`Invalid base version: ${base}`);
+    return {baseVersion: stripV(base), baseSource: "--base", describeTag: ""};
+  }
+
+  let describeTag = "";
+  if (!gitless) {
+    try {
+      const {stdout} = await exec("git", ["describe", "--tags", "--abbrev=0"]);
+      describeTag = stdout.trim();
+      if (isSemver(describeTag)) {
+        return {baseVersion: stripV(describeTag), baseSource: "git describe", describeTag};
+      }
+    } catch {}
+
+    try {
+      const {stdout} = await exec("git", ["tag", "--list", "--sort=-creatordate"]);
+      const tag = stdout.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
+      if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", describeTag};
+    } catch {}
+  }
+
+  const pkgVer = readVersionFromPackageJson(projectRoot);
+  if (pkgVer) return {baseVersion: pkgVer, baseSource: "package.json", describeTag};
+
+  const pyVer = readVersionFromPyprojectToml(projectRoot);
+  if (pyVer) return {baseVersion: pyVer, baseSource: "pyproject.toml", describeTag};
+
+  if (!gitless) return {baseVersion: "0.0.0", baseSource: "default", describeTag};
+  return {baseVersion: "", baseSource: "", describeTag};
 }
 
 const reHeading = /^(#+)\s+(.*?)\s*$/;
@@ -141,33 +175,18 @@ function updateHeadingDateInLines(lines: string[], index: number, date: string, 
   return lines.join(eol);
 }
 
-type ChangelogLocation = {lines: string[], head: {index: number, level: number}, eol: string};
-
-function locateChangelogEntry(content: string, version: string): ChangelogLocation | null {
-  const lines = content.split(reNewline);
-  const head = findVersionHeading(lines, version);
-  if (!head) return null;
-  return {lines, head, eol: detectEol(content)};
-}
-
 // Lenient about heading shape: matches "# 1.2.3", "## v1.2.3", "## [1.2.3]",
 // "## [1.2.3] - 2024-01-15", "## 1.2.3 (2024-01-15)", etc.
 export function readChangelogEntry(content: string, version: string): string | null {
-  const loc = locateChangelogEntry(content, version);
-  return loc ? extractEntry(loc.lines, loc.head) : null;
+  const lines = content.split(reNewline);
+  const head = findVersionHeading(lines, version);
+  return head ? extractEntry(lines, head) : null;
 }
 
 export function updateChangelogHeadingDate(content: string, version: string, date: string): string | null {
-  const loc = locateChangelogEntry(content, version);
-  return loc ? updateHeadingDateInLines(loc.lines, loc.head.index, date, loc.eol) : null;
-}
-
-function processChangelog(content: string, version: string, date: string): {entry: string, updated: string | null} | null {
-  const loc = locateChangelogEntry(content, version);
-  if (!loc) return null;
-  const entry = extractEntry(loc.lines, loc.head);
-  if (!entry) return null;
-  return {entry, updated: updateHeadingDateInLines(loc.lines, loc.head.index, date, loc.eol)};
+  const lines = content.split(reNewline);
+  const head = findVersionHeading(lines, version);
+  return head ? updateHeadingDateInLines(lines, head.index, date, detectEol(content)) : null;
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
@@ -193,7 +212,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
   const fileName = basename(file);
 
   // unhandled lockfiles: blind search-and-replace would corrupt dependency versions
-  if ((/(?:^|[.-])lock/i.test(fileName) || fileName === "go.sum") && fileName !== "package-lock.json" && fileName !== "uv.lock") {
+  if (!handledLockfiles.has(fileName) && (reLockfileName.test(fileName) || fileName === "go.sum")) {
     return [null, null];
   }
 
@@ -213,25 +232,8 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
     // scope to [project] / [tool.poetry] — other sections may have unrelated `version` keys
-    const eol = detectEol(oldData);
-    const lines = oldData.split(reNewline);
     const versionLine = /^(version\s*=\s*["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)$/;
-    let section: string | null = null;
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i].trim();
-      if (!trimmed || trimmed[0] === "#") continue;
-      if (trimmed[0] === "[") {
-        section = /^\[([^[\]]+)\]/.exec(trimmed)?.[1].trim() ?? null;
-        continue;
-      }
-      if (!section || !pyprojectSections.includes(section)) continue;
-      const m = versionLine.exec(lines[i]);
-      if (m) {
-        lines[i] = `${m[1]}${newVersion}${m[2]}`;
-        break;
-      }
-    }
-    newData = lines.join(eol);
+    newData = tomlReplaceFirst(oldData, pyprojectSections, versionLine, `$1${newVersion}$2`);
   } else if (fileName === "uv.lock") {
     const projStr = readFileSync(file.replace(/uv\.lock$/, "pyproject.toml"), "utf8");
     const name = pyprojectGet(projStr, "name");
@@ -283,18 +285,23 @@ function end(err?: Error | string | void): void {
   exit(1);
 }
 
+// parseArgs `strict: false` lets a bare `-r`/`-m` flag through as `true`; keep strings only.
+function stringArgs<T>(values: T[] | undefined): string[] {
+  return (values ?? []).filter((v): v is string & T => typeof v === "string");
+}
+
 function envTokens(names: string[]): string[] {
   return Array.from(new Set(names.map(n => process.env[n]).filter(Boolean) as string[]));
 }
 
 export async function getGithubTokens(): Promise<string[]> {
-  const tokens = new Set(envTokens(["VERSIONS_FORGE_TOKEN", "GITHUB_API_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"]));
+  const tokens = envTokens(["VERSIONS_FORGE_TOKEN", "GITHUB_API_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"]);
   try {
     const {stdout} = await exec("gh", ["auth", "token"]);
     const t = stdout.trim();
-    if (t) tokens.add(t);
+    if (t && !tokens.includes(t)) tokens.push(t);
   } catch {}
-  return Array.from(tokens);
+  return tokens;
 }
 
 export function getGiteaTokens(): string[] {
@@ -335,14 +342,12 @@ export async function getRepoInfo(cwd?: string, remote: string = "origin"): Prom
 
 async function forgeFetch(method: string, url: string, authHeader: string, label: string, jsonBody?: string): Promise<Response> {
   logVerbose(`${colorize(method, "magenta")} ${url}`);
-  const init: RequestInit = {method, headers: {Authorization: authHeader}};
-  if (jsonBody !== undefined) {
-    (init.headers as Record<string, string>)["Content-Type"] = "application/json";
-    init.body = jsonBody;
-  }
+  const headers: Record<string, string> = jsonBody !== undefined ?
+    {Authorization: authHeader, "Content-Type": "application/json"} :
+    {Authorization: authHeader};
   let response: Response;
   try {
-    response = await fetch(url, init);
+    response = await fetch(url, {method, headers, body: jsonBody});
   } catch (err: any) {
     throw new Error(`${label}: ${err.cause?.message || err.message || "Unknown error"}`);
   }
@@ -449,6 +454,85 @@ export function writeResult(result: Result): void {
   }
 }
 
+type RemoteProbe = {branch: string | null, tag: string | null, ok: true} | {branch: null, tag: null, ok: false};
+
+type CommitTagPushOpts = {
+  tagName: string;
+  msgs: string[];
+  changelog: string | undefined;
+  all: boolean;
+  noPush: boolean;
+  filesToAdd: string[];
+  pushRemote: string;
+  pushBranch: string;
+  branchRef: string;
+  tagRef: string;
+  remoteProbe: RemoteProbe | null;
+  rollbacks: Array<() => Promise<void> | void>;
+};
+
+async function commitTagPush({
+  tagName, msgs, changelog, all, noPush, filesToAdd,
+  pushRemote, pushBranch, branchRef, tagRef, remoteProbe, rollbacks,
+}: CommitTagPushOpts): Promise<void> {
+  // preserve user's staged hunks on rollback (--soft would leave our changes staged)
+  const [preIndexTreeOid, priorLocalTagOid] = await Promise.all([
+    exec("git", ["write-tree"]).then(r => r.stdout.trim()).catch(() => null),
+    exec("git", ["rev-parse", "--verify", tagRef]).then(r => r.stdout.trim()).catch(() => null),
+  ]);
+
+  const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
+  const commitArgs = all ?
+    ["commit", "-a", "--allow-empty", "-F", "-"] :
+    filesToAdd.length ?
+      ["commit", "-i", "-F", "-", "--", ...filesToAdd] :
+      ["commit", "--allow-empty", "-F", "-"];
+  writeResult(await exec("git", commitArgs, {stdin: {string: commitMsg}}));
+  rollbacks.push(async () => {
+    const hasParent = await exec("git", ["rev-parse", "HEAD^"]).then(() => true, () => false);
+    if (hasParent) await exec("git", ["reset", "--soft", "HEAD^"]);
+    else await exec("git", ["update-ref", "-d", "HEAD"]);
+    if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
+  });
+
+  const tagMsg = joinStrings([...msgs, changelog], "\n\n");
+  // adding explicit -a here seems to make git no longer sign the tag
+  writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
+  rollbacks.push(async () => {
+    // update-ref preserves the prior tag's type (annotated vs lightweight); `tag -f <oid>`
+    // would create a lightweight tag pointing at the prior tag-object OID.
+    if (priorLocalTagOid) await exec("git", ["update-ref", tagRef, priorLocalTagOid]);
+    else await exec("git", ["tag", "-d", tagName]);
+  });
+
+  if (noPush) return;
+  const headOid = (await exec("git", ["rev-parse", "HEAD"])).stdout.trim();
+  writeResult(await exec("git", ["push", pushRemote, pushBranch, tagName]));
+
+  if (remoteProbe?.ok) {
+    // --force-with-lease guards against concurrent pushes overwriting work
+    rollbacks.push(async () => {
+      if (remoteProbe.branch) {
+        await exec("git", ["push", `--force-with-lease=${branchRef}:${headOid}`, pushRemote, `${remoteProbe.branch}:${branchRef}`]);
+      } else {
+        await exec("git", ["push", pushRemote, `:${branchRef}`]);
+      }
+    });
+    rollbacks.push(async () => {
+      if (remoteProbe.tag) {
+        await exec("git", ["push", "--force", pushRemote, `${remoteProbe.tag}:${tagRef}`]);
+      } else {
+        await exec("git", ["push", pushRemote, `:${tagRef}`]);
+      }
+    });
+  } else {
+    // probe failed — guessing the prior remote state could destroy refs we don't own
+    rollbacks.push(() => {
+      console.error(`rollback skipped: could not capture remote state for ${pushRemote} before push; verify branch ${pushBranch} and tag ${tagName} manually`);
+    });
+  }
+}
+
 async function main(): Promise<void> {
   const commands = new Set(["patch", "minor", "major", "prerelease"]);
   const result = parseArgs({
@@ -523,10 +607,6 @@ async function main(): Promise<void> {
   const gitDir = findUp(".git", pwd);
   const projectRoot = gitDir ? dirname(gitDir) : pwd;
   const pushRemote = typeof args.remote === "string" ? args.remote : "origin";
-  const wantRelease = !args.gitless && Boolean(args.release);
-  const repoInfoPromise = wantRelease ? getRepoInfo(undefined, pushRemote) : null;
-  const tokensPromise = wantRelease ? repoInfoPromise!.then(info =>
-    !info ? [] : info.type === "github" ? getGithubTokens() : getGiteaTokens()) : null;
 
   files = files.map(file => relative(pwd, file));
 
@@ -540,43 +620,17 @@ async function main(): Promise<void> {
     throw new Error("--no-push and --release are mutually exclusive");
   }
 
-  const baseVersionPromise = (async (): Promise<{baseVersion: string, baseSource: string, describeTag: string}> => {
-    if (args.base) {
-      const raw = String(args.base);
-      if (!isSemver(raw)) throw new Error(`Invalid base version: ${raw}`);
-      return {baseVersion: stripV(raw), baseSource: "--base", describeTag: ""};
-    }
+  const wantRelease = Boolean(args.release);
+  const willCommit = !args.gitless && !args.dry;
+  const willPush = willCommit && !args["no-push"];
+  const repoInfoPromise = wantRelease ? getRepoInfo(undefined, pushRemote) : null;
+  const tokensPromise = wantRelease ? repoInfoPromise!.then(info =>
+    !info ? [] : info.type === "github" ? getGithubTokens() : getGiteaTokens()) : null;
 
-    let describeTag = "";
-    if (!args.gitless) {
-      try {
-        const result = await exec("git", ["describe", "--tags", "--abbrev=0"]);
-        describeTag = result.stdout.trim();
-        if (isSemver(describeTag)) {
-          return {baseVersion: stripV(describeTag), baseSource: "git describe", describeTag};
-        }
-      } catch {}
-
-      try {
-        const {stdout} = await exec("git", ["tag", "--list", "--sort=-creatordate"]);
-        const tag = stdout.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
-        if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", describeTag};
-      } catch {}
-    }
-
-    const pkgVer = readVersionFromPackageJson(projectRoot);
-    if (pkgVer) return {baseVersion: pkgVer, baseSource: "package.json", describeTag};
-
-    const pyVer = readVersionFromPyprojectToml(projectRoot);
-    if (pyVer) return {baseVersion: pyVer, baseSource: "pyproject.toml", describeTag};
-
-    if (!args.gitless) return {baseVersion: "0.0.0", baseSource: "default", describeTag};
-
-    return {baseVersion: "", baseSource: "", describeTag};
-  })();
+  const baseVersionPromise = resolveBaseVersion(typeof args.base === "string" ? args.base : undefined, Boolean(args.gitless), projectRoot);
 
   // resolve push branch early so detached HEAD fails before commit/tag
-  const pushBranchPromise = (!args.gitless && !args.dry && !args["no-push"]) ? (async () => {
+  const pushBranchPromise = willPush ? (async () => {
     if (typeof args.branch === "string") return args.branch;
     const {stdout: branchOut} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
     return branchOut.trim();
@@ -597,21 +651,18 @@ async function main(): Promise<void> {
   logVerbose(`new version ${newVersion}`);
 
   const replacements: Array<{re: RegExp, replacement: string}> = [];
-  if (args.replace?.length) {
-    const replace = args.replace.filter(arg => typeof arg === "string");
-    for (const replaceStr of replace) {
-      let [, re, replacement, flags] = (reReplaceString.exec(replaceStr) || []);
+  for (const replaceStr of stringArgs(args.replace)) {
+    let [, re, replacement, flags] = (reReplaceString.exec(replaceStr) || []);
 
-      if (!re || !replacement) {
-        throw new Error(`Invalid replace string: ${replaceStr}`);
-      }
-
-      replacement = replaceTokens(replacement, newVersion);
-      replacements.push({re: new RegExp(re, flags || undefined), replacement});
+    if (!re || !replacement) {
+      throw new Error(`Invalid replace string: ${replaceStr}`);
     }
+
+    replacement = replaceTokens(replacement, newVersion);
+    replacements.push({re: new RegExp(re, flags || undefined), replacement});
   }
 
-  const msgs = (args.message || []).filter(msg => typeof msg === "string");
+  const msgs = stringArgs(args.message);
   const tagName = args.prefix ? `v${newVersion}` : newVersion;
 
   const changelogInfo = (() => {
@@ -623,9 +674,9 @@ async function main(): Promise<void> {
     } catch {
       return null;
     }
-    const processed = processChangelog(original, newVersion, today);
-    if (!processed) return null;
-    return {path, original, entry: processed.entry, updated: processed.updated};
+    const entry = readChangelogEntry(original, newVersion);
+    if (!entry) return null;
+    return {path, original, entry, updated: updateChangelogHeadingDate(original, newVersion, today)};
   })();
 
   // generic baseVersion replacement would rewrite prior version headings in CHANGELOG.md
@@ -634,7 +685,7 @@ async function main(): Promise<void> {
 
   const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
   const filesToAddPromise = (!args.gitless && !args.all && allFiles.length) ? removeIgnoredFiles(allFiles) : null;
-  const changelogPromise = (!args.gitless && !args.dry) ? (async () => {
+  const changelogPromise = willCommit ? (async () => {
     if (changelogInfo) {
       logVerbose(`using changelog entry from ${changelogInfo.path}`);
       return changelogInfo.entry;
@@ -661,7 +712,7 @@ async function main(): Promise<void> {
   // explicitly (defaults to fetch URL, which can differ for github.com fetch + local bare push).
   const branchRef = `refs/heads/${pushBranch}`;
   const tagRef = `refs/tags/${tagName}`;
-  const remoteProbePromise = (!args.gitless && !args.dry && !args["no-push"]) ? (async () => {
+  const remoteProbePromise = willPush ? (async () => {
     try {
       const {stdout: pushUrl} = await exec("git", ["remote", "get-url", "--push", pushRemote]);
       const {stdout} = await exec("git", ["ls-remote", pushUrl.trim(), branchRef, tagRef]);
@@ -718,70 +769,15 @@ async function main(): Promise<void> {
     }
 
     const changelog = (await changelogPromise) ?? undefined;
-
-    // preserve user's staged hunks on rollback (--soft would leave our changes staged)
-    const [preIndexTreeOid, priorLocalTagOid] = await Promise.all([
-      exec("git", ["write-tree"]).then(r => r.stdout.trim()).catch(() => null),
-      exec("git", ["rev-parse", "--verify", tagRef]).then(r => r.stdout.trim()).catch(() => null),
-    ]);
-
-    const commitMsg = joinStrings([tagName, ...msgs, changelog], "\n\n");
-    let commitArgs: string[];
-    if (args.all) {
-      commitArgs = ["commit", "-a", "--allow-empty", "-F", "-"];
-    } else {
-      const filesToAdd = (await filesToAddPromise) ?? [];
-      commitArgs = filesToAdd.length ?
-        ["commit", "-i", "-F", "-", "--", ...filesToAdd] :
-        ["commit", "--allow-empty", "-F", "-"];
-    }
-    writeResult(await exec("git", commitArgs, {stdin: {string: commitMsg}}));
-    rollbacks.push(async () => {
-      const hasParent = await exec("git", ["rev-parse", "HEAD^"]).then(() => true, () => false);
-      if (hasParent) await exec("git", ["reset", "--soft", "HEAD^"]);
-      else await exec("git", ["update-ref", "-d", "HEAD"]);
-      if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
+    await commitTagPush({
+      tagName, msgs, changelog,
+      all: Boolean(args.all),
+      noPush: Boolean(args["no-push"]),
+      filesToAdd: (await filesToAddPromise) ?? [],
+      pushRemote, pushBranch, branchRef, tagRef,
+      remoteProbe: (await remoteProbePromise) ?? null,
+      rollbacks,
     });
-
-    const tagMsg = joinStrings([...msgs, changelog], "\n\n");
-    // adding explicit -a here seems to make git no longer sign the tag
-    writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
-    rollbacks.push(async () => {
-      // update-ref preserves the prior tag's type (annotated vs lightweight); `tag -f <oid>`
-      // would create a lightweight tag pointing at the prior tag-object OID.
-      if (priorLocalTagOid) await exec("git", ["update-ref", tagRef, priorLocalTagOid]);
-      else await exec("git", ["tag", "-d", tagName]);
-    });
-
-    if (!args["no-push"]) {
-      const probe = await remoteProbePromise!;
-      const headOid = (await exec("git", ["rev-parse", "HEAD"])).stdout.trim();
-
-      writeResult(await exec("git", ["push", pushRemote, pushBranch, tagName]));
-
-      if (probe.ok) {
-        // --force-with-lease guards against concurrent pushes overwriting work
-        rollbacks.push(async () => {
-          if (probe.branch) {
-            await exec("git", ["push", `--force-with-lease=${branchRef}:${headOid}`, pushRemote, `${probe.branch}:${branchRef}`]);
-          } else {
-            await exec("git", ["push", pushRemote, `:${branchRef}`]);
-          }
-        });
-        rollbacks.push(async () => {
-          if (probe.tag) {
-            await exec("git", ["push", "--force", pushRemote, `${probe.tag}:${tagRef}`]);
-          } else {
-            await exec("git", ["push", pushRemote, `:${tagRef}`]);
-          }
-        });
-      } else {
-        // probe failed — guessing the prior remote state could destroy refs we don't own
-        rollbacks.push(() => {
-          console.error(`rollback skipped: could not capture remote state for ${pushRemote} before push; verify branch ${pushBranch} and tag ${tagName} manually`);
-        });
-      }
-    }
 
     if (wantRelease) {
       const repoInfo = await repoInfoPromise!;

@@ -51,19 +51,9 @@ update-js: node_modules
 publish: node_modules
 	pnpm publish --no-git-checks
 
-.PHONY: patch
-patch: node_modules lint build test
-	./dist/index.js -R patch package.json
-	git push -u --tags origin master
-
-.PHONY: minor
-minor: node_modules lint build test
-	./dist/index.js -R minor package.json
-	git push -u --tags origin master
-
-.PHONY: major
-major: node_modules lint build test
-	./dist/index.js -R major package.json
+.PHONY: patch minor major
+patch minor major: node_modules lint build test
+	./dist/index.js -R $@ package.json
 	git push -u --tags origin master
 
 .PHONY: update-actions

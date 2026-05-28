@@ -29,7 +29,8 @@ function delta(before: number, after: number): string {
   return `${((1 - after / before) * 100).toFixed(1)}% faster`;
 }
 
-// prior tomlGetString, without the early-exit on leaving the target section.
+// prior tomlGetString — inline section-walking loop without the visitTomlSection
+// callback indirection introduced by the share-with-tomlReplaceFirst refactor.
 function tomlGetStringPrior(content: string, section: string, key: string): string | undefined {
   let inSection = false;
   const keyRe = new RegExp(`^${key}\\s*=\\s*["']([^"']+)["']`);
