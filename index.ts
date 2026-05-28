@@ -493,11 +493,12 @@ async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<string |
       await ensureOk(response, label);
       // Both GitHub and Gitea return `permissions: {push, admin, pull, ...}` on authenticated
       // repo GETs. If the field is present and push/admin are both false, release creation
-      // will 403 — abort now rather than after the push has landed.
+      // will 403 — abort now rather than after the push has landed. Throw `AuthRetryable`
+      // so `withTokens` falls through to the next token: a different token may have push.
       const body = await response.json().catch(() => null);
       const perms = body?.permissions;
       if (perms && perms.push !== true && perms.admin !== true) {
-        throw new Error(`${label}: token lacks push permission on ${repoInfo.owner}/${repoInfo.repo}`);
+        throw new AuthRetryable(`${label}: token lacks push permission on ${repoInfo.owner}/${repoInfo.repo}`);
       }
     });
     return null;
