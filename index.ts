@@ -598,27 +598,40 @@ async function main(): Promise<void> {
   const willCommit = !args.gitless && !args.dry;
   const willPush = willCommit && !args["no-push"];
 
-  // Resolve push branch up front so detached HEAD fails before any other work.
-  let pushBranch = "";
-  if (willPush) {
-    if (typeof args.branch === "string") {
-      pushBranch = args.branch;
-    } else {
-      const {stdout: branchOut} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
-      pushBranch = branchOut.trim();
-    }
-    if (pushBranch === "HEAD") {
-      throw new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push.");
-    }
-  }
-
-  const {baseVersion, baseSource, describeTag} = await resolveBaseVersion(
+  // Fire every independent I/O probe in parallel. Each resolves to a value validate awaits;
+  // the chain repoInfo → tokens → pingForge is the only inherently sequential one.
+  const baseVersionP = resolveBaseVersion(
     typeof args.base === "string" ? args.base : undefined,
     Boolean(args.gitless),
     projectRoot,
   );
+  const pushBranchP: Promise<string> = willPush ? (async () => {
+    if (typeof args.branch === "string") return args.branch;
+    const {stdout} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    return stdout.trim();
+  })() : Promise.resolve("");
+  const identityOkP: Promise<boolean> = willCommit ?
+    exec("git", ["var", "GIT_AUTHOR_IDENT"]).then(() => true, () => false) :
+    Promise.resolve(true);
+  const repoInfoP: Promise<RepoInfo | null> = wantRelease && willCommit ?
+    getRepoInfo(undefined, pushRemote) :
+    Promise.resolve(null);
+  const tokensP: Promise<string[]> = repoInfoP.then(info => info ? getForgeTokens(info) : []);
+  const pingResultP: Promise<string | null> = (async () => {
+    const [info, toks] = await Promise.all([repoInfoP, tokensP]);
+    if (!info || !toks.length) return null;
+    return pingForge(info, toks);
+  })();
+
+  // baseVersion + pushBranch unblock tagRef/branchRef computation; throw the two fatal
+  // configuration errors that can't sensibly be deferred to validate (incrementSemver
+  // would otherwise blow up on an empty base).
+  const [{baseVersion, baseSource, describeTag}, pushBranch] = await Promise.all([baseVersionP, pushBranchP]);
   if (args.gitless && !baseVersion) {
     throw new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`);
+  }
+  if (willPush && pushBranch === "HEAD") {
+    throw new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push.");
   }
   logVerbose(`base version ${baseVersion} from ${baseSource}`);
 
@@ -639,6 +652,15 @@ async function main(): Promise<void> {
   const tagName = args.prefix ? `v${newVersion}` : newVersion;
   const branchRef = `refs/heads/${pushBranch}`;
   const tagRef = `refs/tags/${tagName}`;
+
+  // probeRemote + the ancestor check are the second slow chain; kick them off now and
+  // do the sync work below in the meantime.
+  const remoteStateP = willPush ? probeRemote(pushRemote, branchRef, tagRef) : Promise.resolve(null);
+  const mergeBaseOkP: Promise<boolean> = (async () => {
+    const state = await remoteStateP;
+    if (!state || !state.branch) return true;
+    return exec("git", ["merge-base", "--is-ancestor", state.branch, "HEAD"]).then(() => true, () => false);
+  })();
 
   const changelogInfo = (() => {
     const path = findUp("CHANGELOG.md", projectRoot);
@@ -672,14 +694,11 @@ async function main(): Promise<void> {
 
   const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
 
-  // Probe remote + forge in parallel — both feed validate, neither has side effects.
-  const [remoteState, repoInfo] = await Promise.all([
-    willPush ? probeRemote(pushRemote, branchRef, tagRef) : null,
-    wantRelease && willCommit ? getRepoInfo(undefined, pushRemote) : null,
+  // === VALIDATE === single await collects every probe; checks below are pure.
+  const [remoteState, repoInfo, tokens, identityOk, pingResult, mergeBaseOk] = await Promise.all([
+    remoteStateP, repoInfoP, tokensP, identityOkP, pingResultP, mergeBaseOkP,
   ]);
-  const tokens = repoInfo ? await getForgeTokens(repoInfo) : [];
 
-  // === VALIDATE === all checks must pass before any mutation happens.
   const errors: string[] = [];
 
   // If files were specified (and not -a), at least one must produce a diff — otherwise
@@ -687,15 +706,9 @@ async function main(): Promise<void> {
   if (fileChanges.length > 0 && !args.all && !fileChanges.some(f => f.changed)) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
-
-  if (willCommit) {
-    // `git var` resolves env vars + config + system fallbacks the same way commit/tag will.
-    const identityOk = await exec("git", ["var", "GIT_AUTHOR_IDENT"]).then(() => true).catch(() => false);
-    if (!identityOk) {
-      errors.push("git author identity unavailable; configure user.name + user.email or set GIT_AUTHOR_NAME + GIT_AUTHOR_EMAIL");
-    }
+  if (willCommit && !identityOk) {
+    errors.push("git author identity unavailable; configure user.name + user.email or set GIT_AUTHOR_NAME + GIT_AUTHOR_EMAIL");
   }
-
   if (willPush) {
     if (!remoteState) {
       errors.push(`could not query remote ${pushRemote} (not configured or unreachable)`);
@@ -703,23 +716,18 @@ async function main(): Promise<void> {
       if (remoteState.tag) {
         errors.push(`tag ${tagName} already exists on remote ${pushRemote} at ${remoteState.tag.slice(0, 8)}; delete it or choose a different version`);
       }
-      if (remoteState.branch) {
-        const isAncestor = await exec("git", ["merge-base", "--is-ancestor", remoteState.branch, "HEAD"]).then(() => true).catch(() => false);
-        if (!isAncestor) {
-          errors.push(`local HEAD is not a descendant of ${pushRemote}/${pushBranch} (${remoteState.branch.slice(0, 8)}); fetch and integrate before bumping`);
-        }
+      if (remoteState.branch && !mergeBaseOk) {
+        errors.push(`local HEAD is not a descendant of ${pushRemote}/${pushBranch} (${remoteState.branch.slice(0, 8)}); fetch and integrate before bumping`);
       }
     }
   }
-
   if (wantRelease && willCommit) {
     if (!repoInfo) {
       errors.push("--release: could not detect a forge from the git remote URL");
     } else if (!tokens.length) {
       errors.push(`--release: no ${forgeName(repoInfo)} token found in environment`);
-    } else {
-      const forgeErr = await pingForge(repoInfo, tokens);
-      if (forgeErr) errors.push(`--release: forge unreachable or token rejected: ${forgeErr}`);
+    } else if (pingResult) {
+      errors.push(`--release: forge unreachable or token rejected: ${pingResult}`);
     }
   }
 
