@@ -490,6 +490,11 @@ async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<string |
   try {
     await withTokens(repoInfo.type === "github", tokens, async (authHeader) => {
       const response = await forgeFetch("GET", url, authHeader, label);
+      // GitHub returns 404 for private repos when the token lacks read access (info hiding);
+      // treat it like 401/403 so withTokens falls through to the next token.
+      if (response.status === 404) {
+        throw new AuthRetryable(`${label}: 404 (token may lack access to ${repoInfo.owner}/${repoInfo.repo})`);
+      }
       await ensureOk(response, label);
       // Both GitHub and Gitea return `permissions: {push, admin, pull, ...}` on authenticated
       // repo GETs. If the field is present and push/admin are both false, release creation
@@ -703,8 +708,10 @@ async function main(): Promise<void> {
   const errors: string[] = [];
 
   // If files were specified (and not -a), at least one must produce a diff — otherwise
-  // the commit would be empty and the user's intent (bump these files) is impossible.
-  if (fileChanges.length > 0 && !args.all && !fileChanges.some(f => f.changed)) {
+  // git commit -i with unchanged files would fail "nothing to commit". Use the raw input
+  // count (`files`), not `fileChanges`, so a run that only specified unhandled lockfiles
+  // also aborts. Skipped in --gitless because nothing will commit anyway.
+  if (!args.gitless && files.length > 0 && !args.all && !fileChanges.some(f => f.changed)) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
   if (willCommit && !identityOk) {
