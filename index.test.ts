@@ -801,6 +801,51 @@ test("rollback - push failure reverts local commit, tag, and file", () => withTm
   expect(status.trim()).toEqual("");
 }));
 
+test("validate - aborts when remote branch has advanced beyond local", () => withTmpDir(async (tmpDir) => {
+  // Regression: a prior failed run left orphan tags because remote master had advanced
+  // (locally invisible without fetch) and the next run pushed only the tag while branch
+  // push was rejected. Validate now catches this before any commit/tag.
+  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+  await writeFile(join(tmpDir, "package.json"), pkgContent);
+
+  const {env, bareDir} = await setupReleaseRepo(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  // Simulate "someone else pushed to origin/master": advance remote HEAD without
+  // updating the local tracking ref. Local repo is now behind without knowing it.
+  await writeFile(join(tmpDir, "other.txt"), "remote work");
+  await exec("git", ["add", "other.txt"], opts);
+  await exec("git", ["commit", "-m", "remote work"], opts);
+  await exec("git", ["push", "origin", "master"], opts);
+  await exec("git", ["reset", "--hard", "HEAD^"], opts);
+  // Now: local HEAD is at the initial commit, but origin's master is one commit ahead.
+  await writeFile(join(tmpDir, "package.json"), pkgContent);
+
+  const {stdout: preLocalHead} = await exec("git", ["rev-parse", "HEAD"], opts);
+  const {stdout: preRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+  const {stdout: preTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
+
+  try {
+    await exec("node", [distPath, "patch", "package.json"], opts);
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+    expect(err.exitCode).toEqual(1);
+    expect(err.output).toMatch(/not a descendant/);
+  }
+
+  // No mutation must have happened — neither locally nor on the remote.
+  expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
+  const {stdout: postLocalHead} = await exec("git", ["rev-parse", "HEAD"], opts);
+  expect(postLocalHead).toEqual(preLocalHead);
+  const {stdout: localTags} = await exec("git", ["tag", "--list"], opts);
+  expect(localTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
+  const {stdout: postRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+  expect(postRemoteHead).toEqual(preRemoteHead);
+  const {stdout: postTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
+  expect(postTags).toEqual(preTags);
+}));
+
 test("rollback - -c failure restores file writes (gitless)", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
@@ -1075,8 +1120,11 @@ test("--remote with --release uses that remote for forge detection", () => withT
   }
   expect(err).toBeInstanceOf(SubprocessError);
   expect(err.exitCode).toEqual(1);
-  expect(err.output).toMatch(/Failed to (create|list) release/);
-  expect(err.output).not.toContain("Could not determine repository type");
+  // The forge ping during validate hits the upstream host; if --remote were ignored,
+  // getRepoInfo would have returned null for file:/// and the error would be "could not
+  // detect a forge" instead. The mention of gitea.invalid proves upstream's URL was used.
+  expect(err.output).toContain("gitea.invalid");
+  expect(err.output).not.toContain("could not detect a forge");
 }));
 
 test("--branch pushes specified branch", () => withTmpDir(async (tmpDir) => {
