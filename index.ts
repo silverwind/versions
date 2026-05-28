@@ -490,8 +490,9 @@ async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<string |
   try {
     await withTokens(repoInfo.type === "github", tokens, async (authHeader) => {
       const response = await forgeFetch("GET", url, authHeader, label);
-      // GitHub returns 404 for private repos when the token lacks read access (info hiding);
-      // treat it like 401/403 so withTokens falls through to the next token.
+      // Both GitHub and Gitea return 404 (not 403) for private repos when the token
+      // lacks read access, to avoid leaking repo existence; treat it like 401/403 so
+      // withTokens falls through to the next token.
       if (response.status === 404) {
         throw new AuthRetryable(`${label}: 404 (token may lack access to ${repoInfo.owner}/${repoInfo.repo})`);
       }
