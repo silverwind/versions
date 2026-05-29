@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {SubprocessError, type Result, colorize, detectEol, exec, logVerbose, reNewline, setVerbose, tomlGetString, tomlReplaceFirst} from "./utils.ts";
+import {SubprocessError, type Result, colorize, detectEol, exec, logVerbose, reNewline, replaceJsonVersion, setVerbose, tomlGetString, tomlReplaceFirst} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {cwd, exit, platform, stdout} from "node:process";
@@ -12,7 +12,7 @@ const EOL = platform === "win32" ? "\r\n" : "\n";
 const reEscapeChars = /[|\\{}()[\]^$+*?.-]/g;
 const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const rePrereleaseVersion = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?/;
-const rePrereleaseIdNum = /^([a-zA-Z0-9-]+)\.(\d+)$/;
+const rePrereleaseIdNum = /^([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*)\.(\d+)$/;
 const reDatePattern = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/g;
 const reDate = new RegExp(reDatePattern.source);
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
@@ -54,8 +54,8 @@ export function incrementSemver(str: string, level: string, preid?: string): str
     if (!preid) throw new Error("prerelease requires --preid option");
     if (!prerelease) return `${major}.${minor}.${patch + 1}-${preid}.0`;
     const idNum = rePrereleaseIdNum.exec(prerelease);
-    if (idNum?.[1] === preid) {
-      return `${major}.${minor}.${patch}-${preid}.${Number(idNum[2]) + 1}`;
+    if (idNum && (idNum[1] === preid || idNum[1].startsWith(`${preid}.`))) {
+      return `${major}.${minor}.${patch}-${idNum[1]}.${Number(idNum[2]) + 1}`;
     }
     return `${major}.${minor}.${patch}-${preid}.0`;
   }
@@ -220,10 +220,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
 
   let newData: string;
   if (fileName === "package.json") {
-    // anchor to top-level indent — nested "version" keys (overrides, resolutions, scripts) live deeper
-    const indent = /^\{\r?\n([ \t]+)/.exec(oldData)?.[1] ?? "  ";
-    const re = new RegExp(`(^${esc(indent)}"version"\\s*:\\s*")\\d+\\.\\d+\\.\\d+(?:[^"\\d][^"]*)?(")`, "m");
-    newData = oldData.replace(re, `$1${newVersion}$2`);
+    newData = replaceJsonVersion(oldData, newVersion);
   } else if (fileName === "package-lock.json") {
     // regex replace would corrupt nested dependency versions
     const lockFile = JSON.parse(oldData);
@@ -655,7 +652,7 @@ async function main(): Promise<void> {
     replacements.push({re: new RegExp(re, flags || undefined), replacement});
   }
 
-  const msgs = stringArgs(args.message);
+  const msgs = stringArgs(args.message).map(msg => replaceTokens(msg, newVersion));
   const tagName = args.prefix ? `v${newVersion}` : newVersion;
   const branchRef = `refs/heads/${pushBranch}`;
   const tagRef = `refs/tags/${tagName}`;

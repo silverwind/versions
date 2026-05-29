@@ -1150,6 +1150,9 @@ test("incrementSemver prerelease", () => {
   expect(incrementSemver("1.0.0", "prerelease", "alpha")).toEqual("1.0.1-alpha.0");
   expect(incrementSemver("1.0.1-beta.0", "prerelease", "beta")).toEqual("1.0.1-beta.1");
   expect(incrementSemver("2.0.0-alpha.5", "prerelease", "rc")).toEqual("2.0.0-rc.0");
+  expect(incrementSemver("1.2.3-rc.1.2", "prerelease", "rc")).toEqual("1.2.3-rc.1.3");
+  expect(incrementSemver("1.2.3-alpha.beta.0", "prerelease", "alpha")).toEqual("1.2.3-alpha.beta.1");
+  expect(incrementSemver("1.2.3-alphax.1", "prerelease", "alpha")).toEqual("1.2.3-alpha.0");
   expect(incrementSemver("1.0.0", "patch", "alpha")).toEqual("1.0.1-alpha.0");
   expect(incrementSemver("1.0.0", "minor", "beta")).toEqual("1.1.0-beta.0");
   expect(incrementSemver("1.0.0", "major", "rc")).toEqual("2.0.0-rc.0");
@@ -1301,6 +1304,22 @@ test("incrementSemver unknown level throws", () => {
   expect(() => incrementSemver("1.0.0", "unknown")).toThrow("Invalid semver level");
 });
 
+test("--message tokens are substituted in commit and tag", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+
+  const {env} = await setupReleaseRepo(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  await exec("node", [distPath, "--no-push", "-m", "Release _VER_", "patch", "package.json"], opts);
+
+  const {stdout: commitMsg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(commitMsg).toContain("Release 1.0.1");
+  expect(commitMsg).not.toContain("_VER_");
+
+  const {stdout: tagMsg} = await exec("git", ["tag", "-l", "1.0.1", "--format=%(contents)"], opts);
+  expect(tagMsg).toContain("Release 1.0.1");
+}));
+
 test("CHANGELOG.md drives commit body and gets dated heading", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
   await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## [1.0.1]\n- Fixed thing X\n- Added thing Y\n\n## 1.0.0\nold stuff\n`);
@@ -1393,6 +1412,22 @@ test("getFileChanges package.json", () => withTmpDir(async (tmpDir) => {
   await writeFile(file, JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
   const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1"});
   expect(JSON.parse(content!).version).toEqual("1.0.1");
+}));
+
+test("getFileChanges minified package.json", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "package.json");
+  await writeFile(file, JSON.stringify({name: "test", version: "1.0.0"}));
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1"});
+  expect(JSON.parse(content!).version).toEqual("1.0.1");
+}));
+
+test("getFileChanges minified package.json leaves nested version fields alone", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "package.json");
+  await writeFile(file, JSON.stringify({name: "foo", overrides: {"some-pkg": {version: "1.0.0"}}, version: "1.0.0"}));
+  const [content] = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"});
+  const parsed = JSON.parse(content!);
+  expect(parsed.version).toEqual("2.0.0");
+  expect(parsed.overrides["some-pkg"].version).toEqual("1.0.0");
 }));
 
 test("getFileChanges package-lock.json", () => withTmpDir(async (tmpDir) => {

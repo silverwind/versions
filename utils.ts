@@ -100,6 +100,51 @@ export function tomlReplaceFirst(content: string, sections: readonly string[], l
   return changed ? lines.join(detectEol(content)) : content;
 }
 
+const reJsonWhitespace = /[ \t\n\r]/;
+
+// Replace the top-level "version" value in a JSON document, preserving all other bytes (works on
+// minified manifests too). Brace/bracket depth skips nested "version" keys; the trailing `:`
+// distinguishes a key from a value equal to "version". Returns input unchanged if none found.
+export function replaceJsonVersion(data: string, newVersion: string): string {
+  const stack: string[] = [];
+  let inString = false;
+  let stringStart = -1;
+  for (let pos = 0; pos < data.length; pos++) {
+    const char = data[pos];
+    if (inString) {
+      if (char === "\\") {
+        pos++; // skip the escaped character
+      } else if (char === '"') {
+        inString = false;
+        const atTopLevel = stack.length === 1 && stack[0] === "{";
+        if (atTopLevel && data.slice(stringStart + 1, pos) === "version") {
+          let valuePos = pos + 1;
+          while (valuePos < data.length && reJsonWhitespace.test(data[valuePos])) valuePos++;
+          if (data[valuePos] !== ":") continue;
+          valuePos++;
+          while (valuePos < data.length && reJsonWhitespace.test(data[valuePos])) valuePos++;
+          if (data[valuePos] !== '"') continue;
+          const valueStart = valuePos + 1;
+          let valueEnd = valueStart;
+          while (valueEnd < data.length && data[valueEnd] !== '"') {
+            if (data[valueEnd] === "\\") valueEnd++;
+            valueEnd++;
+          }
+          return `${data.slice(0, valueStart)}${newVersion}${data.slice(valueEnd)}`;
+        }
+      }
+    } else if (char === '"') {
+      inString = true;
+      stringStart = pos;
+    } else if (char === "{" || char === "[") {
+      stack.push(char);
+    } else if (char === "}" || char === "]") {
+      stack.pop();
+    }
+  }
+  return data;
+}
+
 export function exec(file: string, args: readonly string[], options?: ExecOptions): Promise<Result> {
   if (verbose) logVerbose(`$ ${args.length ? `${file} ${args.map(quoteArg).join(" ")}` : file}`);
   return new Promise((resolve, reject) => {
