@@ -10,7 +10,7 @@ import {
   getRepoInfo, writeResult, createForgeRelease, deleteForgeRelease,
   readChangelogEntry, updateChangelogHeadingDate,
   type RepoInfo,
-} from "./index.ts";
+} from "./api.ts";
 import {exec, tomlGetString, SubprocessError} from "./utils.ts";
 
 const distPath = join(process.cwd(), "dist/index.js");
