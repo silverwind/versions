@@ -522,7 +522,7 @@ describe("forge requests", {concurrent: false}, () => {
 
   test("createForgeRelease network error includes cause", async () => {
     stubGlobal("fetch", vi.fn().mockRejectedValue(
-      Object.assign(new TypeError("fetch failed"), {cause: new Error("getaddrinfo ENOTFOUND example.com")}),
+      new TypeError("fetch failed", {cause: new Error("getaddrinfo ENOTFOUND example.com")}),
     ));
     const info: RepoInfo = {owner: "o", repo: "r", host: "example.com", type: "gitea"};
     await expect(createForgeRelease(info, "1.0.0", "body", ["tok"])).rejects.toThrow("getaddrinfo ENOTFOUND example.com");
@@ -696,7 +696,7 @@ describe("forge requests", {concurrent: false}, () => {
 
   test("deleteForgeRelease network error includes cause", async () => {
     stubGlobal("fetch", vi.fn().mockRejectedValue(
-      Object.assign(new TypeError("fetch failed"), {cause: new Error("getaddrinfo ENOTFOUND example.com")}),
+      new TypeError("fetch failed", {cause: new Error("getaddrinfo ENOTFOUND example.com")}),
     ));
     const info: RepoInfo = {owner: "o", repo: "r", host: "example.com", type: "gitea"};
     await expect(deleteForgeRelease(info, 1, ["tok"])).rejects.toThrow("getaddrinfo ENOTFOUND example.com");

@@ -480,7 +480,12 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
       // repo GETs. If the field is present and push/admin are both false, release creation
       // will 403 — abort now rather than after the push has landed. Throw `AuthRetryable`
       // so `withTokens` falls through to the next token: a different token may have push.
-      const body = await response.json().catch(() => null);
+      let body: any;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
       const perms = body?.permissions;
       if (perms && perms.push !== true && perms.admin !== true) {
         throw new AuthRetryable(`${label}: token lacks push permission on ${repoInfo.owner}/${repoInfo.repo}`);

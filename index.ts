@@ -133,12 +133,22 @@ async function main(): Promise<void> {
     return stdout.trim();
   })() : Promise.resolve("");
   const identityOkP: Promise<boolean> = willCommit ?
-    exec("git", ["var", "GIT_AUTHOR_IDENT"]).then(() => true, () => false) :
+    (async () => {
+      try {
+        await exec("git", ["var", "GIT_AUTHOR_IDENT"]);
+        return true;
+      } catch {
+        return false;
+      }
+    })() :
     Promise.resolve(true);
   const repoInfoP: Promise<RepoInfo | null> = wantRelease && willCommit ?
     getRepoInfo(undefined, pushRemote) :
     Promise.resolve(null);
-  const tokensP: Promise<string[]> = repoInfoP.then(info => info ? getForgeTokens(info) : []);
+  const tokensP: Promise<string[]> = (async () => {
+    const info = await repoInfoP;
+    return info ? getForgeTokens(info) : [];
+  })();
   const pingResultP: Promise<string | null> = (async () => {
     const [info, toks] = await Promise.all([repoInfoP, tokensP]);
     if (!info || !toks.length) return null;
@@ -181,7 +191,12 @@ async function main(): Promise<void> {
   const mergeBaseOkP: Promise<boolean> = (async () => {
     const state = await remoteStateP;
     if (!state || !state.branch) return true;
-    return exec("git", ["merge-base", "--is-ancestor", state.branch, "HEAD"]).then(() => true, () => false);
+    try {
+      await exec("git", ["merge-base", "--is-ancestor", state.branch, "HEAD"]);
+      return true;
+    } catch {
+      return false;
+    }
   })();
 
   const changelogInfo = (() => {
@@ -227,7 +242,7 @@ async function main(): Promise<void> {
   // git commit -i with unchanged files would fail "nothing to commit". Use the raw input
   // count (`files`), not `fileChanges`, so a run that only specified unhandled lockfiles
   // also aborts. Skipped in --gitless because nothing will commit anyway.
-  if (!args.gitless && files.length > 0 && !args.all && !fileChanges.some(f => f.changed)) {
+  if (!args.gitless && files.length > 0 && !args.all && fileChanges.every(f => !f.changed)) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
   if (willCommit && !identityOk) {
@@ -263,8 +278,20 @@ async function main(): Promise<void> {
   // === EXECUTE === mutations only — every realistic failure mode was caught above.
   // preserve user's staged hunks on rollback (--soft would leave our changes staged)
   const [preIndexTreeOid, priorLocalTagOid] = willCommit ? await Promise.all([
-    exec("git", ["write-tree"]).then(r => r.stdout.trim()).catch(() => null),
-    exec("git", ["rev-parse", "--verify", tagRef]).then(r => r.stdout.trim()).catch(() => null),
+    (async () => {
+      try {
+        return (await exec("git", ["write-tree"])).stdout.trim();
+      } catch {
+        return null;
+      }
+    })(),
+    (async () => {
+      try {
+        return (await exec("git", ["rev-parse", "--verify", tagRef])).stdout.trim();
+      } catch {
+        return null;
+      }
+    })(),
   ]) : [null, null];
 
   // Pre-push rollback only — once the atomic push lands, we leave the remote alone.
@@ -313,7 +340,13 @@ async function main(): Promise<void> {
         return changelogInfo.entry;
       }
       let range = "";
-      const tagExists = await exec("git", ["rev-parse", "--verify", tagRef]).then(() => true, () => false);
+      let tagExists: boolean;
+      try {
+        await exec("git", ["rev-parse", "--verify", tagRef]);
+        tagExists = true;
+      } catch {
+        tagExists = false;
+      }
       if (tagExists) {
         range = `${tagName}..HEAD`;
       } else if (describeTag) {
@@ -339,7 +372,13 @@ async function main(): Promise<void> {
 
     writeResult(await exec("git", commitArgs, {stdin: {string: commitMsg}}));
     rollbacks.push(async () => {
-      const hasParent = await exec("git", ["rev-parse", "HEAD^"]).then(() => true, () => false);
+      let hasParent: boolean;
+      try {
+        await exec("git", ["rev-parse", "HEAD^"]);
+        hasParent = true;
+      } catch {
+        hasParent = false;
+      }
       if (hasParent) await exec("git", ["reset", "--soft", "HEAD^"]);
       else await exec("git", ["update-ref", "-d", "HEAD"]);
       if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
@@ -389,5 +428,10 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.filename === resolve(process.argv[1] ?? "")) {
-  main().then(end).catch(end);
+  try {
+    await main();
+    end();
+  } catch (err) {
+    end(err as Error);
+  }
 }
