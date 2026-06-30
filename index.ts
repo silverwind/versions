@@ -7,7 +7,7 @@ import {
 } from "./api.ts";
 import {SubprocessError, exec, logVerbose, setVerbose} from "./utils.ts";
 import {parseArgs} from "node:util";
-import {dirname, relative, resolve} from "node:path";
+import {dirname, relative} from "node:path";
 import {cwd, exit} from "node:process";
 import {readFileSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
@@ -427,11 +427,9 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.filename === resolve(process.argv[1] ?? "")) {
-  try {
-    await main();
-    end();
-  } catch (err) {
-    end(err as Error);
-  }
+try {
+  await main();
+  end();
+} catch (err) {
+  end(err as Error);
 }
