@@ -1,11 +1,14 @@
-import {type Result, colorize, detectEol, exec, logVerbose, reNewline, replaceJsonVersion, tomlGetString, tomlReplaceFirst} from "./utils.ts";
+import {
+  type Result, colorize, detectEol, exec, logVerbose, reNewline, replaceJsonVersion, tomlGetString,
+  tomlReplaceFirst, tryExec,
+} from "./utils.ts";
 import {basename, dirname, join} from "node:path";
 import {platform, stdout} from "node:process";
 import {readFileSync, writeFileSync, accessSync, truncateSync} from "node:fs";
+import {EOL} from "node:os";
 
 export type SemverLevel = "patch" | "minor" | "major" | "prerelease";
 
-const EOL = platform === "win32" ? "\r\n" : "\n";
 const reEscapeChars = /[|\\{}()[\]^$+*?.-]/g;
 const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const rePrereleaseVersion = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?/;
@@ -107,19 +110,14 @@ export async function resolveBaseVersion(base: string | undefined, gitless: bool
 
   let describeTag = "";
   if (!gitless) {
-    try {
-      const {stdout} = await exec("git", ["describe", "--tags", "--abbrev=0"]);
-      describeTag = stdout.trim();
-      if (isSemver(describeTag)) {
-        return {baseVersion: stripV(describeTag), baseSource: "git describe", describeTag};
-      }
-    } catch {}
+    describeTag = await tryExec("git", ["describe", "--tags", "--abbrev=0"]) ?? "";
+    if (isSemver(describeTag)) {
+      return {baseVersion: stripV(describeTag), baseSource: "git describe", describeTag};
+    }
 
-    try {
-      const {stdout} = await exec("git", ["tag", "--list", "--sort=-creatordate"]);
-      const tag = stdout.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
-      if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", describeTag};
-    } catch {}
+    const tagList = await tryExec("git", ["tag", "--list", "--sort=-creatordate"]);
+    const tag = tagList?.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
+    if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", describeTag};
   }
 
   const pkgVer = readVersionFromPackageJson(projectRoot);
@@ -204,12 +202,15 @@ export type GetFileChangesOpts = {
   date?: string,
 };
 
-export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): [string | null, string | null] {
+export type FileChanges = {newData: string, oldData: string};
+
+// Returns null for files that must not be touched at all.
+export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): FileChanges | null {
   const fileName = basename(file);
 
   // unhandled lockfiles: blind search-and-replace would corrupt dependency versions
   if (!handledLockfiles.has(fileName) && (reLockfileName.test(fileName) || fileName === "go.sum")) {
-    return [null, null];
+    return null;
   }
 
   const oldData = readFileSync(file, "utf8");
@@ -248,7 +249,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     }
   }
 
-  return [newData, oldData];
+  return {newData, oldData};
 }
 
 export function write(file: string, content: string): void {
@@ -329,9 +330,8 @@ export async function getRepoInfo(cwd?: string, remote: string = "origin"): Prom
 
 async function forgeFetch(method: string, url: string, authHeader: string, label: string, jsonBody?: string): Promise<Response> {
   logVerbose(`${colorize(method, "magenta")} ${url}`);
-  const headers: Record<string, string> = jsonBody !== undefined ?
-    {Authorization: authHeader, "Content-Type": "application/json"} :
-    {Authorization: authHeader};
+  const headers: Record<string, string> = {Authorization: authHeader};
+  if (jsonBody !== undefined) headers["Content-Type"] = "application/json";
   let response: Response;
   try {
     response = await fetch(url, {method, headers, body: jsonBody});
@@ -360,13 +360,13 @@ async function ensureOk(response: Response, label: string, allow404 = false): Pr
 }
 
 async function withTokens<T>(
-  isGithub: boolean,
+  repoInfo: RepoInfo,
   tokens: string[],
   attempt: (authHeader: string) => Promise<T>,
 ): Promise<T> {
   let lastError: Error | undefined;
   for (const token of tokens) {
-    const authHeader = isGithub ? `Bearer ${token}` : `token ${token}`;
+    const authHeader = repoInfo.type === "github" ? `Bearer ${token}` : `token ${token}`;
     try {
       return await attempt(authHeader);
     } catch (err: any) {
@@ -399,7 +399,7 @@ export async function deleteForgeRelease(repoInfo: RepoInfo, releaseId: number, 
   const url = `${forgeApiBase(repoInfo)}/releases/${releaseId}`;
   const label = `Failed to delete release ${releaseId}`;
 
-  await withTokens(repoInfo.type === "github", tokens, async (authHeader) => {
+  await withTokens(repoInfo, tokens, async (authHeader) => {
     const response = await forgeFetch("DELETE", url, authHeader, label);
     await ensureOk(response, label, true);
   });
@@ -418,7 +418,7 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
 
   const post = (authHeader: string) => forgeFetch("POST", apiUrl, authHeader, label, releaseBody);
 
-  return withTokens(repoInfo.type === "github", tokens, async (authHeader) => {
+  return withTokens(repoInfo, tokens, async (authHeader) => {
     let response = await post(authHeader);
 
     // Stale draft for the same tag blocks creation: Gitea returns 409 "Release is has no Tag",
@@ -467,7 +467,7 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
   const url = forgeApiBase(repoInfo);
   const label = "forge ping";
   try {
-    await withTokens(repoInfo.type === "github", tokens, async (authHeader) => {
+    await withTokens(repoInfo, tokens, async (authHeader) => {
       const response = await forgeFetch("GET", url, authHeader, label);
       // Both GitHub and Gitea return 404 (not 403) for private repos when the token
       // lacks read access, to avoid leaking repo existence; treat it like 401/403 so

@@ -54,7 +54,6 @@ publish: node_modules
 .PHONY: patch minor major
 patch minor major: node_modules lint build test
 	./dist/index.js -R $@ package.json
-	git push -u --tags origin master
 
 .PHONY: update-actions
 update-actions: node_modules

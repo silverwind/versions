@@ -5,7 +5,7 @@ import {
   write, writeResult, getRepoInfo, getForgeTokens, forgeName, probeRemote,
   pingForge, createForgeRelease, type RepoInfo,
 } from "./api.ts";
-import {SubprocessError, exec, logVerbose, setVerbose} from "./utils.ts";
+import {SubprocessError, exec, logVerbose, setVerbose, tryExec} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {dirname, relative} from "node:path";
 import {cwd, exit} from "node:process";
@@ -13,6 +13,7 @@ import {readFileSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
 
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
+const commands = new Set(["patch", "minor", "major", "prerelease"]);
 
 function end(err?: Error | string | void): void {
   if (!err) return exit(0);
@@ -24,12 +25,11 @@ function end(err?: Error | string | void): void {
 }
 
 // parseArgs `strict: false` lets a bare `-r`/`-m` flag through as `true`; keep strings only.
-function stringArgs<T>(values: T[] | undefined): string[] {
-  return (values ?? []).filter((v): v is string & T => typeof v === "string");
+function stringArgs(values: unknown): string[] {
+  return Array.isArray(values) ? values.filter(value => typeof value === "string") : [];
 }
 
 async function main(): Promise<void> {
-  const commands = new Set(["patch", "minor", "major", "prerelease"]);
   const result = parseArgs({
     strict: false,
     allowPositionals: true,
@@ -55,7 +55,6 @@ async function main(): Promise<void> {
   });
   const args = result.values;
   let [level, ...files] = result.positionals;
-  files = Array.from(new Set(files));
 
   setVerbose(Boolean(args.verbose));
 
@@ -114,7 +113,8 @@ async function main(): Promise<void> {
   const projectRoot = gitDir ? dirname(gitDir) : pwd;
   const pushRemote = typeof args.remote === "string" ? args.remote : "origin";
 
-  files = files.map(file => relative(pwd, file));
+  // dedupe after normalizing, so `foo` and `./foo` collapse to one entry
+  files = Array.from(new Set(files.map(file => relative(pwd, file))));
 
   const wantRelease = Boolean(args.release);
   const willCommit = !args.gitless && !args.dry;
@@ -133,14 +133,7 @@ async function main(): Promise<void> {
     return stdout.trim();
   })() : Promise.resolve("");
   const identityOkP: Promise<boolean> = willCommit ?
-    (async () => {
-      try {
-        await exec("git", ["var", "GIT_AUTHOR_IDENT"]);
-        return true;
-      } catch {
-        return false;
-      }
-    })() :
+    (async () => await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)() :
     Promise.resolve(true);
   const repoInfoP: Promise<RepoInfo | null> = wantRelease && willCommit ?
     getRepoInfo(undefined, pushRemote) :
@@ -150,7 +143,8 @@ async function main(): Promise<void> {
     return info ? getForgeTokens(info) : [];
   })();
   const pingResultP: Promise<string | null> = (async () => {
-    const [info, toks] = await Promise.all([repoInfoP, tokensP]);
+    const toks = await tokensP;
+    const info = await repoInfoP;
     if (!info || !toks.length) return null;
     return pingForge(info, toks);
   })();
@@ -191,12 +185,7 @@ async function main(): Promise<void> {
   const mergeBaseOkP: Promise<boolean> = (async () => {
     const state = await remoteStateP;
     if (!state || !state.branch) return true;
-    try {
-      await exec("git", ["merge-base", "--is-ancestor", state.branch, "HEAD"]);
-      return true;
-    } catch {
-      return false;
-    }
+    return await tryExec("git", ["merge-base", "--is-ancestor", state.branch, "HEAD"]) !== null;
   })();
 
   const changelogInfo = (() => {
@@ -221,12 +210,12 @@ async function main(): Promise<void> {
   type FileChange = {path: string; oldData: string; newData: string; changed: boolean};
   const fileChanges: FileChange[] = [];
   for (const file of files) {
-    const [newData, oldData] = getFileChanges({file, baseVersion, newVersion, replacements, date});
-    if (newData === null) {
+    const changes = getFileChanges({file, baseVersion, newVersion, replacements, date});
+    if (!changes) {
       logVerbose(`skipping ${file} (unhandled lockfile)`);
       continue;
     }
-    fileChanges.push({path: file, oldData: oldData!, newData, changed: newData !== oldData});
+    fileChanges.push({path: file, ...changes, changed: changes.newData !== changes.oldData});
   }
 
   const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
@@ -278,20 +267,8 @@ async function main(): Promise<void> {
   // === EXECUTE === mutations only — every realistic failure mode was caught above.
   // preserve user's staged hunks on rollback (--soft would leave our changes staged)
   const [preIndexTreeOid, priorLocalTagOid] = willCommit ? await Promise.all([
-    (async () => {
-      try {
-        return (await exec("git", ["write-tree"])).stdout.trim();
-      } catch {
-        return null;
-      }
-    })(),
-    (async () => {
-      try {
-        return (await exec("git", ["rev-parse", "--verify", tagRef])).stdout.trim();
-      } catch {
-        return null;
-      }
-    })(),
+    tryExec("git", ["write-tree"]),
+    tryExec("git", ["rev-parse", "--verify", tagRef]),
   ]) : [null, null];
 
   // Pre-push rollback only — once the atomic push lands, we leave the remote alone.
@@ -340,27 +317,16 @@ async function main(): Promise<void> {
         return changelogInfo.entry;
       }
       let range = "";
-      let tagExists: boolean;
-      try {
-        await exec("git", ["rev-parse", "--verify", tagRef]);
-        tagExists = true;
-      } catch {
-        tagExists = false;
-      }
-      if (tagExists) {
+      if (priorLocalTagOid) { // the tag is created further down, so this still reflects a pre-existing one
         range = `${tagName}..HEAD`;
       } else if (describeTag) {
         range = `${describeTag}..HEAD`;
       }
-      try {
-        const logArgs = ["log"];
-        if (range) logArgs.push(range);
-        // https://git-scm.com/docs/pretty-formats
-        const {stdout} = await exec("git", [...logArgs, `--pretty=format:* %s (%aN)`]);
-        return stdout?.length ? stdout : undefined;
-      } catch {
-        return undefined;
-      }
+      const logArgs = ["log"];
+      if (range) logArgs.push(range);
+      // https://git-scm.com/docs/pretty-formats
+      const stdout = await tryExec("git", [...logArgs, `--pretty=format:* %s (%aN)`]);
+      return stdout?.length ? stdout : undefined;
     })();
     const commitMsg = joinStrings([tagName, ...msgs, changelogBody], "\n\n");
     const tagMsg = joinStrings([...msgs, changelogBody], "\n\n");
@@ -372,14 +338,7 @@ async function main(): Promise<void> {
 
     writeResult(await exec("git", commitArgs, {stdin: {string: commitMsg}}));
     rollbacks.push(async () => {
-      let hasParent: boolean;
-      try {
-        await exec("git", ["rev-parse", "HEAD^"]);
-        hasParent = true;
-      } catch {
-        hasParent = false;
-      }
-      if (hasParent) await exec("git", ["reset", "--soft", "HEAD^"]);
+      if (await tryExec("git", ["rev-parse", "HEAD^"]) !== null) await exec("git", ["reset", "--soft", "HEAD^"]);
       else await exec("git", ["update-ref", "-d", "HEAD"]);
       if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
     });

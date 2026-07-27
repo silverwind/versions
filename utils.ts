@@ -145,6 +145,17 @@ export function replaceJsonVersion(data: string, newVersion: string): string {
   return data;
 }
 
+// exec variant for probes where a nonzero exit is an expected answer, not an error.
+// Returns trimmed stdout, or null if the command failed. Note that success with no
+// output yields "", so callers must test against null, not falsiness.
+export async function tryExec(file: string, args: readonly string[], options?: ExecOptions): Promise<string | null> {
+  try {
+    return (await exec(file, args, options)).stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
 export function exec(file: string, args: readonly string[], options?: ExecOptions): Promise<Result> {
   if (verbose) logVerbose(`$ ${args.length ? `${file} ${args.map(quoteArg).join(" ")}` : file}`);
   return new Promise((resolve, reject) => {
