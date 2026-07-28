@@ -244,6 +244,55 @@ version = "3.0.0"
   expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 3.1.0");
 }));
 
+test("version files above the repo root are not used", () => withTmpDir(async (tmpDir) => {
+  const repoDir = join(tmpDir, "repo");
+  await mkdir(repoDir, {recursive: true});
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "outer", version: "42.0.0"}));
+  await writeFile(join(repoDir, "testfile.txt"), "version 0.0.0");
+  await initGitRepo(repoDir);
+
+  const {stderr} = await exec("node", [distPath, "-D", "-V", "patch", "testfile.txt"], {cwd: repoDir});
+
+  expect(stderr).toContain("base version 0.0.0 from default");
+  expect(stderr).not.toContain("42.0.0");
+}));
+
+test("version file at the repo root is still found from a subdirectory", () => withTmpDir(async (tmpDir) => {
+  const subDir = join(tmpDir, "sub");
+  await mkdir(subDir, {recursive: true});
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "5.0.0"}));
+  await initGitRepo(tmpDir);
+
+  const {stderr} = await exec("node", [distPath, "-D", "-V", "patch"], {cwd: subDir});
+
+  expect(stderr).toContain("base version 5.0.0 from package.json");
+}));
+
+test("warns only when a manifest disagrees with a detected base version", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "9.9.9"}));
+  const {env} = await setupReleaseRepo(tmpDir); // tags 1.0.0
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  expect((await exec("node", [distPath, "-D", "patch", "package.json"], opts)).stderr)
+    .toContain("warning: package.json declares 9.9.9 but the base version is 1.0.0");
+  // an explicit base is the user overriding detection, so a stale manifest says nothing
+  expect((await exec("node", [distPath, "-D", "--base=7.0.0", "patch", "package.json"], opts)).stderr).not.toContain("warning:");
+
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}));
+  expect((await exec("node", [distPath, "-D", "patch", "package.json"], opts)).stderr).not.toContain("warning:");
+}));
+
+test("empty --base is rejected rather than ignored", () => withTmpDir(async (tmpDir) => {
+  let output;
+  try {
+    await exec("node", [distPath, "--gitless", "--base=", "patch", "package.json"], {cwd: tmpDir});
+  } catch (err) {
+    output = (err as SubprocessError).output;
+  }
+
+  expect(output).toContain("Invalid base version");
+}));
+
 test("prerelease from stable version", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");

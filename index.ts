@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {
-  findUp, resolveBaseVersion, incrementSemver, replaceTokens, getFileChanges,
+  findUp, resolveBaseVersion, incrementSemver, replaceTokens, getFileChanges, readDeclaredVersion,
   readChangelogEntry, updateChangelogHeadingDate, removeIgnoredFiles, joinStrings,
   write, writeResult, getRepoInfo, getForgeTokens, forgeName, probeRemote,
   pingForge, createForgeRelease, type RepoInfo,
@@ -110,7 +110,9 @@ async function main(): Promise<void> {
 
   const pwd = cwd();
   const gitDir = findUp(".git", pwd);
-  const projectRoot = gitDir ? dirname(gitDir) : pwd;
+  // bound version-file lookup at the repo root so a stray parent manifest can't set the base
+  const repoRoot = gitDir ? dirname(gitDir) : undefined;
+  const projectRoot = repoRoot ?? pwd;
   const pushRemote = typeof args.remote === "string" ? args.remote : "origin";
 
   // dedupe after normalizing, so `foo` and `./foo` collapse to one entry
@@ -126,6 +128,7 @@ async function main(): Promise<void> {
     typeof args.base === "string" ? args.base : undefined,
     Boolean(args.gitless),
     projectRoot,
+    repoRoot,
   );
   const pushBranchP: Promise<string> = willPush ? (async () => {
     if (typeof args.branch === "string") return args.branch;
@@ -189,7 +192,7 @@ async function main(): Promise<void> {
   })();
 
   const changelogInfo = (() => {
-    const path = findUp("CHANGELOG.md", projectRoot);
+    const path = findUp("CHANGELOG.md", projectRoot, repoRoot);
     if (!path) return null;
     let original: string;
     try {
@@ -225,6 +228,20 @@ async function main(): Promise<void> {
     remoteStateP, repoInfoP, tokensP, identityOkP, pingResultP, mergeBaseOkP,
   ]);
 
+  // A manifest that disagrees with a detected base means the base is likely wrong. The file check
+  // below cannot see it: manifest rewrites set the new version outright rather than replacing the
+  // base string, so they always produce a diff.
+  const warnings: string[] = [];
+  if (baseSource !== "--base") { // an explicit base overrides detection on purpose
+    for (const f of fileChanges) {
+      const declared = readDeclaredVersion(f.path, f.oldData);
+      // only a warning, a deliberately out-of-sync manifest is a legitimate setup
+      if (declared && declared !== baseVersion) {
+        warnings.push(`${f.path} declares ${declared} but the base version is ${baseVersion} (from ${baseSource})`);
+      }
+    }
+  }
+
   const errors: string[] = [];
 
   // If files were specified (and not -a), at least one must produce a diff — otherwise
@@ -258,6 +275,8 @@ async function main(): Promise<void> {
       errors.push(`--release: forge unreachable or token rejected: ${pingResult}`);
     }
   }
+
+  for (const warning of warnings) console.error(`warning: ${warning}`);
 
   if (errors.length > 0) {
     for (const e of errors) console.error(`error: ${e}`);
