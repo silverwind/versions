@@ -74,18 +74,18 @@ export function findUp(filename: string, dir: string, stopDir?: string): string 
   }
 }
 
-function readVersionFile(filename: string, dir: string, parse: (content: string) => string | undefined): string | null {
-  const path = findUp(filename, dir);
+function readVersionFile(filename: string, dir: string, stopDir?: string): string | null {
+  const path = findUp(filename, dir, stopDir);
   if (!path) return null;
   try {
-    const v = parse(readFileSync(path, "utf8"));
-    if (v && isSemver(v)) return stripV(v);
-  } catch {}
-  return null;
+    return readDeclaredVersion(path, readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
-export function readVersionFromPackageJson(projectRoot: string): string | null {
-  return readVersionFile("package.json", projectRoot, content => JSON.parse(content).version);
+export function readVersionFromPackageJson(projectRoot: string, stopDir?: string): string | null {
+  return readVersionFile("package.json", projectRoot, stopDir);
 }
 
 function pyprojectGet(content: string, key: string): string | undefined {
@@ -96,14 +96,28 @@ function pyprojectGet(content: string, key: string): string | undefined {
   return undefined;
 }
 
-export function readVersionFromPyprojectToml(projectRoot: string): string | null {
-  return readVersionFile("pyproject.toml", projectRoot, content => pyprojectGet(content, "version"));
+export function readVersionFromPyprojectToml(projectRoot: string, stopDir?: string): string | null {
+  return readVersionFile("pyproject.toml", projectRoot, stopDir);
+}
+
+// The version a manifest declares about itself, from content already in hand.
+export function readDeclaredVersion(file: string, data: string): string | null {
+  const fileName = basename(file);
+  try {
+    const version = fileName === "package.json" ? JSON.parse(data).version :
+      fileName === "pyproject.toml" ? pyprojectGet(data, "version") :
+        undefined;
+    // JSON.parse yields `any`, and the semver regex would coerce e.g. ["1.2.3"]
+    return typeof version === "string" && isSemver(version) ? stripV(version) : null;
+  } catch {
+    return null;
+  }
 }
 
 type BaseVersion = {baseVersion: string, baseSource: string, describeTag: string};
 
-export async function resolveBaseVersion(base: string | undefined, gitless: boolean, projectRoot: string): Promise<BaseVersion> {
-  if (base) {
+export async function resolveBaseVersion(base: string | undefined, gitless: boolean, projectRoot: string, stopDir?: string): Promise<BaseVersion> {
+  if (base !== undefined) {
     if (!isSemver(base)) throw new Error(`Invalid base version: ${base}`);
     return {baseVersion: stripV(base), baseSource: "--base", describeTag: ""};
   }
@@ -120,10 +134,10 @@ export async function resolveBaseVersion(base: string | undefined, gitless: bool
     if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", describeTag};
   }
 
-  const pkgVer = readVersionFromPackageJson(projectRoot);
+  const pkgVer = readVersionFromPackageJson(projectRoot, stopDir);
   if (pkgVer) return {baseVersion: pkgVer, baseSource: "package.json", describeTag};
 
-  const pyVer = readVersionFromPyprojectToml(projectRoot);
+  const pyVer = readVersionFromPyprojectToml(projectRoot, stopDir);
   if (pyVer) return {baseVersion: pyVer, baseSource: "pyproject.toml", describeTag};
 
   if (!gitless) return {baseVersion: "0.0.0", baseSource: "default", describeTag};
