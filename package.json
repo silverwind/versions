@@ -22,7 +22,7 @@
   "files": [
     "dist"
   ],
-  "packageManager": "pnpm@11.17.0",
+  "packageManager": "pnpm@11.18.0",
   "engines": {
     "node": ">=22",
     "bun": "*"
@@ -38,7 +38,7 @@
     "tsdown-config-silverwind": "4.0.3",
     "typescript": "6.0.3",
     "typescript-config-silverwind": "20.0.3",
-    "updates": "17.19.1",
+    "updates": "17.20.1",
     "updates-config-silverwind": "4.0.4",
     "vitest": "4.1.10",
     "vitest-config-silverwind": "11.4.0"
