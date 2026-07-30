@@ -1307,6 +1307,53 @@ test("package-lock.json", () => withTmpDir(async (tmpDir) => {
   expect(result.packages["node_modules/dep"].version).toEqual("2.0.0");
 }));
 
+test("a packageManager pin carries the lockfile into the commit", () => withTmpDir(async (tmpDir) => {
+  const pkg = (version: string, dep: string) => `${JSON.stringify({
+    name: "test-pkg", version, packageManager: "pnpm@11.18.0", devDependencies: {timerel: dep},
+  }, null, 2)}\n`;
+  await writeFile(join(tmpDir, "package.json"), pkg("1.0.0", "5.8.7"));
+  await writeFile(join(tmpDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\ntimerel: 5.8.7\n");
+
+  const {env} = await setupReleaseRepo(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  await writeFile(join(tmpDir, "package.json"), pkg("1.0.0", "5.8.8"));
+  await writeFile(join(tmpDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\ntimerel: 5.8.8\n");
+
+  await exec("node", [distPath, "--no-push", "patch", "package.json"], opts);
+
+  const {stdout: committed} = await exec("git", ["show", "--name-only", "--format=", "HEAD"], opts);
+  expect(committed.trim().split("\n").filter(Boolean).sort()).toEqual(["package.json", "pnpm-lock.yaml"]);
+  const {stdout: status} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts);
+  expect(status.trim()).toEqual("");
+  expect(await readFile(join(tmpDir, "pnpm-lock.yaml"), "utf8")).toEqual("lockfileVersion: '9.0'\ntimerel: 5.8.8\n");
+}));
+
+test("a companion package-lock.json is bumped, not just committed", () => withTmpDir(async (tmpDir) => {
+  const pkg = (dep: string) => `${JSON.stringify({
+    name: "test-pkg", version: "1.0.0", packageManager: "npm@11.10.0", devDependencies: {timerel: dep},
+  }, null, 2)}\n`;
+  await writeFile(join(tmpDir, "package.json"), pkg("5.8.7"));
+  await writeFile(join(tmpDir, "package-lock.json"), `${JSON.stringify({
+    name: "test-pkg", version: "1.0.0", lockfileVersion: 3,
+    packages: {"": {name: "test-pkg", version: "1.0.0"}, "node_modules/timerel": {version: "5.8.7"}},
+  }, null, 2)}\n`);
+
+  const {env} = await setupReleaseRepo(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  await writeFile(join(tmpDir, "package.json"), pkg("5.8.8"));
+
+  await exec("node", [distPath, "--no-push", "patch", "package.json"], opts);
+
+  const lock = JSON.parse(await readFile(join(tmpDir, "package-lock.json"), "utf8"));
+  expect(lock.version).toEqual("1.0.1");
+  expect(lock.packages[""].version).toEqual("1.0.1");
+  expect(lock.packages["node_modules/timerel"].version).toEqual("5.8.7");
+  const {stdout: status} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts);
+  expect(status.trim()).toEqual("");
+}));
+
 test("go.sum is skipped", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "go.sum"), "content with 1.0.0");
   await exec("node", [distPath, "--gitless", "--base", "1.0.0", "patch", "go.sum"], {cwd: tmpDir});

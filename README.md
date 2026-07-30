@@ -42,6 +42,10 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
 ```
 
+## Lockfiles
+
+When a `package.json` passed as a file declares `packageManager` and changes, its lockfile joins the same commit. A `package-lock.json` gets the new version written to it, lockfiles that do not record the project's own version are committed untouched.
+
 ## Signing commits and tags
 
 To automatically sign commits and tags created by `versions` with GPG add this to your `~/.gitconfig`:

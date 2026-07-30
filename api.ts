@@ -114,6 +114,31 @@ export function readDeclaredVersion(file: string, data: string): string | null {
   }
 }
 
+const packageManagerLockfiles: Record<string, readonly string[]> = {
+  npm: ["package-lock.json"],
+  pnpm: ["pnpm-lock.yaml"],
+  yarn: ["yarn.lock"],
+  bun: ["bun.lock", "bun.lockb"],
+};
+
+// A packageManager pin binds the lockfile to the manifest, so both belong in the same commit.
+export function findCompanionLockfile(file: string): string | null {
+  if (basename(file) !== "package.json") return null;
+  let packageManager: unknown;
+  try {
+    packageManager = JSON.parse(readFileSync(file, "utf8")).packageManager;
+  } catch {
+    return null;
+  }
+  if (typeof packageManager !== "string") return null;
+  const dir = dirname(file);
+  for (const name of packageManagerLockfiles[packageManager.split("@")[0]] ?? []) {
+    const path = findUp(name, dir, dir); // stopDir === dir, so this only ever looks next to the manifest
+    if (path) return path;
+  }
+  return null;
+}
+
 type BaseVersion = {baseVersion: string, baseSource: string, describeTag: string};
 
 export async function resolveBaseVersion(base: string | undefined, gitless: boolean, projectRoot: string, stopDir?: string): Promise<BaseVersion> {

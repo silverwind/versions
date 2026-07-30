@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {
   findUp, resolveBaseVersion, incrementSemver, replaceTokens, getFileChanges, readDeclaredVersion,
+  findCompanionLockfile,
   readChangelogEntry, updateChangelogHeadingDate, removeIgnoredFiles, joinStrings,
   write, writeResult, getRepoInfo, getForgeTokens, forgeName, probeRemote,
   pingForge, createForgeRelease, type RepoInfo,
@@ -117,6 +118,16 @@ async function main(): Promise<void> {
 
   // dedupe after normalizing, so `foo` and `./foo` collapse to one entry
   files = Array.from(new Set(files.map(file => relative(pwd, file))));
+
+  // A lockfile joins its manifest in the commit, but must not stand in for one in the checks below.
+  const specifiedFiles = new Set(files);
+  files = Array.from(new Set(files.flatMap(file => {
+    const lockfile = findCompanionLockfile(file);
+    return lockfile ? [file, lockfile] : [file];
+  })));
+  for (const file of files) {
+    if (!specifiedFiles.has(file)) logVerbose(`including ${file}`);
+  }
 
   const wantRelease = Boolean(args.release);
   const willCommit = !args.gitless && !args.dry;
@@ -246,9 +257,9 @@ async function main(): Promise<void> {
 
   // If files were specified (and not -a), at least one must produce a diff — otherwise
   // git commit -i with unchanged files would fail "nothing to commit". Use the raw input
-  // count (`files`), not `fileChanges`, so a run that only specified unhandled lockfiles
+  // count (`specifiedFiles`), not `fileChanges`, so a run that only specified unhandled lockfiles
   // also aborts. Skipped in --gitless because nothing will commit anyway.
-  if (!args.gitless && files.length > 0 && !args.all && fileChanges.every(f => !f.changed)) {
+  if (!args.gitless && specifiedFiles.size > 0 && !args.all && fileChanges.every(f => !f.changed || !specifiedFiles.has(f.path))) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
   if (willCommit && !identityOk) {
