@@ -8,8 +8,10 @@
 To increment patch version of current project:
 
 ```bash
-npx versions patch
+npx versions patch package.json
 ```
+
+If files are given, at least one must contain the version. With no files, only a commit and tag are created.
 
 ## Options
 ```
@@ -36,9 +38,11 @@ usage: versions [options] patch|minor|major|prerelease [files...]
 
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
+  If files are given, at least one must contain the version.
+
   Examples:
-    $ versions patch
-    $ versions prerelease --preid=alpha
+    $ versions patch package.json
+    $ versions prerelease --preid=alpha package.json
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
 ```
 
@@ -93,7 +97,7 @@ For Gitea releases, provide an API token via one of these environment variables 
 Example:
 ```bash
 export GITHUB_TOKEN=ghp_your_token_here
-versions --release patch
+versions --release patch package.json
 ```
 
 ## CI environments

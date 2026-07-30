@@ -1274,6 +1274,34 @@ test("dry mode", () => withTmpDir(async (tmpDir) => {
   expect(gitless).not.toContain("Would create");
 }));
 
+test("--all no longer exempts named files that produce no diff", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "notes.txt"), "no version in here");
+  const {env} = await setupReleaseRepo(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  try {
+    await exec("node", [distPath, "--no-push", "--all", "--base", "1.0.0", "patch", "notes.txt"], opts);
+    throw new Error("should have thrown");
+  } catch (err: any) {
+    expect(err).toBeInstanceOf(SubprocessError);
+    expect(err.output).toContain("would not change any of the specified files");
+  }
+}));
+
+// a tag-only release, the flow used by repos whose version lives solely in the git tag
+test("no files still commits and tags", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "README.md"), "docs"); // the initial commit needs a file
+  const {env} = await setupReleaseRepo(tmpDir); // tags 1.0.0
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+
+  await exec("node", [distPath, "--no-push", "patch"], opts);
+
+  const {stdout: tags} = await exec("git", ["tag", "--list"], opts);
+  expect(tags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
+  const {stdout: log} = await exec("git", ["log", "--oneline"], opts);
+  expect(log.trim().split("\n")).toHaveLength(2);
+}));
+
 test("prefix", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");

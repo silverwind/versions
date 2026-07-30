@@ -88,9 +88,11 @@ async function main(): Promise<void> {
 
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
+  If files are given, at least one must contain the version.
+
   Examples:
-    $ versions patch
-    $ versions prerelease --preid=alpha
+    $ versions patch package.json
+    $ versions prerelease --preid=alpha package.json
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
     end();
   }
@@ -255,10 +257,9 @@ async function main(): Promise<void> {
 
   const errors: string[] = [];
 
-  // If files were specified (and not -a), at least one must produce a diff — otherwise
-  // git commit -i with unchanged files would fail "nothing to commit". A companion lockfile is
-  // not a bump. Skipped in --gitless because nothing will commit anyway.
-  if (!args.gitless && specifiedFiles.size > 0 && !args.all && fileChanges.every(f => !f.changed || !f.specified)) {
+  // Named files must produce a diff, or the base version is wrong. No files is a tag-only release,
+  // and a companion lockfile is not a bump. --gitless has no commit to be empty.
+  if (!args.gitless && specifiedFiles.size > 0 && fileChanges.every(f => !f.changed || !f.specified)) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
   if (willCommit && !identityOk) {
