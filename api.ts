@@ -121,7 +121,7 @@ const packageManagerLockfiles: Record<string, readonly string[]> = {
   bun: ["bun.lock", "bun.lockb"],
 };
 
-// A packageManager pin binds the lockfile to the manifest, so both belong in the same commit.
+// a packageManager pin binds the lockfile to the manifest, both belong in one commit
 export function findCompanionLockfile(file: string): string | null {
   if (basename(file) !== "package.json") return null;
   let packageManager: unknown;
@@ -133,7 +133,7 @@ export function findCompanionLockfile(file: string): string | null {
   if (typeof packageManager !== "string") return null;
   const dir = dirname(file);
   for (const name of packageManagerLockfiles[packageManager.split("@")[0]] ?? []) {
-    const path = findUp(name, dir, dir); // stopDir === dir, so this only ever looks next to the manifest
+    const path = findUp(name, dir, dir); // stopDir === dir: only look next to the manifest
     if (path) return path;
   }
   return null;

@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
-    -D, --dry             Do not create a tag or commit, just print what would be done
+    -D, --dry             Change nothing, just print what would be done
     -R, --release         Create a GitHub or Gitea release with the changelog as body
     -n, --no-push         Skip pushing commit and tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
@@ -118,16 +118,7 @@ async function main(): Promise<void> {
 
   // dedupe after normalizing, so `foo` and `./foo` collapse to one entry
   files = Array.from(new Set(files.map(file => relative(pwd, file))));
-
-  // A lockfile joins its manifest in the commit, but must not stand in for one in the checks below.
   const specifiedFiles = new Set(files);
-  files = Array.from(new Set(files.flatMap(file => {
-    const lockfile = findCompanionLockfile(file);
-    return lockfile ? [file, lockfile] : [file];
-  })));
-  for (const file of files) {
-    if (!specifiedFiles.has(file)) logVerbose(`including ${file}`);
-  }
 
   const wantRelease = Boolean(args.release);
   const willCommit = !args.gitless && !args.dry;
@@ -220,8 +211,16 @@ async function main(): Promise<void> {
   const changelogRel = changelogInfo ? relative(pwd, changelogInfo.path) : null;
   if (changelogRel) files = files.filter(file => file !== changelogRel);
 
+  // lockfiles join their manifest in the commit, but never count as a bumped file
+  files = Array.from(new Set(files.flatMap(file => {
+    const lockfile = findCompanionLockfile(file);
+    if (!lockfile) return [file];
+    logVerbose(`including ${lockfile}`);
+    return [file, lockfile];
+  })));
+
   // Compute file changes WITHOUT writing — pure dry-run of the replacement pipeline.
-  type FileChange = {path: string; oldData: string; newData: string; changed: boolean};
+  type FileChange = {path: string; oldData: string; newData: string; changed: boolean; specified: boolean};
   const fileChanges: FileChange[] = [];
   for (const file of files) {
     const changes = getFileChanges({file, baseVersion, newVersion, replacements, date});
@@ -229,7 +228,8 @@ async function main(): Promise<void> {
       logVerbose(`skipping ${file} (unhandled lockfile)`);
       continue;
     }
-    fileChanges.push({path: file, ...changes, changed: changes.newData !== changes.oldData});
+    const changed = changes.newData !== changes.oldData;
+    fileChanges.push({path: file, ...changes, changed, specified: specifiedFiles.has(file)});
   }
 
   const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
@@ -256,10 +256,9 @@ async function main(): Promise<void> {
   const errors: string[] = [];
 
   // If files were specified (and not -a), at least one must produce a diff — otherwise
-  // git commit -i with unchanged files would fail "nothing to commit". Use the raw input
-  // count (`specifiedFiles`), not `fileChanges`, so a run that only specified unhandled lockfiles
-  // also aborts. Skipped in --gitless because nothing will commit anyway.
-  if (!args.gitless && specifiedFiles.size > 0 && !args.all && fileChanges.every(f => !f.changed || !specifiedFiles.has(f.path))) {
+  // git commit -i with unchanged files would fail "nothing to commit". A companion lockfile is
+  // not a bump. Skipped in --gitless because nothing will commit anyway.
+  if (!args.gitless && specifiedFiles.size > 0 && !args.all && fileChanges.every(f => !f.changed || !f.specified)) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
   if (willCommit && !identityOk) {
@@ -294,6 +293,18 @@ async function main(): Promise<void> {
     exit(1);
   }
 
+  // one list of every write, so --dry can report without performing
+  const writes: Array<Pick<FileChange, "path" | "oldData" | "newData">> = fileChanges.filter(f => f.changed);
+  if (changelogInfo?.updated) {
+    writes.push({path: changelogRel!, oldData: changelogInfo.original, newData: changelogInfo.updated});
+  }
+
+  if (args.dry) {
+    for (const w of writes) console.info(`Would update ${w.path}`);
+    if (!args.gitless) console.info(`Would create new tag and commit: ${tagName}`);
+    return;
+  }
+
   // === EXECUTE === mutations only — every realistic failure mode was caught above.
   // preserve user's staged hunks on rollback (--soft would leave our changes staged)
   const [preIndexTreeOid, priorLocalTagOid] = willCommit ? await Promise.all([
@@ -311,16 +322,10 @@ async function main(): Promise<void> {
       for (const [path, content] of originals) write(path, content);
     });
 
-    for (const f of fileChanges) {
-      if (!f.changed) continue;
-      originals.set(f.path, f.oldData);
-      logVerbose(`writing ${f.path}`);
-      write(f.path, f.newData);
-    }
-    if (changelogInfo?.updated) {
-      originals.set(changelogInfo.path, changelogInfo.original);
-      logVerbose(`updating heading date in ${changelogInfo.path}`);
-      write(changelogInfo.path, changelogInfo.updated);
+    for (const w of writes) {
+      originals.set(w.path, w.oldData);
+      logVerbose(`writing ${w.path}`);
+      write(w.path, w.newData);
     }
 
     if (typeof args.command === "string") {
@@ -333,13 +338,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (args.dry) {
-      logVerbose("dry run — skipping commit and tag");
-      console.info(`Would create new tag and commit: ${tagName}`);
-      return;
-    }
-
-    // Commit-specific data — resolved here so dry/gitless paths skip the work entirely.
+    // Commit-specific data — resolved here so the gitless path skips the work entirely.
     const filesToAdd = !args.all && allFiles.length ? await removeIgnoredFiles(allFiles) : [];
     const changelogBody = await (async () => {
       if (changelogInfo) {

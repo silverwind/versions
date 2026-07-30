@@ -1260,8 +1260,18 @@ test("dry mode", () => withTmpDir(async (tmpDir) => {
   const {stdout} = await exec("node", [distPath, "--dry", "patch", "testfile.txt"], {
     cwd: tmpDir, env: {...process.env, ...env},
   });
+  expect(stdout).toContain("Would update testfile.txt");
   expect(stdout).toContain("Would create new tag and commit: 1.0.1");
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.0");
+  const {stdout: status} = await exec("git", ["status", "--porcelain"], {cwd: tmpDir, env: {...process.env, ...env}});
+  expect(status.trim()).toEqual("");
+
+  // --gitless creates neither, so promising them would be a lie
+  const {stdout: gitless} = await exec("node", [distPath, "--dry", "--gitless", "patch", "testfile.txt"], {
+    cwd: tmpDir, env: {...process.env, ...env},
+  });
+  expect(gitless).toContain("Would update testfile.txt");
+  expect(gitless).not.toContain("Would create");
 }));
 
 test("prefix", () => withTmpDir(async (tmpDir) => {

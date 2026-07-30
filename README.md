@@ -25,7 +25,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
-    -D, --dry             Do not create a tag or commit, just print what would be done
+    -D, --dry             Change nothing, just print what would be done
     -R, --release         Create a GitHub or Gitea release with the changelog as body
     -n, --no-push         Skip pushing commit and tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
@@ -44,7 +44,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
 
 ## Lockfiles
 
-When a `package.json` passed as a file declares `packageManager` and changes, its lockfile joins the same commit. A `package-lock.json` gets the new version written to it, lockfiles that do not record the project's own version are committed untouched.
+When a `package.json` with a `packageManager` pin changes, its lockfile joins the same commit. A `package-lock.json` also gets the new version, other lockfiles are committed untouched.
 
 ## Signing commits and tags
 
