@@ -7,7 +7,7 @@ import {
   joinStrings, findUp, getFileChanges, write,
   readVersionFromPackageJson, readVersionFromPyprojectToml,
   removeIgnoredFiles, getGithubTokens, getGiteaTokens,
-  getRepoInfo, writeResult, createForgeRelease, deleteForgeRelease,
+  getRepoInfo, writeResult, createForgeRelease, deleteForgeRelease, pingForge,
   readChangelogEntry, updateChangelogHeadingDate,
   type RepoInfo,
 } from "./api.ts";
@@ -749,6 +749,14 @@ describe("forge requests", {concurrent: false}, () => {
     ));
     const info: RepoInfo = {owner: "o", repo: "r", host: "example.com", type: "gitea"};
     await expect(deleteForgeRelease(info, 1, ["tok"])).rejects.toThrow("getaddrinfo ENOTFOUND example.com");
+  });
+
+  test("pingForge names a disabled gitea releases unit, except for repo admins who bypass it", async () => {
+    const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
+    mockForgePost(Response.json({has_releases: false, permissions: {push: true, admin: false}}, {status: 200}));
+    expect(await pingForge(info, ["tok"])).toEqual("the Releases unit is disabled on o/r; enable it in the repository settings");
+    mockForgePost(Response.json({has_releases: false, permissions: {push: true, admin: true}}, {status: 200}));
+    expect(await pingForge(info, ["tok"])).toBeNull();
   });
 });
 

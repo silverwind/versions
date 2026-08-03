@@ -283,7 +283,7 @@ async function main(): Promise<void> {
     } else if (!tokens.length) {
       errors.push(`--release: no ${forgeName(repoInfo)} token found in environment`);
     } else if (pingResult) {
-      errors.push(`--release: forge unreachable or token rejected: ${pingResult}`);
+      errors.push(`--release: ${pingResult}`);
     }
   }
 

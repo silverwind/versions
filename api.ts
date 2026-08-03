@@ -512,7 +512,7 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
       // lacks read access, to avoid leaking repo existence; treat it like 401/403 so
       // withTokens falls through to the next token.
       if (response.status === 404) {
-        throw new AuthRetryable(`${label}: 404 (token may lack access to ${repoInfo.owner}/${repoInfo.repo})`);
+        throw new AuthRetryable(`404 (token may lack access to ${repoInfo.owner}/${repoInfo.repo})`);
       }
       await ensureOk(response, label);
       // Both GitHub and Gitea return `permissions: {push, admin, pull, ...}` on authenticated
@@ -527,7 +527,13 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
       }
       const perms = body?.permissions;
       if (perms && perms.push !== true && perms.admin !== true) {
-        throw new AuthRetryable(`${label}: token lacks push permission on ${repoInfo.owner}/${repoInfo.repo}`);
+        throw new AuthRetryable(`token lacks push permission on ${repoInfo.owner}/${repoInfo.repo}`);
+      }
+      // Gitea 403s every /releases route when the repo's Releases unit is off, with a message
+      // that reads like a token problem. Repo admins bypass that check, so don't flag it for
+      // them. GitHub never sends the field.
+      if (body?.has_releases === false && perms?.admin !== true) {
+        throw new AuthRetryable(`the Releases unit is disabled on ${repoInfo.owner}/${repoInfo.repo}; enable it in the repository settings`);
       }
     });
     return null;
