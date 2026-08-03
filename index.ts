@@ -4,7 +4,7 @@ import {
   findCompanionLockfile,
   readChangelogEntry, updateChangelogHeadingDate, removeIgnoredFiles, joinStrings,
   write, writeResult, getRepoInfo, getForgeTokens, forgeName, probeRemote,
-  pingForge, createForgeRelease, type RepoInfo,
+  pingForge, createForgeRelease,
 } from "./api.ts";
 import {SubprocessError, exec, logVerbose, setVerbose, tryExec} from "./utils.ts";
 import {parseArgs} from "node:util";
@@ -16,7 +16,7 @@ import pkg from "./package.json" with {type: "json"};
 const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
 const commands = new Set(["patch", "minor", "major", "prerelease"]);
 
-function end(err?: Error | string | void): void {
+function end(err?: unknown): void {
   if (!err) return exit(0);
   const msg = err instanceof SubprocessError ? `${err.message}\n${err.output}` :
     err instanceof Error ? (err.stack || err.message).trim() :
@@ -134,26 +134,17 @@ async function main(): Promise<void> {
     projectRoot,
     repoRoot,
   );
-  const pushBranchP: Promise<string> = willPush ? (async () => {
+  const pushBranchP = willPush ? (async () => {
     if (typeof args.branch === "string") return args.branch;
     const {stdout} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
     return stdout.trim();
   })() : Promise.resolve("");
-  const identityOkP: Promise<boolean> = willCommit ?
-    (async () => await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)() :
-    Promise.resolve(true);
-  const repoInfoP: Promise<RepoInfo | null> = wantRelease && willCommit ?
-    getRepoInfo(undefined, pushRemote) :
-    Promise.resolve(null);
-  const tokensP: Promise<string[]> = (async () => {
-    const info = await repoInfoP;
-    return info ? getForgeTokens(info) : [];
-  })();
-  const pingResultP: Promise<string | null> = (async () => {
-    const toks = await tokensP;
-    const info = await repoInfoP;
-    if (!info || !toks.length) return null;
-    return pingForge(info, toks);
+  const identityOkP = (async () => !willCommit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
+  const forgeP = (async () => {
+    const repoInfo = wantRelease && willCommit ? await getRepoInfo(undefined, pushRemote) : null;
+    const tokens = repoInfo ? await getForgeTokens(repoInfo) : [];
+    const pingResult = repoInfo && tokens.length ? await pingForge(repoInfo, tokens) : null;
+    return {repoInfo, tokens, pingResult};
   })();
 
   // baseVersion + pushBranch unblock tagRef/branchRef computation; throw the two fatal
@@ -171,15 +162,13 @@ async function main(): Promise<void> {
   const newVersion = incrementSemver(baseVersion, level, typeof args.preid === "string" ? args.preid : undefined);
   logVerbose(`new version ${newVersion}`);
 
-  const replacements: Array<{re: RegExp, replacement: string}> = [];
-  for (const replaceStr of stringArgs(args.replace)) {
-    let [, re, replacement, flags] = (reReplaceString.exec(replaceStr) || []);
+  const replacements = stringArgs(args.replace).map(replaceStr => {
+    const [, re, replacement, flags] = reReplaceString.exec(replaceStr) || [];
     if (!re || !replacement) {
       throw new Error(`Invalid replace string: ${replaceStr}`);
     }
-    replacement = replaceTokens(replacement, newVersion);
-    replacements.push({re: new RegExp(re, flags || undefined), replacement});
-  }
+    return {re: new RegExp(re, flags), replacement: replaceTokens(replacement, newVersion)};
+  });
 
   const msgs = stringArgs(args.message).map(msg => replaceTokens(msg, newVersion));
   const tagName = args.prefix ? `v${newVersion}` : newVersion;
@@ -189,10 +178,9 @@ async function main(): Promise<void> {
   // probeRemote + the ancestor check are the second slow chain; kick them off now and
   // do the sync work below in the meantime.
   const remoteStateP = willPush ? probeRemote(pushRemote, branchRef, tagRef) : Promise.resolve(null);
-  const mergeBaseOkP: Promise<boolean> = (async () => {
+  const mergeBaseOkP = (async () => {
     const state = await remoteStateP;
-    if (!state || !state.branch) return true;
-    return await tryExec("git", ["merge-base", "--is-ancestor", state.branch, "HEAD"]) !== null;
+    return !state?.branch || await tryExec("git", ["merge-base", "--is-ancestor", state.branch, "HEAD"]) !== null;
   })();
 
   const changelogInfo = (() => {
@@ -234,23 +222,20 @@ async function main(): Promise<void> {
     fileChanges.push({path: file, ...changes, changed, specified: specifiedFiles.has(file)});
   }
 
-  const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
-
   // === VALIDATE === single await collects every probe; checks below are pure.
-  const [remoteState, repoInfo, tokens, identityOk, pingResult, mergeBaseOk] = await Promise.all([
-    remoteStateP, repoInfoP, tokensP, identityOkP, pingResultP, mergeBaseOkP,
+  const [remoteState, {repoInfo, tokens, pingResult}, identityOk, mergeBaseOk] = await Promise.all([
+    remoteStateP, forgeP, identityOkP, mergeBaseOkP,
   ]);
 
   // A manifest that disagrees with a detected base means the base is likely wrong. The file check
   // below cannot see it: manifest rewrites set the new version outright rather than replacing the
   // base string, so they always produce a diff.
-  const warnings: string[] = [];
   if (baseSource !== "--base") { // an explicit base overrides detection on purpose
     for (const f of fileChanges) {
       const declared = readDeclaredVersion(f.path, f.oldData);
       // only a warning, a deliberately out-of-sync manifest is a legitimate setup
       if (declared && declared !== baseVersion) {
-        warnings.push(`${f.path} declares ${declared} but the base version is ${baseVersion} (from ${baseSource})`);
+        console.error(`warning: ${f.path} declares ${declared} but the base version is ${baseVersion} (from ${baseSource})`);
       }
     }
   }
@@ -262,7 +247,7 @@ async function main(): Promise<void> {
   if (!args.gitless && specifiedFiles.size > 0 && fileChanges.every(f => !f.changed || !f.specified)) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
-  if (willCommit && !identityOk) {
+  if (!identityOk) {
     errors.push("git author identity unavailable; configure user.name + user.email or set GIT_AUTHOR_NAME + GIT_AUTHOR_EMAIL");
   }
   if (willPush) {
@@ -286,8 +271,6 @@ async function main(): Promise<void> {
       errors.push(`--release: ${pingResult}`);
     }
   }
-
-  for (const warning of warnings) console.error(`warning: ${warning}`);
 
   if (errors.length > 0) {
     for (const e of errors) console.error(`error: ${e}`);
@@ -318,19 +301,16 @@ async function main(): Promise<void> {
   let pushed = false;
 
   try {
-    const originals = new Map<string, string>();
     rollbacks.push(() => {
-      for (const [path, content] of originals) write(path, content);
+      for (const w of writes) write(w.path, w.oldData);
     });
 
     for (const w of writes) {
-      originals.set(w.path, w.oldData);
       logVerbose(`writing ${w.path}`);
       write(w.path, w.newData);
     }
 
     if (typeof args.command === "string") {
-      logVerbose(`running command: ${args.command}`);
       writeResult(await exec(args.command, [], {shell: true}));
     }
 
@@ -340,23 +320,18 @@ async function main(): Promise<void> {
     }
 
     // Commit-specific data — resolved here so the gitless path skips the work entirely.
+    const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
     const filesToAdd = !args.all && allFiles.length ? await removeIgnoredFiles(allFiles) : [];
     const changelogBody = await (async () => {
       if (changelogInfo) {
         logVerbose(`using changelog entry from ${changelogInfo.path}`);
         return changelogInfo.entry;
       }
-      let range = "";
-      if (priorLocalTagOid) { // the tag is created further down, so this still reflects a pre-existing one
-        range = `${tagName}..HEAD`;
-      } else if (describeTag) {
-        range = `${describeTag}..HEAD`;
-      }
-      const logArgs = ["log"];
-      if (range) logArgs.push(range);
+      // the tag is created further down, so priorLocalTagOid still reflects a pre-existing one
+      const since = priorLocalTagOid ? tagName : describeTag;
       // https://git-scm.com/docs/pretty-formats
-      const stdout = await tryExec("git", [...logArgs, `--pretty=format:* %s (%aN)`]);
-      return stdout?.length ? stdout : undefined;
+      const stdout = await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], `--pretty=format:* %s (%aN)`]);
+      return stdout || undefined;
     })();
     const commitMsg = joinStrings([tagName, ...msgs, changelogBody], "\n\n");
     const tagMsg = joinStrings([...msgs, changelogBody], "\n\n");
@@ -366,7 +341,7 @@ async function main(): Promise<void> {
         ["commit", "-i", "-F", "-", "--", ...filesToAdd] :
         ["commit", "--allow-empty", "-F", "-"];
 
-    writeResult(await exec("git", commitArgs, {stdin: {string: commitMsg}}));
+    writeResult(await exec("git", commitArgs, {stdin: commitMsg}));
     rollbacks.push(async () => {
       if (await tryExec("git", ["rev-parse", "HEAD^"]) !== null) await exec("git", ["reset", "--soft", "HEAD^"]);
       else await exec("git", ["update-ref", "-d", "HEAD"]);
@@ -374,10 +349,8 @@ async function main(): Promise<void> {
     });
 
     // adding explicit -a here seems to make git no longer sign the tag
-    writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: {string: tagMsg}}));
+    writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: tagMsg}));
     rollbacks.push(async () => {
-      // update-ref preserves the prior tag's type (annotated vs lightweight); `tag -f <oid>`
-      // would create a lightweight tag pointing at the prior tag-object OID.
       if (priorLocalTagOid) await exec("git", ["update-ref", tagRef, priorLocalTagOid]);
       else await exec("git", ["tag", "-d", tagName]);
     });
@@ -420,5 +393,5 @@ try {
   await main();
   end();
 } catch (err) {
-  end(err as Error);
+  end(err);
 }

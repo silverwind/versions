@@ -5,15 +5,17 @@ import {join} from "node:path";
 import {
   isSemver, incrementSemver, replaceTokens, esc,
   joinStrings, findUp, getFileChanges, write,
-  readVersionFromPackageJson, readVersionFromPyprojectToml,
+  readVersionFile,
   removeIgnoredFiles, getGithubTokens, getGiteaTokens,
-  getRepoInfo, writeResult, createForgeRelease, deleteForgeRelease, pingForge,
+  getRepoInfo, writeResult, createForgeRelease, pingForge,
   readChangelogEntry, updateChangelogHeadingDate,
   type RepoInfo,
 } from "./api.ts";
 import {exec, tomlGetString, SubprocessError} from "./utils.ts";
 
 const distPath = join(process.cwd(), "dist/index.js");
+const pkgJson = (version: string) => JSON.stringify({name: "test-pkg", version}, null, 2);
+const pep621 = (version: string) => `[project]\nname = "test-project"\nversion = "${version}"\n`;
 
 // bun's vitest-compat `vi` lacks stubGlobal/unstubAllGlobals, so fall back to manual restore.
 const stubbedGlobals = new Map<string, unknown>();
@@ -58,10 +60,13 @@ function getIsolatedGitEnv(tmpDir: string) {
   };
 }
 
-async function initGitRepo(tmpDir: string): Promise<void> {
+// returns the exec options every later git call in that repo needs
+async function initGitRepo(tmpDir: string) {
   const env = getIsolatedGitEnv(tmpDir);
+  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
   await mkdir(env.HOME, {recursive: true});
-  await exec("git", ["init", "-q"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["init", "-q"], opts);
+  return opts;
 }
 
 async function withTmpDir(fn: (tmpDir: string) => Promise<void>): Promise<void> {
@@ -75,19 +80,27 @@ async function withTmpDir(fn: (tmpDir: string) => Promise<void>): Promise<void> 
 
 // initial commit, fetch URL with local bare push, tag 1.0.0. Caller must have written
 // any tracked files into tmpDir before invocation since this stages everything via `git add .`.
-// Default fetchUrl uses a non-resolvable gitea host so --release tests fail at DNS lookup
-// without ever hitting the network. Tests that need specific forge semantics override fetchUrl.
-async function setupReleaseRepo(tmpDir: string, fetchUrl: string = "https://gitea.invalid/o/r.git"): Promise<{env: ReturnType<typeof getIsolatedGitEnv>, bareDir: string}> {
-  const env = getIsolatedGitEnv(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
-  const [, bareDir] = await Promise.all([initGitRepo(tmpDir), createBareRemote(tmpDir)]);
+// The fetch URL is a non-resolvable gitea host so --release tests fail at DNS lookup without
+// ever hitting the network, while pushes still reach the local bare repo via the push URL.
+async function setupReleaseRepo(tmpDir: string) {
+  const [opts, bareDir] = await Promise.all([initGitRepo(tmpDir), createBareRemote(tmpDir)]);
   await exec("git", ["add", "."], opts);
   await exec("git", ["commit", "-m", "Initial commit"], opts);
-  await exec("git", ["remote", "add", "origin", fetchUrl], opts);
+  await exec("git", ["remote", "add", "origin", "https://gitea.invalid/o/r.git"], opts);
   await exec("git", ["remote", "set-url", "--push", "origin", bareDir], opts);
   await exec("git", ["push", "origin", "master"], opts);
   await exec("git", ["tag", "1.0.0"], opts);
-  return {env, bareDir};
+  return {bareDir, opts};
+}
+
+async function runFail(args: string[], opts?: Parameters<typeof exec>[2]): Promise<SubprocessError> {
+  try {
+    await exec("node", [distPath, ...args], opts);
+  } catch (err) {
+    if (err instanceof SubprocessError) return err;
+    throw err;
+  }
+  throw new Error(`expected \`versions ${args.join(" ")}\` to fail`);
 }
 
 test("version", async () => {
@@ -141,14 +154,9 @@ test("versions", () => withTmpDir(async (tmpDir) => {
   await run(`--date --base ${version} --gitless major testfile`);
   version = await verify(incrementSemver(version, "major"));
 
-  await run(`--date --base ${version} --gitless major testfile`);
-  version = await verify(incrementSemver(version, "major"));
-
+  // a file named twice must dedupe to a single replacement pass
   await run(`--date --base ${version} --gitless major testfile testfile`);
   version = await verify(incrementSemver(version, "major"));
-
-  await run(`--date --base ${version} --gitless minor testfile`);
-  version = await verify(incrementSemver(version, "minor"));
 }));
 
 test("poetry", () => withTmpDir(async (tmpDir) => {
@@ -185,63 +193,19 @@ test("uv", () => withTmpDir(async (tmpDir) => {
   expect(lockMatch![1]).toEqual(versionAfter);
 }));
 
-test("fallback to package.json when no git tags exist", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.5.0"}, null, 2));
-  await writeFile(join(tmpDir, "testfile.txt"), "version 2.5.0");
+test.each([
+  {from: "package.json", files: {"package.json": pkgJson("2.5.0")}, level: "patch", before: "2.5.0", after: "2.5.1"},
+  {from: "pyproject.toml", files: {"pyproject.toml": pep621("3.2.1")}, level: "minor", before: "3.2.1", after: "3.3.0"},
+  {from: "poetry-style pyproject.toml", files: {"pyproject.toml": `[tool.poetry]\nname = "poetry-test"\nversion = "0.5.2"\n`}, level: "patch", before: "0.5.2", after: "0.5.3"},
+  {from: "package.json over pyproject.toml", files: {"package.json": pkgJson("1.0.0"), "pyproject.toml": pep621("2.0.0")}, level: "patch", before: "1.0.0", after: "1.0.1"},
+  {from: "pyproject.toml when package.json has invalid semver", files: {"package.json": pkgJson("invalid"), "pyproject.toml": pep621("3.0.0")}, level: "minor", before: "3.0.0", after: "3.1.0"},
+])("base version with no git tags comes from $from", ({files, level, before, after}) => withTmpDir(async (tmpDir) => {
+  for (const [name, content] of Object.entries(files)) await writeFile(join(tmpDir, name), content);
+  await writeFile(join(tmpDir, "testfile.txt"), `version ${before}`);
 
-  await exec("node", [distPath, "--gitless", "patch", "testfile.txt"], {cwd: tmpDir});
+  await exec("node", [distPath, "--gitless", level, "testfile.txt"], {cwd: tmpDir});
 
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.5.1");
-}));
-
-test("fallback to pyproject.toml when no git tags exist", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "pyproject.toml"), `[project]
-name = "test-project"
-version = "3.2.1"
-`);
-  await writeFile(join(tmpDir, "testfile.txt"), "version 3.2.1");
-
-  await exec("node", [distPath, "--gitless", "minor", "testfile.txt"], {cwd: tmpDir});
-
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 3.3.0");
-}));
-
-test("poetry-style pyproject.toml fallback", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "pyproject.toml"), `[tool.poetry]
-name = "poetry-test"
-version = "0.5.2"
-`);
-  await writeFile(join(tmpDir, "testfile.txt"), "version 0.5.2");
-
-  await exec("node", [distPath, "--gitless", "patch", "testfile.txt"], {cwd: tmpDir});
-
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 0.5.3");
-}));
-
-test("package.json takes precedence over pyproject.toml", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-  await writeFile(join(tmpDir, "pyproject.toml"), `[project]
-name = "test-project"
-version = "2.0.0"
-`);
-  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-
-  await exec("node", [distPath, "--gitless", "patch", "testfile.txt"], {cwd: tmpDir});
-
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1");
-}));
-
-test("fallback to pyproject.toml when package.json has invalid semver", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "invalid"}, null, 2));
-  await writeFile(join(tmpDir, "pyproject.toml"), `[project]
-name = "test-project"
-version = "3.0.0"
-`);
-  await writeFile(join(tmpDir, "testfile.txt"), "version 3.0.0");
-
-  await exec("node", [distPath, "--gitless", "minor", "testfile.txt"], {cwd: tmpDir});
-
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 3.1.0");
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual(`version ${after}`);
 }));
 
 test("version files above the repo root are not used", () => withTmpDir(async (tmpDir) => {
@@ -270,8 +234,7 @@ test("version file at the repo root is still found from a subdirectory", () => w
 
 test("warns only when a manifest disagrees with a detected base version", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "9.9.9"}));
-  const {env} = await setupReleaseRepo(tmpDir); // tags 1.0.0
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {opts} = await setupReleaseRepo(tmpDir); // tags 1.0.0
 
   expect((await exec("node", [distPath, "-D", "patch", "package.json"], opts)).stderr)
     .toContain("warning: package.json declares 9.9.9 but the base version is 1.0.0");
@@ -283,61 +246,18 @@ test("warns only when a manifest disagrees with a detected base version", () => 
 }));
 
 test("empty --base is rejected rather than ignored", () => withTmpDir(async (tmpDir) => {
-  let output;
-  try {
-    await exec("node", [distPath, "--gitless", "--base=", "patch", "package.json"], {cwd: tmpDir});
-  } catch (err) {
-    output = (err as SubprocessError).output;
-  }
-
-  expect(output).toContain("Invalid base version");
+  const err = await runFail(["--gitless", "--base=", "patch", "package.json"], {cwd: tmpDir});
+  expect(err.output).toContain("Invalid base version");
 }));
 
-test("prerelease from stable version", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-
-  await exec("node", [distPath, "--gitless", "--preid=alpha", "prerelease", "testfile.txt"], {cwd: tmpDir});
-
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-alpha.0");
-}));
-
-test("prerelease increment with same preid", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.1-beta.0"}, null, 2));
-  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.1-beta.0");
-
-  await exec("node", [distPath, "--gitless", "--preid=beta", "prerelease", "testfile.txt"], {cwd: tmpDir});
-
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1-beta.1");
-}));
-
-test("prerelease with different preid", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.0.0-alpha.5"}, null, 2));
-  await writeFile(join(tmpDir, "testfile.txt"), "version 2.0.0-alpha.5");
-
-  await exec("node", [distPath, "--gitless", "--preid=rc", "prerelease", "testfile.txt"], {cwd: tmpDir});
-
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 2.0.0-rc.0");
-}));
-
-test("prerelease without preid fails", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-
-  let error;
-  try {
-    await exec("node", [distPath, "--gitless", "prerelease", "testfile.txt"], {cwd: tmpDir});
-  } catch (err) {
-    error = err;
-  }
-
-  expect(error).toBeDefined();
-}));
+test("prerelease without preid fails", async () => {
+  expect((await runFail(["--gitless", "prerelease", "testfile.txt"])).output).toContain("prerelease requires --preid option");
+});
 
 // level + --preid pass-through is unit-tested in `incrementSemver prerelease`; one CLI smoke test
 // is enough to prove the flag wires through.
 test("patch with preid creates prerelease", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
   await exec("node", [distPath, "--gitless", "--preid=alpha", "patch", "testfile.txt"], {cwd: tmpDir});
@@ -346,7 +266,7 @@ test("patch with preid creates prerelease", () => withTmpDir(async (tmpDir) => {
 }));
 
 test("patch with preid on prerelease version strips old prerelease", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0-alpha.5"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0-alpha.5"));
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0-alpha.5");
 
   await exec("node", [distPath, "--gitless", "--preid=beta", "patch", "testfile.txt"], {cwd: tmpDir});
@@ -355,7 +275,7 @@ test("patch with preid on prerelease version strips old prerelease", () => withT
 }));
 
 test("package.json with non-matching base version", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
 
   await exec("node", [distPath, "--gitless", "--base", "8.16.3", "patch", "package.json"], {cwd: tmpDir});
 
@@ -364,10 +284,7 @@ test("package.json with non-matching base version", () => withTmpDir(async (tmpD
 }));
 
 test("pyproject.toml with non-matching base version", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "pyproject.toml"), `[project]
-name = "test-project"
-version = "2.0.0"
-`);
+  await writeFile(join(tmpDir, "pyproject.toml"), pep621("2.0.0"));
 
   await exec("node", [distPath, "--gitless", "--base", "5.3.1", "minor", "pyproject.toml"], {cwd: tmpDir});
 
@@ -376,7 +293,7 @@ version = "2.0.0"
 }));
 
 test("lockfiles are not corrupted by version replacement", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "2.3.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("2.3.0"));
 
   const lockContent = `lockfileVersion: '9.0'
 
@@ -481,8 +398,8 @@ function authOf(init: RequestInit | undefined) {
   return (init?.headers as Record<string, string> | undefined)?.Authorization;
 }
 
-function mockForgePost(create: Response | (() => Response)) {
-  const mock = vi.fn(() => Promise.resolve(typeof create === "function" ? create() : create));
+function mockForgePost(create: Response) {
+  const mock = vi.fn(() => Promise.resolve(create));
   stubGlobal("fetch", mock);
   return mock;
 }
@@ -505,13 +422,14 @@ function mockForgeConflictThenSuccess(conflictStatus: number, drafts: Array<{id:
   return mock;
 }
 
+const githubInfo: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
+const giteaInfo: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
+
 // these stub globalThis.fetch; running them concurrently lets one test's stub leak into another
 describe("forge requests", {concurrent: false}, () => {
   test("createForgeRelease github success skips cleanup on happy path", async () => {
     const mock = mockForgePost(Response.json({id: 4242, html_url: "https://github.com/o/r/releases/tag/1.0.1"}, {status: 201}));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    const created = await createForgeRelease(info, "1.0.1", "changelog", ["gh-token"]);
-    expect(created).toEqual({id: 4242, html_url: "https://github.com/o/r/releases/tag/1.0.1"});
+    await createForgeRelease(githubInfo, "1.0.1", "changelog", ["gh-token"]);
     expect(mock).toHaveBeenCalledOnce();
     const [url, init] = postCall(mock);
     expect(url).toEqual("https://api.github.com/repos/o/r/releases");
@@ -524,16 +442,9 @@ describe("forge requests", {concurrent: false}, () => {
     expect(body.prerelease).toEqual(false);
   });
 
-  test("createForgeRelease returns null when response has no numeric id", async () => {
-    mockForgePost(Response.json({html_url: "https://github.com/o/r/releases/tag/1.0.0"}, {status: 201}));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    expect(await createForgeRelease(info, "1.0.0", "body", ["tok"])).toBeNull();
-  });
-
   test("createForgeRelease gitea success skips cleanup on happy path", async () => {
     const mock = mockForgePost(Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/2.0.0"}, {status: 201}));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
-    await createForgeRelease(info, "2.0.0", "notes", ["gitea-tok"]);
+    await createForgeRelease(giteaInfo, "2.0.0", "notes", ["gitea-tok"]);
     expect(mock).toHaveBeenCalledOnce();
     const [url, init] = postCall(mock);
     expect(url).toEqual("https://gitea.example.com/api/v1/repos/o/r/releases");
@@ -542,8 +453,7 @@ describe("forge requests", {concurrent: false}, () => {
 
   test("createForgeRelease prerelease tag", async () => {
     const mock = mockForgePost(Response.json({}, {status: 201}));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await createForgeRelease(info, "1.0.0-beta.1", "body", ["tok"]);
+    await createForgeRelease(githubInfo, "1.0.0-beta.1", "body", ["tok"]);
     expect(JSON.parse(postCall(mock)[1]!.body as string).prerelease).toEqual(true);
   });
 
@@ -552,35 +462,25 @@ describe("forge requests", {concurrent: false}, () => {
       .mockResolvedValueOnce(new Response(text, {status}))
       .mockImplementation(() => Promise.resolve(Response.json({html_url: "https://github.com/o/r/releases/tag/1.0.0"}, {status: 201})));
     stubGlobal("fetch", mock);
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await createForgeRelease(info, "1.0.0", "body", ["bad-token", "good-token"]);
+    await createForgeRelease(githubInfo, "1.0.0", "body", ["bad-token", "good-token"]);
     expect(mock).toHaveBeenCalledTimes(2);
   });
 
   test("createForgeRelease throws on non-conflict, non-auth error", async () => {
     stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Server error", {status: 500, statusText: "Internal Server Error"}))));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await expect(createForgeRelease(info, "1.0.0", "body", ["tok"])).rejects.toThrow("500");
+    await expect(createForgeRelease(githubInfo, "1.0.0", "body", ["tok"])).rejects.toThrow("500");
   });
 
   test("createForgeRelease throws when all tokens fail", async () => {
     stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Unauthorized", {status: 401, statusText: "Unauthorized"}))));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await expect(createForgeRelease(info, "1.0.0", "body", ["tok1", "tok2"])).rejects.toThrow("401");
+    await expect(createForgeRelease(githubInfo, "1.0.0", "body", ["tok1", "tok2"])).rejects.toThrow("401");
   });
 
   test("createForgeRelease network error includes cause", async () => {
     stubGlobal("fetch", vi.fn().mockRejectedValue(
       new TypeError("fetch failed", {cause: new Error("getaddrinfo ENOTFOUND example.com")}),
     ));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "example.com", type: "gitea"};
-    await expect(createForgeRelease(info, "1.0.0", "body", ["tok"])).rejects.toThrow("getaddrinfo ENOTFOUND example.com");
-  });
-
-  test("createForgeRelease no html_url in response", async () => {
-    mockForgePost(Response.json({id: 1}, {status: 201}));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await createForgeRelease(info, "1.0.0", "body", ["tok"]);
+    await expect(createForgeRelease(giteaInfo, "1.0.0", "body", ["tok"])).rejects.toThrow("getaddrinfo ENOTFOUND example.com");
   });
 
   test("createForgeRelease cleans up draft on gitea 409 then retries", async () => {
@@ -593,8 +493,7 @@ describe("forge requests", {concurrent: false}, () => {
       ],
       Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/v1.2.3"}, {status: 201}),
     );
-    const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
-    await createForgeRelease(info, "v1.2.3", "notes", ["tok"]);
+    await createForgeRelease(giteaInfo, "v1.2.3", "notes", ["tok"]);
 
     const calls = getCalls(mock);
     const methods = calls.map(([, init]) => init?.method ?? "GET");
@@ -603,27 +502,13 @@ describe("forge requests", {concurrent: false}, () => {
     expect(deleteCall[0]).toEqual("https://gitea.example.com/api/v1/repos/o/r/releases/35141");
   });
 
-  test("createForgeRelease cleans up draft on gitea 422 then retries", async () => {
-    const mock = mockForgeConflictThenSuccess(
-      422,
-      [{id: 7, tag_name: "v9.9.9", draft: true}],
-      Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/v9.9.9"}, {status: 201}),
-    );
-    const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
-    await createForgeRelease(info, "v9.9.9", "body", ["tok"]);
-
-    const methods = getCalls(mock).map(([, init]) => init?.method ?? "GET");
-    expect(methods).toEqual(["POST", "GET", "DELETE", "POST"]);
-  });
-
   test("createForgeRelease cleans up draft on github 422 then retries", async () => {
     const mock = mockForgeConflictThenSuccess(
       422,
       [{id: 99, tag_name: "v1.0.0", draft: true}],
       Response.json({html_url: "https://github.com/o/r/releases/tag/v1.0.0"}, {status: 201}),
     );
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await createForgeRelease(info, "v1.0.0", "body", ["tok"]);
+    await createForgeRelease(githubInfo, "v1.0.0", "body", ["tok"]);
 
     const calls = getCalls(mock);
     const deleteCall = calls.find(([, init]) => init?.method === "DELETE")!;
@@ -639,8 +524,7 @@ describe("forge requests", {concurrent: false}, () => {
       throw new Error(`unexpected method ${method}`);
     });
     stubGlobal("fetch", mock);
-    const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
-    await expect(createForgeRelease(info, "v1.0.0", "body", ["tok"])).rejects.toThrow("409");
+    await expect(createForgeRelease(giteaInfo, "v1.0.0", "body", ["tok"])).rejects.toThrow("409");
     const methods = getCalls(mock).map(([, init]) => init?.method ?? "GET");
     expect(methods).toEqual(["POST", "GET"]);
   });
@@ -654,8 +538,7 @@ describe("forge requests", {concurrent: false}, () => {
       ],
       Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/v1.0.0"}, {status: 201}),
     );
-    const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
-    await createForgeRelease(info, "v1.0.0", "body", ["tok"]);
+    await createForgeRelease(giteaInfo, "v1.0.0", "body", ["tok"]);
 
     const deleteCalls = getCalls(mock).filter(([, init]) => init?.method === "DELETE");
     expect(deleteCalls).toHaveLength(2);
@@ -675,8 +558,7 @@ describe("forge requests", {concurrent: false}, () => {
       throw new Error(`unexpected method ${method}`);
     });
     stubGlobal("fetch", mock);
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await createForgeRelease(info, "v1.0.0", "body", ["tok"]);
+    await createForgeRelease(githubInfo, "v1.0.0", "body", ["tok"]);
     const methods = getCalls(mock).map(([, init]) => init?.method ?? "GET");
     expect(methods).toEqual(["POST", "GET", "DELETE", "POST"]);
   });
@@ -689,184 +571,104 @@ describe("forge requests", {concurrent: false}, () => {
       if (method === "DELETE") return Promise.resolve(new Response("server error", {status: 500, statusText: "Internal Server Error"}));
       throw new Error(`unexpected method ${method}`);
     }));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await expect(createForgeRelease(info, "v1.0.0", "body", ["tok"])).rejects.toThrow("Failed to delete draft release 5");
-  });
-
-  test("deleteForgeRelease github DELETEs by id", async () => {
-    const mock = vi.fn(() => Promise.resolve(new Response(null, {status: 204})));
-    stubGlobal("fetch", mock);
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await deleteForgeRelease(info, 4242, ["gh-tok"]);
-    expect(mock).toHaveBeenCalledOnce();
-    const [url, init] = mock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toEqual("https://api.github.com/repos/o/r/releases/4242");
-    expect(init.method).toEqual("DELETE");
-    expect(authOf(init)).toEqual("Bearer gh-tok");
-  });
-
-  test("deleteForgeRelease gitea DELETEs by id", async () => {
-    const mock = vi.fn(() => Promise.resolve(new Response(null, {status: 204})));
-    stubGlobal("fetch", mock);
-    const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
-    await deleteForgeRelease(info, 35141, ["gitea-tok"]);
-    const [url, init] = mock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toEqual("https://gitea.example.com/api/v1/repos/o/r/releases/35141");
-    expect(authOf(init)).toEqual("token gitea-tok");
-  });
-
-  test("deleteForgeRelease tolerates 404", async () => {
-    stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("not found", {status: 404}))));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await deleteForgeRelease(info, 1, ["tok"]);
-  });
-
-  test("deleteForgeRelease falls back across tokens on 401", async () => {
-    const mock = vi.fn()
-      .mockResolvedValueOnce(new Response("auth", {status: 401, statusText: "Unauthorized"}))
-      .mockResolvedValueOnce(new Response(null, {status: 204}));
-    stubGlobal("fetch", mock);
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await deleteForgeRelease(info, 7, ["bad", "good"]);
-    expect(mock).toHaveBeenCalledTimes(2);
-  });
-
-  test("deleteForgeRelease throws on non-auth error", async () => {
-    stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("server", {status: 500, statusText: "Internal Server Error"}))));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await expect(deleteForgeRelease(info, 1, ["tok"])).rejects.toThrow("500");
-  });
-
-  test("deleteForgeRelease throws when all tokens fail", async () => {
-    stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("auth", {status: 401, statusText: "Unauthorized"}))));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "github.com", type: "github"};
-    await expect(deleteForgeRelease(info, 1, ["a", "b"])).rejects.toThrow("401");
-  });
-
-  test("deleteForgeRelease network error includes cause", async () => {
-    stubGlobal("fetch", vi.fn().mockRejectedValue(
-      new TypeError("fetch failed", {cause: new Error("getaddrinfo ENOTFOUND example.com")}),
-    ));
-    const info: RepoInfo = {owner: "o", repo: "r", host: "example.com", type: "gitea"};
-    await expect(deleteForgeRelease(info, 1, ["tok"])).rejects.toThrow("getaddrinfo ENOTFOUND example.com");
+    await expect(createForgeRelease(githubInfo, "v1.0.0", "body", ["tok"])).rejects.toThrow("Failed to delete draft release 5");
   });
 
   test("pingForge names a disabled gitea releases unit, except for repo admins who bypass it", async () => {
-    const info: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", type: "gitea"};
     mockForgePost(Response.json({has_releases: false, permissions: {push: true, admin: false}}, {status: 200}));
-    expect(await pingForge(info, ["tok"])).toEqual("the Releases unit is disabled on o/r; enable it in the repository settings");
+    expect(await pingForge(giteaInfo, ["tok"])).toEqual("the Releases unit is disabled on o/r; enable it in the repository settings");
     mockForgePost(Response.json({has_releases: false, permissions: {push: true, admin: true}}, {status: 200}));
-    expect(await pingForge(info, ["tok"])).toBeNull();
+    expect(await pingForge(giteaInfo, ["tok"])).toBeNull();
   });
 });
 
 test("release rejects detached HEAD", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-  const {env} = await setupReleaseRepo(tmpDir);
-  await exec("git", ["checkout", "--detach"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
+  const {opts} = await setupReleaseRepo(tmpDir);
+  await exec("git", ["checkout", "--detach"], opts);
 
-  try {
-    await exec("node", [distPath, "--release", "patch", "package.json"], {
-      cwd: tmpDir,
-      env: {...process.env, GITEA_TOKEN: "tok", ...env},
-    });
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-    expect(err.exitCode).toEqual(1);
-  }
+  const err = await runFail(["--release", "patch", "package.json"], {
+    ...opts, env: {...opts.env, GITEA_TOKEN: "tok"},
+  });
+  expect(err.exitCode).toEqual(1);
 }));
 
-test("--gitless and --release are mutually exclusive", async () => {
-  try {
-    await exec("node", [distPath, "--gitless", "--release", "--base", "1.0.0", "patch"]);
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-    expect(err.exitCode).toEqual(1);
-  }
+test.each(["--gitless", "--no-push"])("%s and --release are mutually exclusive", async (flag) => {
+  const err = await runFail([flag, "--release", "--base", "1.0.0", "patch"]);
+  expect(err.exitCode).toEqual(1);
+  expect(err.output).toContain(`${flag} and --release are mutually exclusive`);
 });
 
-test("rollback - forge failure reverts local + remote", () => withTmpDir(async (tmpDir) => {
-  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+// Both triggers abort in validate, before any write, commit, tag or push. One repo, two runs.
+test("validate aborts before any mutation", () => withTmpDir(async (tmpDir) => {
+  const pkgContent = pkgJson("1.0.0");
   await writeFile(join(tmpDir, "package.json"), pkgContent);
 
-  const {env, bareDir} = await setupReleaseRepo(tmpDir, "https://gitea.invalid/owner/repo.git");
+  const {bareDir, opts} = await setupReleaseRepo(tmpDir);
+  const tokenOpts = {...opts, env: {...opts.env, GITEA_TOKEN: "fake-token"}};
+  const {stdout: preHead} = await exec("git", ["rev-parse", "HEAD"], opts);
 
-  const {stdout: preLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
-  const {stdout: preRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
+  const expectUntouched = async () => {
+    expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
+    expect((await exec("git", ["rev-parse", "HEAD"], opts)).stdout).toEqual(preHead);
+    expect((await exec("git", ["tag", "--list"], opts)).stdout).not.toContain("1.0.1");
+    expect((await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts)).stdout.trim()).toEqual("");
+    expect((await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir})).stdout).toEqual(preHead);
+  };
 
-  // gitea.invalid doesn't resolve → forge fails → rollback runs
-  try {
-    await exec("node", [distPath, "--release", "patch", "package.json"], {
-      cwd: tmpDir,
-      env: {...process.env, GITEA_TOKEN: "fake-token", ...env},
-    });
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-    expect(err.exitCode).toEqual(1);
-  }
+  // gitea.invalid does not resolve, so the forge ping fails
+  expect((await runFail(["--release", "patch", "package.json"], tokenOpts)).output).toContain("--release: forge ping");
+  await expectUntouched();
 
-  const {stdout: localTags} = await exec("git", ["tag", "--list"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(localTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
-  const {stdout: postLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(postLocalHead.trim()).toEqual(preLocalHead.trim());
-  expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
-  const {stdout: localStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(localStatus.trim()).toEqual("");
-
-  const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
-  expect(remoteTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
-  const {stdout: postRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
-  expect(postRemoteHead.trim()).toEqual(preRemoteHead.trim());
+  await exec("git", ["tag", "1.0.1", preHead.trim()], {cwd: bareDir});
+  expect((await runFail(["patch", "package.json"], opts)).output).toContain("tag 1.0.1 already exists on remote origin");
+  await expectUntouched();
 }));
 
-test("rollback - push failure reverts local commit, tag, and file", () => withTmpDir(async (tmpDir) => {
-  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+test("rollback - push failure restores commit, prior annotated tag, and the user's index", () => withTmpDir(async (tmpDir) => {
+  const pkgContent = pkgJson("1.0.0");
   await writeFile(join(tmpDir, "package.json"), pkgContent);
+  await writeFile(join(tmpDir, "tracked.txt"), "base\n");
 
-  const {env, bareDir} = await setupReleaseRepo(tmpDir);
+  const {bareDir, opts} = await setupReleaseRepo(tmpDir);
+  // server-side rejection: validate passes and the push itself fails, so EXECUTE has to roll back
+  await writeFile(join(bareDir, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n", {mode: 0o755});
 
-  // pre-create tag 1.0.1 on bare remote pointing to a different commit so push fails
-  const {stdout: oldRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
-  await exec("git", ["tag", "1.0.1", oldRemoteHead.trim()], {cwd: bareDir});
+  // --base pins the bump at the pre-existing ANNOTATED tag, which rollback must restore, not delete
+  await exec("git", ["tag", "-a", "1.0.1", "-m", "annotated"], opts);
+  // partial staged hunk (index sits between HEAD and worktree) plus a staged addition: a bare
+  // --soft reset would leave the committed package.json bump staged on top of them
+  await writeFile(join(tmpDir, "tracked.txt"), "base\nstaged hunk\n");
+  await exec("git", ["add", "tracked.txt"], opts);
+  await writeFile(join(tmpDir, "tracked.txt"), "base\nstaged hunk\nworktree only\n");
+  await writeFile(join(tmpDir, "new.txt"), "new content\n");
+  await exec("git", ["add", "new.txt"], opts);
 
-  const {stdout: preLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: preHead} = await exec("git", ["rev-parse", "HEAD"], opts);
+  const {stdout: preTag} = await exec("git", ["rev-parse", "refs/tags/1.0.1"], opts);
+  const {stdout: preStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts);
+  const {stdout: preStaged} = await exec("git", ["diff", "--cached"], opts);
+  const preTracked = await readFile(join(tmpDir, "tracked.txt"), "utf8");
 
-  try {
-    await exec("node", [distPath, "--release", "patch", "package.json"], {
-      cwd: tmpDir,
-      env: {...process.env, GITEA_TOKEN: "tok", ...env},
-    });
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-    expect(err.exitCode).toEqual(1);
-  }
+  expect((await runFail(["--base", "1.0.0", "patch", "package.json"], opts)).output).toContain("pre-receive hook declined");
 
-  // local tag was never created
-  const {stdout: localTags} = await exec("git", ["tag", "--list"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(localTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
-  // commit was reset
-  const {stdout: postLocalHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(postLocalHead.trim()).toEqual(preLocalHead.trim());
-  // file restored
+  expect((await exec("git", ["rev-parse", "HEAD"], opts)).stdout).toEqual(preHead);
+  expect((await exec("git", ["rev-parse", "refs/tags/1.0.1"], opts)).stdout).toEqual(preTag);
+  expect((await exec("git", ["cat-file", "-t", "refs/tags/1.0.1"], opts)).stdout.trim()).toEqual("tag");
+  expect((await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts)).stdout).toEqual(preStatus);
+  expect((await exec("git", ["diff", "--cached"], opts)).stdout).toEqual(preStaged);
+  expect(await readFile(join(tmpDir, "tracked.txt"), "utf8")).toEqual(preTracked);
   expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
-  // working tree + index clean
-  const {stdout: status} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(status.trim()).toEqual("");
 }));
 
 test("validate - aborts when remote branch has advanced beyond local", () => withTmpDir(async (tmpDir) => {
   // Regression: a prior failed run left orphan tags because remote master had advanced
   // (locally invisible without fetch) and the next run pushed only the tag while branch
   // push was rejected. Validate now catches this before any commit/tag.
-  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+  const pkgContent = pkgJson("1.0.0");
   await writeFile(join(tmpDir, "package.json"), pkgContent);
 
-  const {env, bareDir} = await setupReleaseRepo(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {bareDir, opts} = await setupReleaseRepo(tmpDir);
 
   // Simulate "someone else pushed to origin/master": advance remote HEAD without
   // updating the local tracking ref. Local repo is now behind without knowing it.
@@ -882,14 +684,9 @@ test("validate - aborts when remote branch has advanced beyond local", () => wit
   const {stdout: preRemoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
   const {stdout: preTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
 
-  try {
-    await exec("node", [distPath, "patch", "package.json"], opts);
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-    expect(err.exitCode).toEqual(1);
-    expect(err.output).toMatch(/not a descendant/);
-  }
+  const err = await runFail(["patch", "package.json"], opts);
+  expect(err.exitCode).toEqual(1);
+  expect(err.output).toMatch(/not a descendant/);
 
   // No mutation must have happened — neither locally nor on the remote.
   expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
@@ -906,12 +703,7 @@ test("validate - aborts when remote branch has advanced beyond local", () => wit
 test("rollback - -c failure restores file writes (gitless)", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
 
-  try {
-    await exec("node", [distPath, "--gitless", "--base", "1.0.0", "-c", "exit 1", "patch", "testfile.txt"], {cwd: tmpDir});
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-  }
+  await runFail(["--gitless", "--base", "1.0.0", "-c", "exit 1", "patch", "testfile.txt"], {cwd: tmpDir});
 
   expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.0");
 }));
@@ -920,178 +712,41 @@ test("rollback - -c failure restores multiple file writes", () => withTmpDir(asy
   await writeFile(join(tmpDir, "a.txt"), "v 1.0.0 a");
   await writeFile(join(tmpDir, "b.txt"), "v 1.0.0 b");
 
-  try {
-    await exec("node", [distPath, "--gitless", "--base", "1.0.0", "-c", "exit 1", "patch", "a.txt", "b.txt"], {cwd: tmpDir});
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-  }
+  await runFail(["--gitless", "--base", "1.0.0", "-c", "exit 1", "patch", "a.txt", "b.txt"], {cwd: tmpDir});
 
   expect(await readFile(join(tmpDir, "a.txt"), "utf8")).toEqual("v 1.0.0 a");
   expect(await readFile(join(tmpDir, "b.txt"), "utf8")).toEqual("v 1.0.0 b");
 }));
 
 test("rollback - -c failure leaves no commit or tag in git mode", () => withTmpDir(async (tmpDir) => {
-  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
+  const pkgContent = pkgJson("1.0.0");
   await writeFile(join(tmpDir, "package.json"), pkgContent);
 
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const opts = await initGitRepo(tmpDir);
+  await exec("git", ["add", "."], opts);
+  await exec("git", ["commit", "-m", "Initial commit"], opts);
+  await exec("git", ["tag", "1.0.0"], opts);
 
-  const {stdout: preHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: preHead} = await exec("git", ["rev-parse", "HEAD"], opts);
 
-  try {
-    await exec("node", [distPath, "--no-push", "-c", "exit 1", "patch", "package.json"], {
-      cwd: tmpDir, env: {...process.env, ...env},
-    });
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-  }
+  await runFail(["--no-push", "-c", "exit 1", "patch", "package.json"], opts);
 
   expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
   // -c runs before commit/tag, so neither should exist
-  const {stdout: tags} = await exec("git", ["tag", "--list"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: tags} = await exec("git", ["tag", "--list"], opts);
   expect(tags.trim().split("\n").filter(Boolean)).toEqual(["1.0.0"]);
-  const {stdout: postHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: postHead} = await exec("git", ["rev-parse", "HEAD"], opts);
   expect(postHead.trim()).toEqual(preHead.trim());
 }));
 
-test("rollback - prior local tag is restored to its original target", () => withTmpDir(async (tmpDir) => {
-  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
-  await writeFile(join(tmpDir, "package.json"), pkgContent);
-
-  const {env} = await setupReleaseRepo(tmpDir);
-
-  // pre-existing local tag 1.0.1 at the initial commit
-  const {stdout: initialOid} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.1"], {cwd: tmpDir, env: {...process.env, ...env}});
-  const priorTagOid = initialOid.trim();
-
-  // forge release fails after push, triggering rollback that must restore (not delete) the prior tag
-  try {
-    await exec("node", [distPath, "--release", "patch", "package.json"], {
-      cwd: tmpDir,
-      env: {...process.env, GITEA_TOKEN: "fake-token", ...env},
-    });
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-  }
-
-  const {stdout: postTagOid} = await exec("git", ["rev-parse", "refs/tags/1.0.1"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(postTagOid.trim()).toEqual(priorTagOid);
-}));
-
-test("rollback - prior annotated tag stays annotated after restore", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-
-  const {env} = await setupReleaseRepo(tmpDir);
-
-  // pre-existing ANNOTATED tag 1.0.1 — `tag -f <oid>` would silently downgrade to lightweight on rollback
-  await exec("git", ["tag", "-a", "1.0.1", "-m", "annotated"], {cwd: tmpDir, env: {...process.env, ...env}});
-  const {stdout: priorType} = await exec("git", ["cat-file", "-t", "refs/tags/1.0.1"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(priorType.trim()).toEqual("tag");
-
-  try {
-    await exec("node", [distPath, "--release", "patch", "package.json"], {
-      cwd: tmpDir,
-      env: {...process.env, GITEA_TOKEN: "fake-token", ...env},
-    });
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-  }
-
-  const {stdout: postType} = await exec("git", ["cat-file", "-t", "refs/tags/1.0.1"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(postType.trim()).toEqual("tag");
-}));
-
-test("rollback - user's pre-existing staged hunks survive", () => withTmpDir(async (tmpDir) => {
-  const pkgContent = JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2);
-  await writeFile(join(tmpDir, "package.json"), pkgContent);
-  await writeFile(join(tmpDir, "other.txt"), "before");
-
-  const {env} = await setupReleaseRepo(tmpDir);
-
-  // user has pre-staged a hunk on an unrelated file
-  await writeFile(join(tmpDir, "other.txt"), "user staged change");
-  await exec("git", ["add", "other.txt"], {cwd: tmpDir, env: {...process.env, ...env}});
-  const {stdout: preStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(preStatus.trim()).toEqual("M  other.txt");
-
-  try {
-    await exec("node", [distPath, "--release", "patch", "package.json"], {
-      cwd: tmpDir,
-      env: {...process.env, GITEA_TOKEN: "fake-token", ...env},
-    });
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-  }
-
-  // after rollback: other.txt is still staged with the user's change, package.json untouched
-  const {stdout: postStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], {cwd: tmpDir, env: {...process.env, ...env}});
-  expect(postStatus.trim()).toEqual("M  other.txt");
-  expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
-}));
-
-test("rollback - partial staged hunks and staged additions survive byte-for-byte", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
-  await writeFile(join(tmpDir, "tracked.txt"), "base\n");
-
-  const {env} = await setupReleaseRepo(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
-
-  // partial staged hunk: index has "base + staged hunk", working tree has more on top.
-  // a plain --soft reset would leave our committed package.json bump in the index here too,
-  // overwriting the staged hunk with a 1.0.1 entry; only read-tree restores it byte-for-byte.
-  await writeFile(join(tmpDir, "tracked.txt"), "base\nstaged hunk\n");
-  await exec("git", ["add", "tracked.txt"], opts);
-  await writeFile(join(tmpDir, "tracked.txt"), "base\nstaged hunk\nworktree only\n");
-
-  // staged addition: a brand new file the user staged (`A  new.txt`)
-  await writeFile(join(tmpDir, "new.txt"), "new content\n");
-  await exec("git", ["add", "new.txt"], opts);
-
-  const {stdout: preStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts);
-  const {stdout: preStaged} = await exec("git", ["diff", "--cached"], opts);
-  const preTracked = await readFile(join(tmpDir, "tracked.txt"), "utf8");
-
-  try {
-    await exec("node", [distPath, "--release", "patch", "package.json"], {
-      ...opts, env: {...opts.env, GITEA_TOKEN: "fake-token"},
-    });
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-  }
-
-  const {stdout: postStatus} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts);
-  expect(postStatus).toEqual(preStatus);
-  const {stdout: postStaged} = await exec("git", ["diff", "--cached"], opts);
-  expect(postStaged).toEqual(preStaged);
-  expect(await readFile(join(tmpDir, "tracked.txt"), "utf8")).toEqual(preTracked);
-}));
-
 test("default push - pushes commit and tag without --release", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
 
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
-  const bareDir = await createBareRemote(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "add", "origin", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["push", "origin", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {bareDir, opts} = await setupReleaseRepo(tmpDir);
 
-  await exec("node", [distPath, "patch", "package.json"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("node", [distPath, "patch", "package.json"], opts);
 
-  const {stdout: localHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: localHead} = await exec("git", ["rev-parse", "HEAD"], opts);
   const {stdout: remoteHead} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
   expect(remoteHead.trim()).toEqual(localHead.trim());
   const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
@@ -1099,20 +754,13 @@ test("default push - pushes commit and tag without --release", () => withTmpDir(
 }));
 
 test("--no-push skips push", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
 
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
-  const bareDir = await createBareRemote(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "add", "origin", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["push", "origin", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {bareDir, opts} = await setupReleaseRepo(tmpDir);
 
   const {stdout: remoteHeadBefore} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
 
-  await exec("node", [distPath, "--no-push", "patch", "package.json"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("node", [distPath, "--no-push", "patch", "package.json"], opts);
 
   const {stdout: remoteHeadAfter} = await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir});
   expect(remoteHeadAfter.trim()).toEqual(remoteHeadBefore.trim());
@@ -1120,62 +768,43 @@ test("--no-push skips push", () => withTmpDir(async (tmpDir) => {
   expect(remoteTags.trim().split("\n").filter(Boolean)).not.toContain("1.0.1");
 }));
 
-test("--no-push and --release are mutually exclusive", async () => {
-  try {
-    await exec("node", [distPath, "--no-push", "--release", "--base", "1.0.0", "patch"]);
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-    expect(err.exitCode).toEqual(1);
-  }
-});
-
 test("--remote pushes to custom remote", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
 
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
+  const opts = await initGitRepo(tmpDir);
   const bareDir = await createBareRemote(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "add", "upstream", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["push", "upstream", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["add", "."], opts);
+  await exec("git", ["commit", "-m", "Initial commit"], opts);
+  await exec("git", ["remote", "add", "upstream", bareDir], opts);
+  await exec("git", ["push", "upstream", "master"], opts);
+  await exec("git", ["tag", "1.0.0"], opts);
 
-  await exec("node", [distPath, "--remote", "upstream", "patch", "package.json"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("node", [distPath, "--remote", "upstream", "patch", "package.json"], opts);
 
   const {stdout: remoteTags} = await exec("git", ["tag", "--list"], {cwd: bareDir});
   expect(remoteTags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
 }));
 
 test("--remote with --release uses that remote for forge detection", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
 
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
+  const opts = await initGitRepo(tmpDir);
   const bareDir = await createBareRemote(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["add", "."], opts);
+  await exec("git", ["commit", "-m", "Initial commit"], opts);
   // origin has no forge URL, upstream points at a gitea host — release must follow --remote
-  await exec("git", ["remote", "add", "origin", "file:///nowhere"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "add", "upstream", "https://gitea.invalid/owner/repo.git"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "set-url", "--push", "upstream", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["push", "upstream", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["remote", "add", "origin", "file:///nowhere"], opts);
+  await exec("git", ["remote", "add", "upstream", "https://gitea.invalid/owner/repo.git"], opts);
+  await exec("git", ["remote", "set-url", "--push", "upstream", bareDir], opts);
+  await exec("git", ["push", "upstream", "master"], opts);
+  await exec("git", ["tag", "1.0.0"], opts);
 
   // forge call to gitea.invalid fails at DNS; the error proves the upstream URL was used.
   // If --remote was ignored, getRepoInfo would return null for file:/// and the error would
   // be "Could not determine repository type" instead.
-  let err: any;
-  try {
-    await exec("node", [distPath, "--remote", "upstream", "--release", "patch", "package.json"], {
-      cwd: tmpDir,
-      env: {...process.env, GITEA_TOKEN: "fake-token", ...env},
-    });
-  } catch (caught: any) {
-    err = caught;
-  }
-  expect(err).toBeInstanceOf(SubprocessError);
+  const err = await runFail(["--remote", "upstream", "--release", "patch", "package.json"], {
+    ...opts, env: {...opts.env, GITEA_TOKEN: "fake-token"},
+  });
   expect(err.exitCode).toEqual(1);
   // The forge ping during validate hits the upstream host; if --remote were ignored,
   // getRepoInfo would have returned null for file:/// and the error would be "could not
@@ -1185,19 +814,12 @@ test("--remote with --release uses that remote for forge detection", () => withT
 }));
 
 test("--branch pushes specified branch", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
 
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
-  const bareDir = await createBareRemote(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "Initial commit"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["remote", "add", "origin", bareDir], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["push", "origin", "master"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["tag", "1.0.0"], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["checkout", "-b", "release"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {bareDir, opts} = await setupReleaseRepo(tmpDir);
+  await exec("git", ["checkout", "-b", "release"], opts);
 
-  await exec("node", [distPath, "--branch", "release", "patch", "package.json"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("node", [distPath, "--branch", "release", "patch", "package.json"], opts);
 
   const {stdout: remoteBranches} = await exec("git", ["branch", "--list"], {cwd: bareDir});
   expect(remoteBranches).toContain("release");
@@ -1246,61 +868,46 @@ test("findUp", () => withTmpDir(async (tmpDir) => {
   expect(findUp("nonexistent.txt", subDir, tmpDir)).toBeNull();
 }));
 
-test("help", async () => {
-  const {stdout} = await exec("node", [distPath, "--help"]);
+// no level hits the first operand of the `!commands.has(level) || args.help` guard, --help on a
+// valid level hits the second
+test.each([[[]], [["patch", "--help"]]])("prints help for %j", async (args) => {
+  const {stdout} = await exec("node", [distPath, ...args]);
   expect(stdout).toContain("usage: versions");
   expect(stdout).toContain("--replace");
-});
-
-test("no args prints help", async () => {
-  const {stdout} = await exec("node", [distPath]);
-  expect(stdout).toContain("usage: versions");
 });
 
 test("dry mode", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "init"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const opts = await initGitRepo(tmpDir);
+  await exec("git", ["add", "."], opts);
+  await exec("git", ["commit", "-m", "init"], opts);
 
-  const {stdout} = await exec("node", [distPath, "--dry", "patch", "testfile.txt"], {
-    cwd: tmpDir, env: {...process.env, ...env},
-  });
+  const {stdout} = await exec("node", [distPath, "--dry", "patch", "testfile.txt"], opts);
   expect(stdout).toContain("Would update testfile.txt");
   expect(stdout).toContain("Would create new tag and commit: 1.0.1");
   expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.0");
-  const {stdout: status} = await exec("git", ["status", "--porcelain"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const {stdout: status} = await exec("git", ["status", "--porcelain"], opts);
   expect(status.trim()).toEqual("");
 
   // --gitless creates neither, so promising them would be a lie
-  const {stdout: gitless} = await exec("node", [distPath, "--dry", "--gitless", "patch", "testfile.txt"], {
-    cwd: tmpDir, env: {...process.env, ...env},
-  });
+  const {stdout: gitless} = await exec("node", [distPath, "--dry", "--gitless", "patch", "testfile.txt"], opts);
   expect(gitless).toContain("Would update testfile.txt");
   expect(gitless).not.toContain("Would create");
 }));
 
 test("--all no longer exempts named files that produce no diff", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "notes.txt"), "no version in here");
-  const {env} = await setupReleaseRepo(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {opts} = await setupReleaseRepo(tmpDir);
 
-  try {
-    await exec("node", [distPath, "--no-push", "--all", "--base", "1.0.0", "patch", "notes.txt"], opts);
-    throw new Error("should have thrown");
-  } catch (err: any) {
-    expect(err).toBeInstanceOf(SubprocessError);
-    expect(err.output).toContain("would not change any of the specified files");
-  }
+  const err = await runFail(["--no-push", "--all", "--base", "1.0.0", "patch", "notes.txt"], opts);
+  expect(err.output).toContain("would not change any of the specified files");
 }));
 
 // a tag-only release, the flow used by repos whose version lives solely in the git tag
 test("no files still commits and tags", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "README.md"), "docs"); // the initial commit needs a file
-  const {env} = await setupReleaseRepo(tmpDir); // tags 1.0.0
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {opts} = await setupReleaseRepo(tmpDir); // tags 1.0.0
 
   await exec("node", [distPath, "--no-push", "patch"], opts);
 
@@ -1313,14 +920,11 @@ test("no files still commits and tags", () => withTmpDir(async (tmpDir) => {
 test("prefix", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "init"], {cwd: tmpDir, env: {...process.env, ...env}});
+  const opts = await initGitRepo(tmpDir);
+  await exec("git", ["add", "."], opts);
+  await exec("git", ["commit", "-m", "init"], opts);
 
-  const {stdout} = await exec("node", [distPath, "--dry", "--prefix", "patch", "testfile.txt"], {
-    cwd: tmpDir, env: {...process.env, ...env},
-  });
+  const {stdout} = await exec("node", [distPath, "--dry", "--prefix", "patch", "testfile.txt"], opts);
   expect(stdout).toContain("Would create new tag and commit: v1.0.1");
 }));
 
@@ -1360,8 +964,7 @@ test("a packageManager pin carries the lockfile into the commit", () => withTmpD
   await writeFile(join(tmpDir, "package.json"), pkg("1.0.0", "5.8.7"));
   await writeFile(join(tmpDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\ntimerel: 5.8.7\n");
 
-  const {env} = await setupReleaseRepo(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {opts} = await setupReleaseRepo(tmpDir);
 
   await writeFile(join(tmpDir, "package.json"), pkg("1.0.0", "5.8.8"));
   await writeFile(join(tmpDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\ntimerel: 5.8.8\n");
@@ -1385,8 +988,7 @@ test("a companion package-lock.json is bumped, not just committed", () => withTm
     packages: {"": {name: "test-pkg", version: "1.0.0"}, "node_modules/timerel": {version: "5.8.7"}},
   }, null, 2)}\n`);
 
-  const {env} = await setupReleaseRepo(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {opts} = await setupReleaseRepo(tmpDir);
 
   await writeFile(join(tmpDir, "package.json"), pkg("5.8.8"));
 
@@ -1447,10 +1049,9 @@ test("incrementSemver unknown level throws", () => {
 });
 
 test("--message tokens are substituted in commit and tag", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
 
-  const {env} = await setupReleaseRepo(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {opts} = await setupReleaseRepo(tmpDir);
 
   await exec("node", [distPath, "--no-push", "-m", "Release _VER_", "patch", "package.json"], opts);
 
@@ -1463,11 +1064,10 @@ test("--message tokens are substituted in commit and tag", () => withTmpDir(asyn
 }));
 
 test("CHANGELOG.md drives commit body and gets dated heading", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
   await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## [1.0.1]\n- Fixed thing X\n- Added thing Y\n\n## 1.0.0\nold stuff\n`);
 
-  const {env} = await setupReleaseRepo(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {opts} = await setupReleaseRepo(tmpDir);
 
   await exec("node", [distPath, "--no-push", "patch", "package.json"], opts);
 
@@ -1483,11 +1083,10 @@ test("CHANGELOG.md drives commit body and gets dated heading", () => withTmpDir(
 }));
 
 test("CHANGELOG.md without entry falls back to git log", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
   await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## 1.0.0\nold\n`);
 
-  const {env} = await setupReleaseRepo(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {opts} = await setupReleaseRepo(tmpDir);
 
   // commit between the tag and HEAD so the git log fallback has something to report
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0", changed: true}, null, 2));
@@ -1503,12 +1102,11 @@ test("CHANGELOG.md without entry falls back to git log", () => withTmpDir(async 
 }));
 
 test("CHANGELOG.md with existing date is left alone", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}, null, 2));
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
   const original = `# Changelog\n\n## [1.0.1] - 2024-01-15\n- existing entry\n`;
   await writeFile(join(tmpDir, "CHANGELOG.md"), original);
 
-  const {env} = await setupReleaseRepo(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
+  const {opts} = await setupReleaseRepo(tmpDir);
 
   await exec("node", [distPath, "--no-push", "patch", "package.json"], opts);
 
@@ -1518,54 +1116,36 @@ test("CHANGELOG.md with existing date is left alone", () => withTmpDir(async (tm
   expect(msg).toContain("- existing entry");
 }));
 
-test("readVersionFromPackageJson", () => withTmpDir(async (tmpDir) => {
+test("readVersionFile package.json", () => withTmpDir(async (tmpDir) => {
+  expect(readVersionFile("package.json", tmpDir)).toBeNull();
+
+  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test"}, null, 2));
+  expect(readVersionFile("package.json", tmpDir)).toBeNull();
+
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "3.2.1"}, null, 2));
-  expect(readVersionFromPackageJson(tmpDir)).toEqual("3.2.1");
+  expect(readVersionFile("package.json", tmpDir)).toEqual("3.2.1");
 
   const subDir = join(tmpDir, "sub");
   await mkdir(subDir);
-  expect(readVersionFromPackageJson(subDir)).toEqual("3.2.1");
+  expect(readVersionFile("package.json", subDir)).toEqual("3.2.1");
 }));
 
-test("readVersionFromPackageJson returns null", () => withTmpDir(async (tmpDir) => {
-  expect(readVersionFromPackageJson(tmpDir)).toBeNull();
+test("readVersionFile pyproject.toml", () => withTmpDir(async (tmpDir) => {
+  const file = join(tmpDir, "pyproject.toml");
 
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test"}, null, 2));
-  expect(readVersionFromPackageJson(tmpDir)).toBeNull();
+  await writeFile(file, `[project]\nname = "test"\n`);
+  expect(readVersionFile("pyproject.toml", tmpDir)).toBeNull();
+
+  await writeFile(file, `[project]\nname = "test"\nversion = "1.5.0"\n`);
+  expect(readVersionFile("pyproject.toml", tmpDir)).toEqual("1.5.0");
+
+  await writeFile(file, `[tool.poetry]\nname = "test"\nversion = "2.0.0"\n`);
+  expect(readVersionFile("pyproject.toml", tmpDir)).toEqual("2.0.0");
 }));
 
-test("readVersionFromPyprojectToml", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "pyproject.toml"), `[project]\nname = "test"\nversion = "1.5.0"\n`);
-  expect(readVersionFromPyprojectToml(tmpDir)).toEqual("1.5.0");
-}));
-
-test("readVersionFromPyprojectToml poetry", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "pyproject.toml"), `[tool.poetry]\nname = "test"\nversion = "2.0.0"\n`);
-  expect(readVersionFromPyprojectToml(tmpDir)).toEqual("2.0.0");
-}));
-
-test("readVersionFromPyprojectToml returns null", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "pyproject.toml"), `[project]\nname = "test"\n`);
-  expect(readVersionFromPyprojectToml(tmpDir)).toBeNull();
-}));
-
-test("getFileChanges package.json", () => withTmpDir(async (tmpDir) => {
+test.each([undefined, 2])("getFileChanges package.json with indent %s leaves nested version fields alone", (indent) => withTmpDir(async (tmpDir) => {
   const file = join(tmpDir, "package.json");
-  await writeFile(file, JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
-  const content = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1"})?.newData;
-  expect(JSON.parse(content!).version).toEqual("1.0.1");
-}));
-
-test("getFileChanges minified package.json", () => withTmpDir(async (tmpDir) => {
-  const file = join(tmpDir, "package.json");
-  await writeFile(file, JSON.stringify({name: "test", version: "1.0.0"}));
-  const content = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.0.1"})?.newData;
-  expect(JSON.parse(content!).version).toEqual("1.0.1");
-}));
-
-test("getFileChanges minified package.json leaves nested version fields alone", () => withTmpDir(async (tmpDir) => {
-  const file = join(tmpDir, "package.json");
-  await writeFile(file, JSON.stringify({name: "foo", overrides: {"some-pkg": {version: "1.0.0"}}, version: "1.0.0"}));
+  await writeFile(file, JSON.stringify({name: "foo", overrides: {"some-pkg": {version: "1.0.0"}}, version: "1.0.0"}, null, indent));
   const content = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"})?.newData;
   const parsed = JSON.parse(content!);
   expect(parsed.version).toEqual("2.0.0");
@@ -1587,19 +1167,6 @@ test("getFileChanges pyproject.toml", () => withTmpDir(async (tmpDir) => {
   await writeFile(file, `[project]\nname = "test"\nversion = "1.0.0"\n`);
   const content = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.1.0"})?.newData;
   expect(content).toContain(`version = "1.1.0"`);
-}));
-
-test("getFileChanges package.json leaves nested version fields alone", () => withTmpDir(async (tmpDir) => {
-  const file = join(tmpDir, "package.json");
-  await writeFile(file, JSON.stringify({
-    name: "foo",
-    overrides: {"some-pkg": {version: "1.0.0"}},
-    version: "1.0.0",
-  }, null, 2));
-  const content = getFileChanges({file, baseVersion: "1.0.0", newVersion: "2.0.0"})?.newData;
-  const parsed = JSON.parse(content!);
-  expect(parsed.version).toEqual("2.0.0");
-  expect(parsed.overrides["some-pkg"].version).toEqual("1.0.0");
 }));
 
 test("getFileChanges pyproject.toml leaves unrelated section version alone", () => withTmpDir(async (tmpDir) => {
@@ -1694,13 +1261,12 @@ test("getRepoInfo returns null without git", () => withTmpDir(async (tmpDir) => 
 }));
 
 test("removeIgnoredFiles", () => withTmpDir(async (tmpDir) => {
-  await initGitRepo(tmpDir);
-  const env = getIsolatedGitEnv(tmpDir);
+  const opts = await initGitRepo(tmpDir);
   await writeFile(join(tmpDir, ".gitignore"), "ignored.txt\n");
   await writeFile(join(tmpDir, "kept.txt"), "");
   await writeFile(join(tmpDir, "ignored.txt"), "");
-  await exec("git", ["add", "."], {cwd: tmpDir, env: {...process.env, ...env}});
-  await exec("git", ["commit", "-m", "init"], {cwd: tmpDir, env: {...process.env, ...env}});
+  await exec("git", ["add", "."], opts);
+  await exec("git", ["commit", "-m", "init"], opts);
 
   const result = await removeIgnoredFiles(["kept.txt", "ignored.txt"], tmpDir);
   expect(result).toEqual(["kept.txt"]);

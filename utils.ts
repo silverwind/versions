@@ -1,6 +1,4 @@
 import {execFile as execFileCb} from "node:child_process";
-import {stderr} from "node:process";
-import {styleText} from "node:util";
 
 export type Result = {stdout: string; stderr: string};
 
@@ -10,20 +8,14 @@ export function setVerbose(value: boolean): void {
   verbose = value;
 }
 
-const pad = (value: number, len = 2) => String(value).padStart(len, "0");
-
 function timestamp(): string {
   const date = new Date();
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 23).replace("T", " ");
 }
 
 export function logVerbose(message: string): void {
   if (!verbose) return;
   console.error(`${timestamp()} ${message}`);
-}
-
-export function colorize(text: string, color: "magenta" | "green" | "red"): string {
-  return styleText(color, text, {stream: stderr});
 }
 
 function quoteArg(arg: string): string {
@@ -48,7 +40,7 @@ export class SubprocessError extends Error {
 
 type ExecOptions = {
   shell?: boolean;
-  stdin?: {string: string};
+  stdin?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
 };
@@ -81,10 +73,8 @@ export function tomlGetString(content: string, section: string, key: string): st
   const keyRe = new RegExp(`^${key}\\s*=\\s*["']([^"']+)["']`);
   let value: string | undefined;
   visitTomlSection(content, [section], line => {
-    const m = keyRe.exec(line.trim());
-    if (!m) return false;
-    value = m[1];
-    return true;
+    value = keyRe.exec(line.trim())?.[1];
+    return value !== undefined;
   });
   return value;
 }
@@ -166,8 +156,8 @@ export function exec(file: string, args: readonly string[], options?: ExecOption
         resolve({stdout: stdout.trimEnd(), stderr: stderr.trimEnd()});
       }
     });
-    if (options?.stdin) {
-      child.stdin!.end(options.stdin.string);
+    if (options?.stdin !== undefined) {
+      child.stdin!.end(options.stdin);
     }
   });
 }

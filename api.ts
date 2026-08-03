@@ -1,20 +1,18 @@
 import {
-  type Result, colorize, detectEol, exec, logVerbose, reNewline, replaceJsonVersion, tomlGetString,
+  type Result, detectEol, logVerbose, reNewline, replaceJsonVersion, tomlGetString,
   tomlReplaceFirst, tryExec,
 } from "./utils.ts";
 import {basename, dirname, join} from "node:path";
-import {platform, stdout} from "node:process";
+import {platform, stderr, stdout} from "node:process";
 import {readFileSync, writeFileSync, accessSync, truncateSync} from "node:fs";
 import {EOL} from "node:os";
-
-export type SemverLevel = "patch" | "minor" | "major" | "prerelease";
+import {styleText} from "node:util";
 
 const reEscapeChars = /[|\\{}()[\]^$+*?.-]/g;
 const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
-const rePrereleaseVersion = /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?/;
 const rePrereleaseIdNum = /^([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*)\.(\d+)$/;
 const reDatePattern = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/g;
-const reDate = new RegExp(reDatePattern.source);
+const reDate = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/;
 const pyprojectSections: readonly string[] = ["project", "tool.poetry"];
 const handledLockfiles = new Set(["package-lock.json", "uv.lock"]);
 const reLockfileName = /(?:^|[.-])lock/i;
@@ -41,8 +39,9 @@ export function replaceTokens(str: string, newVersion: string): string {
 }
 
 export function incrementSemver(str: string, level: string, preid?: string): string {
-  if (!isSemver(str)) throw new Error(`Invalid semver: ${str}`);
-  const [, majStr, minStr, patStr, prerelease] = rePrereleaseVersion.exec(stripV(str))!;
+  const match = reSemver.exec(stripV(str));
+  if (!match) throw new Error(`Invalid semver: ${str}`);
+  const [, majStr, minStr, patStr, prerelease] = match;
   const major = Number(majStr), minor = Number(minStr), patch = Number(patStr);
   const tail = preid ? `-${preid}.0` : "";
 
@@ -74,7 +73,7 @@ export function findUp(filename: string, dir: string, stopDir?: string): string 
   }
 }
 
-function readVersionFile(filename: string, dir: string, stopDir?: string): string | null {
+export function readVersionFile(filename: string, dir: string, stopDir?: string): string | null {
   const path = findUp(filename, dir, stopDir);
   if (!path) return null;
   try {
@@ -84,20 +83,12 @@ function readVersionFile(filename: string, dir: string, stopDir?: string): strin
   }
 }
 
-export function readVersionFromPackageJson(projectRoot: string, stopDir?: string): string | null {
-  return readVersionFile("package.json", projectRoot, stopDir);
-}
-
 function pyprojectGet(content: string, key: string): string | undefined {
   for (const section of pyprojectSections) {
     const v = tomlGetString(content, section, key);
     if (v) return v;
   }
   return undefined;
-}
-
-export function readVersionFromPyprojectToml(projectRoot: string, stopDir?: string): string | null {
-  return readVersionFile("pyproject.toml", projectRoot, stopDir);
 }
 
 // The version a manifest declares about itself, from content already in hand.
@@ -159,11 +150,10 @@ export async function resolveBaseVersion(base: string | undefined, gitless: bool
     if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", describeTag};
   }
 
-  const pkgVer = readVersionFromPackageJson(projectRoot, stopDir);
-  if (pkgVer) return {baseVersion: pkgVer, baseSource: "package.json", describeTag};
-
-  const pyVer = readVersionFromPyprojectToml(projectRoot, stopDir);
-  if (pyVer) return {baseVersion: pyVer, baseSource: "pyproject.toml", describeTag};
+  for (const filename of ["package.json", "pyproject.toml"]) {
+    const version = readVersionFile(filename, projectRoot, stopDir);
+    if (version) return {baseVersion: version, baseSource: filename, describeTag};
+  }
 
   if (!gitless) return {baseVersion: "0.0.0", baseSource: "default", describeTag};
   return {baseVersion: "", baseSource: "", describeTag};
@@ -223,17 +213,14 @@ export function updateChangelogHeadingDate(content: string, version: string, dat
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
-  let result: Result;
-  try {
-    result = await exec("git", ["check-ignore", "--", ...files], {cwd});
-  } catch {
-    return files;
-  }
-  const ignoredFiles = new Set<string>(result.stdout.split(reNewline));
+  // check-ignore exits 1 when nothing is ignored and 128 on error, both meaning "keep everything"
+  const stdout = await tryExec("git", ["check-ignore", "--", ...files], {cwd});
+  if (!stdout) return files;
+  const ignoredFiles = new Set<string>(stdout.split(reNewline));
   return files.filter(file => !ignoredFiles.has(file));
 }
 
-export type GetFileChangesOpts = {
+type GetFileChangesOpts = {
   file: string,
   baseVersion: string,
   newVersion: string,
@@ -241,7 +228,7 @@ export type GetFileChangesOpts = {
   date?: string,
 };
 
-export type FileChanges = {newData: string, oldData: string};
+type FileChanges = {newData: string, oldData: string};
 
 // Returns null for files that must not be touched at all.
 export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): FileChanges | null {
@@ -261,7 +248,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     // regex replace would corrupt nested dependency versions
     const lockFile = JSON.parse(oldData);
     if (lockFile.version) lockFile.version = newVersion; // v1 and v2
-    if (lockFile?.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
+    if (lockFile.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
     // scope to [project] / [tool.poetry] — other sections may have unrelated `version` keys
@@ -282,10 +269,8 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     newData = newData.replace(reDatePattern, date);
   }
 
-  if (replacements?.length) {
-    for (const replacement of replacements) {
-      newData = newData.replace(replacement.re, replacement.replacement);
-    }
+  for (const replacement of replacements ?? []) {
+    newData = newData.replace(replacement.re, replacement.replacement);
   }
 
   return {newData, oldData};
@@ -296,12 +281,10 @@ export function write(file: string, content: string): void {
     try {
       truncateSync(file);
       writeFileSync(file, content, {flag: "r+"});
-    } catch {
-      writeFileSync(file, content);
-    }
-  } else {
-    writeFileSync(file, content);
+      return;
+    } catch {}
   }
+  writeFileSync(file, content);
 }
 
 // join strings, ignoring falsy values and trimming the result
@@ -315,11 +298,8 @@ function envTokens(names: string[]): string[] {
 
 export async function getGithubTokens(): Promise<string[]> {
   const tokens = envTokens(["VERSIONS_FORGE_TOKEN", "GITHUB_API_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"]);
-  try {
-    const {stdout} = await exec("gh", ["auth", "token"]);
-    const t = stdout.trim();
-    if (t && !tokens.includes(t)) tokens.push(t);
-  } catch {}
+  const ghToken = await tryExec("gh", ["auth", "token"]);
+  if (ghToken && !tokens.includes(ghToken)) tokens.push(ghToken);
   return tokens;
 }
 
@@ -342,33 +322,19 @@ export type RepoInfo = {
   type: "github" | "gitea";
 };
 
+// Parse git URLs: https://[user[:pass]@]host/owner/repo[.git][/] or git@host:owner/repo[.git][/]
+const reHttpsRemote = /^https:\/\/(?:[^@/]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?\/?$/;
+const reSshRemote = /^git@([^:]+):([^/]+)\/(.+?)(?:\.git)?\/?$/;
+
 export async function getRepoInfo(cwd?: string, remote: string = "origin"): Promise<RepoInfo | null> {
-  try {
-    const {stdout} = await exec("git", ["remote", "get-url", remote], {cwd});
-    const url = stdout.trim();
-
-    // Parse git URLs: https://[user[:pass]@]host/owner/repo[.git][/] or git@host:owner/repo[.git][/]
-    const httpsMatch = /^https:\/\/(?:[^@/]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?\/?$/.exec(url);
-    const sshMatch = /^git@([^:]+):([^/]+)\/(.+?)(?:\.git)?\/?$/.exec(url);
-
-    const match = httpsMatch || sshMatch;
-    if (match) {
-      return {
-        owner: match[2],
-        repo: match[3],
-        host: match[1],
-        type: match[1] === "github.com" ? "github" : "gitea",
-      };
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
+  const url = await tryExec("git", ["remote", "get-url", remote], {cwd});
+  const match = url ? reHttpsRemote.exec(url) ?? reSshRemote.exec(url) : null;
+  if (!match) return null;
+  return {owner: match[2], repo: match[3], host: match[1], type: match[1] === "github.com" ? "github" : "gitea"};
 }
 
 async function forgeFetch(method: string, url: string, authHeader: string, label: string, jsonBody?: string): Promise<Response> {
-  logVerbose(`${colorize(method, "magenta")} ${url}`);
+  logVerbose(`${styleText("magenta", method, {stream: stderr})} ${url}`);
   const headers: Record<string, string> = {Authorization: authHeader};
   if (jsonBody !== undefined) headers["Content-Type"] = "application/json";
   let response: Response;
@@ -377,16 +343,12 @@ async function forgeFetch(method: string, url: string, authHeader: string, label
   } catch (err: any) {
     throw new Error(`${label}: ${err.cause?.message || err.message || "Unknown error"}`);
   }
-  logVerbose(`${colorize(String(response.status), response.ok ? "green" : "red")} ${url}`);
+  logVerbose(`${styleText(response.ok ? "green" : "red", String(response.status), {stream: stderr})} ${url}`);
   return response;
 }
 
 // Thrown by attempt callbacks of withTokens to signal that the next token should be tried.
 class AuthRetryable extends Error {}
-
-function authOrError(status: number, message: string): Error {
-  return status === 401 || status === 403 ? new AuthRetryable(message) : new Error(message);
-}
 
 function forgeApiBase(repoInfo: RepoInfo): string {
   const host = repoInfo.type === "github" ? "api.github.com" : `${repoInfo.host}/api/v1`;
@@ -395,7 +357,8 @@ function forgeApiBase(repoInfo: RepoInfo): string {
 
 async function ensureOk(response: Response, label: string, allow404 = false): Promise<void> {
   if (response.ok || (allow404 && response.status === 404)) return;
-  throw authOrError(response.status, `${label}: ${response.status} ${response.statusText}\n${await response.text()}`);
+  const message = `${label}: ${response.status} ${response.statusText}\n${await response.text()}`;
+  throw response.status === 401 || response.status === 403 ? new AuthRetryable(message) : new Error(message);
 }
 
 async function withTokens<T>(
@@ -417,7 +380,7 @@ async function withTokens<T>(
   throw lastError ?? new Error("No tokens provided");
 }
 
-async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName: string): Promise<number> {
+async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName: string): Promise<boolean> {
   const listLabel = "Failed to list releases";
   const listResponse = await forgeFetch("GET", `${apiUrl}?draft=true&limit=50&per_page=100`, authHeader, listLabel);
   await ensureOk(listResponse, listLabel);
@@ -429,22 +392,10 @@ async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName:
     await ensureOk(deleteResponse, label, true);
     console.info(`Deleted stale draft release for ${tagName}`);
   }
-  return drafts.length;
+  return drafts.length > 0;
 }
 
-export type CreatedRelease = {id: number; html_url?: string};
-
-export async function deleteForgeRelease(repoInfo: RepoInfo, releaseId: number, tokens: string[]): Promise<void> {
-  const url = `${forgeApiBase(repoInfo)}/releases/${releaseId}`;
-  const label = `Failed to delete release ${releaseId}`;
-
-  await withTokens(repoInfo, tokens, async (authHeader) => {
-    const response = await forgeFetch("DELETE", url, authHeader, label);
-    await ensureOk(response, label, true);
-  });
-}
-
-export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<CreatedRelease | null> {
+export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<void> {
   const apiUrl = `${forgeApiBase(repoInfo)}/releases`;
   const label = "Failed to create release";
   const releaseBody = JSON.stringify({
@@ -457,20 +408,19 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
 
   const post = (authHeader: string) => forgeFetch("POST", apiUrl, authHeader, label, releaseBody);
 
-  return withTokens(repoInfo, tokens, async (authHeader) => {
+  await withTokens(repoInfo, tokens, async (authHeader) => {
     let response = await post(authHeader);
 
     // Stale draft for the same tag blocks creation: Gitea returns 409 "Release is has no Tag",
     // GitHub returns 422 "already_exists". Clean up matching drafts and retry once.
     if (response.status === 409 || response.status === 422) {
       const cleaned = await deleteMatchingDrafts(apiUrl, authHeader, tagName);
-      if (cleaned > 0) response = await post(authHeader);
+      if (cleaned) response = await post(authHeader);
     }
 
     await ensureOk(response, label);
     const result = await response.json();
     console.info(result.html_url ? `Created release: ${result.html_url}` : "Created release");
-    return typeof result.id === "number" ? {id: result.id, html_url: result.html_url} : null;
   });
 }
 
@@ -484,19 +434,17 @@ type RemoteState = {branch: string | null; tag: string | null};
 
 // ls-remote needs the push URL explicitly: the default fetch URL can differ from the push URL.
 export async function probeRemote(pushRemote: string, branchRef: string, tagRef: string): Promise<RemoteState | null> {
-  try {
-    const {stdout: pushUrl} = await exec("git", ["remote", "get-url", "--push", pushRemote]);
-    const {stdout} = await exec("git", ["ls-remote", pushUrl.trim(), branchRef, tagRef]);
-    let branch: string | null = null, tag: string | null = null;
-    for (const line of stdout.split(reNewline)) {
-      const [oid, ref] = line.split(/\s+/);
-      if (ref === branchRef) branch = oid;
-      else if (ref === tagRef) tag = oid;
-    }
-    return {branch, tag};
-  } catch {
-    return null;
+  const pushUrl = await tryExec("git", ["remote", "get-url", "--push", pushRemote]);
+  if (pushUrl === null) return null;
+  const stdout = await tryExec("git", ["ls-remote", pushUrl, branchRef, tagRef]);
+  if (stdout === null) return null;
+  let branch: string | null = null, tag: string | null = null;
+  for (const line of stdout.split(reNewline)) {
+    const [oid, ref] = line.split(/\s+/);
+    if (ref === branchRef) branch = oid;
+    else if (ref === tagRef) tag = oid;
   }
+  return {branch, tag};
 }
 
 // Authenticated GET on the forge repo endpoint — verifies host reachability, token validity,
@@ -519,12 +467,10 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
       // repo GETs. If the field is present and push/admin are both false, release creation
       // will 403 — abort now rather than after the push has landed. Throw `AuthRetryable`
       // so `withTokens` falls through to the next token: a different token may have push.
-      let body: any;
+      let body: any = null;
       try {
         body = await response.json();
-      } catch {
-        body = null;
-      }
+      } catch {}
       const perms = body?.permissions;
       if (perms && perms.push !== true && perms.admin !== true) {
         throw new AuthRetryable(`token lacks push permission on ${repoInfo.owner}/${repoInfo.repo}`);
@@ -538,6 +484,6 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
     });
     return null;
   } catch (err: any) {
-    return err?.message || "unknown error";
+    return err.message || "unknown error";
   }
 }
