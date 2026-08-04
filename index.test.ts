@@ -1,6 +1,6 @@
 import {Buffer} from "node:buffer";
 import {readFileSync} from "node:fs";
-import {readFile, writeFile, rm, mkdir, mkdtemp, realpath} from "node:fs/promises";
+import {readFile, writeFile, rm, mkdir, mkdtemp} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {
@@ -1259,19 +1259,24 @@ test("getForgeTokens matches a VERSIONS_FORGE_TOKENS host carrying a port", () =
 }));
 
 // mirrors what actions/checkout writes, includeIf and all, so a regression to `git config --local` fails here
-test("getForgeTokens recovers the CI token from the git config extraheader", () => withTmpDir(async (rawDir) => {
-  // includeIf.gitdir matches the resolved path, and tmpdir() is a symlink on macOS
-  const tmpDir = await realpath(rawDir);
+test("getForgeTokens recovers the CI token from the git config extraheader", () => withTmpDir(async (tmpDir) => {
   await exec("git", ["init", "-q"], {cwd: tmpDir});
-  const credentials = join(tmpDir, "credentials.config");
+  const globalConfig = join(tmpDir, "global.config");
   const basic = Buffer.from("x-access-token:ci-tok").toString("base64");
-  await exec("git", ["config", "--file", credentials, "http.https://ci.example.com/.extraheader", `AUTHORIZATION: basic ${basic}`], {cwd: tmpDir});
-  await exec("git", ["config", `includeIf.gitdir:${join(tmpDir, ".git")}.path`, credentials], {cwd: tmpDir});
+  await exec("git", ["config", "--file", globalConfig, "http.https://ci.example.com/.extraheader", `AUTHORIZATION: basic ${basic}`], {cwd: tmpDir});
 
-  await withTokenEnv({}, async () => {
-    expect(await getForgeTokens(giteaHost("ci.example.com"), tmpDir)).toEqual(["ci-tok"]);
-    expect(await getForgeTokens(giteaHost("elsewhere.example.com"), tmpDir)).toEqual([]);
-  });
+  // checkout puts the credential outside .git/config, so a regression to `--local` fails here
+  const saved = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = globalConfig;
+  try {
+    await withTokenEnv({}, async () => {
+      expect(await getForgeTokens(giteaHost("ci.example.com"), tmpDir)).toEqual(["ci-tok"]);
+      expect(await getForgeTokens(giteaHost("elsewhere.example.com"), tmpDir)).toEqual([]);
+    });
+  } finally {
+    if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = saved;
+  }
 }));
 
 test("getRepoInfo", async () => {
