@@ -81,22 +81,35 @@ The tool will automatically detect whether you're using GitHub or Gitea based on
 
 ### API Tokens
 
-For GitHub releases, provide an API token via one of these environment variables (in priority order):
-- `VERSIONS_FORGE_TOKEN`
+`VERSIONS_FORGE_TOKENS` wins over everything else and is the only way to reach more than one
+Gitea or Forgejo instance. It holds comma-separated `host:token` pairs whose host must match the
+remote exactly, port included, so a ported instance needs an https remote:
+
+```bash
+export VERSIONS_FORGE_TOKENS="git.example.com:tok_xxx,localhost:3000:tok_yyy"
+```
+
+Otherwise every one of these that is set is tried in order, only ever against `github.com`:
+- `VERSIONS_GITHUB_API_TOKEN`
 - `GITHUB_API_TOKEN`
-- `GITHUB_TOKEN`
 - `GH_TOKEN`
+- `GITHUB_TOKEN`
 - `HOMEBREW_GITHUB_API_TOKEN`
 
-For Gitea releases, provide an API token via one of these environment variables (in priority order):
-- `VERSIONS_FORGE_TOKEN`
+`gh auth token` follows as one more candidate, so a read-only env token cannot lock out a
+working `gh` login.
+
+The same for Gitea and Forgejo, only ever against the instance named by `GITEA_URL`. The names
+do not say which instance they belong to, so without a matching `GITEA_URL` they go unused:
+- `VERSIONS_GITEA_API_TOKEN`
 - `GITEA_API_TOKEN`
 - `GITEA_AUTH_TOKEN`
 - `GITEA_TOKEN`
+- `FORGEJO_TOKEN`
 
-Example:
 ```bash
-export GITHUB_TOKEN=ghp_your_token_here
+export GITEA_URL=https://git.example.com
+export GITEA_TOKEN=tok_xxx
 versions --release patch package.json
 ```
 
@@ -107,5 +120,11 @@ CI environments usually do incomplete git checkouts without tags. Fetch tags fir
 ```bash
 git fetch --tags --force
 ```
+
+`--release` needs no token wired up on GitHub, Gitea or Forgejo Actions. `actions/checkout`
+leaves the job token in git config as `http.<origin>/.extraheader`, and `versions` reads it back
+for that host as a last resort, so it is only ever returned to the forge that issued it. Needs
+`permissions: contents: write` on GitHub and `releases: write` on Gitea. A release created with
+the job token triggers no `release` workflows.
 
 © [silverwind](https://github.com/silverwind), distributed under BSD licence

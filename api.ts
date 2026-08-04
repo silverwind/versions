@@ -3,7 +3,8 @@ import {
   tomlReplaceFirst, tryExec,
 } from "./utils.ts";
 import {basename, dirname, join} from "node:path";
-import {platform, stderr, stdout} from "node:process";
+import {Buffer} from "node:buffer";
+import {env, platform, stderr, stdout} from "node:process";
 import {readFileSync, writeFileSync, accessSync, truncateSync} from "node:fs";
 import {EOL} from "node:os";
 import {styleText} from "node:util";
@@ -292,27 +293,66 @@ export function joinStrings(strings: Array<string | undefined>, separator: strin
   return strings.filter(Boolean).join(separator).trim();
 }
 
+export const githubTokenEnvNames = ["VERSIONS_GITHUB_API_TOKEN", "GITHUB_API_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"];
+export const giteaTokenEnvNames = ["VERSIONS_GITEA_API_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN"];
+
 function envTokens(names: string[]): string[] {
-  return Array.from(new Set(names.map(n => process.env[n]).filter(Boolean) as string[]));
+  return Array.from(new Set(names.map(name => env[name]).filter(Boolean) as string[]));
 }
 
-export async function getGithubTokens(): Promise<string[]> {
-  const tokens = envTokens(["VERSIONS_FORGE_TOKEN", "GITHUB_API_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"]);
-  const ghToken = await tryExec("gh", ["auth", "token"]);
-  if (ghToken && !tokens.includes(ghToken)) tokens.push(ghToken);
-  return tokens;
+function urlHost(url = ""): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
 }
 
-export function getGiteaTokens(): string[] {
-  return envTokens(["VERSIONS_FORGE_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN"]);
+// host may carry a port, so the last colon separates host from token
+function pairToken(host: string): string | null {
+  for (const entry of (env.VERSIONS_FORGE_TOKENS ?? "").split(",")) {
+    const sep = entry.lastIndexOf(":");
+    if (sep > 0 && entry.slice(0, sep) === host) return entry.slice(sep + 1);
+  }
+  return null;
+}
+
+const reExtraheader = /^http\.(\S+)\/\.extraheader AUTHORIZATION:\s*basic\s+(\S+)$/i;
+
+// actions/checkout leaves the CI token in `http.<origin>/.extraheader`, base64 of
+// `x-access-token:<token>`. `--local` misses it, the credentials file arrives via includeIf.
+async function extraheaderToken(host: string, cwd?: string): Promise<string | null> {
+  const config = await tryExec("git", ["config", "--get-regexp", "^http\\..*\\.extraheader$"], {cwd});
+  for (const line of config?.split(reNewline) ?? []) {
+    const match = reExtraheader.exec(line);
+    if (!match || urlHost(match[1]) !== host) continue;
+    const decoded = Buffer.from(match[2], "base64").toString("utf8");
+    const token = decoded.slice(decoded.indexOf(":") + 1);
+    if (token) return token;
+  }
+  return null;
 }
 
 export function forgeName(repoInfo: RepoInfo): "GitHub" | "Gitea" {
   return repoInfo.type === "github" ? "GitHub" : "Gitea";
 }
 
-export async function getForgeTokens(repoInfo: RepoInfo): Promise<string[]> {
-  return repoInfo.type === "github" ? getGithubTokens() : getGiteaTokens();
+// Every credential is bound to one host: pairs and extraheader keys name theirs, the generic env
+// names mean github.com and the GITEA_URL instance. Any other host gets only a pair entry.
+export async function getForgeTokens(repoInfo: RepoInfo, cwd?: string): Promise<string[]> {
+  const pair = pairToken(repoInfo.host);
+  if (pair) return [pair];
+
+  const isGithub = repoInfo.host === "github.com";
+  const tokens = isGithub ? envTokens(githubTokenEnvNames) :
+    repoInfo.host === urlHost(env.GITEA_URL) ? envTokens(giteaTokenEnvNames) : [];
+
+  // appended, not preferred, so a read-only configured token cannot lock out a working one
+  const [ghToken, header] = await Promise.all([
+    isGithub ? tryExec("gh", ["auth", "token"]) : null,
+    extraheaderToken(repoInfo.host, cwd),
+  ]);
+  return Array.from(new Set([...tokens, ghToken, header].filter(Boolean) as string[]));
 }
 
 export type RepoInfo = {
@@ -323,6 +363,7 @@ export type RepoInfo = {
 };
 
 // Parse git URLs: https://[user[:pass]@]host/owner/repo[.git][/] or git@host:owner/repo[.git][/]
+// The scp-style form cannot express an HTTP port, so a ported instance needs an https remote.
 const reHttpsRemote = /^https:\/\/(?:[^@/]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?\/?$/;
 const reSshRemote = /^git@([^:]+):([^/]+)\/(.+?)(?:\.git)?\/?$/;
 

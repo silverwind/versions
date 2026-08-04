@@ -9,7 +9,7 @@ import {
 import {SubprocessError, exec, logVerbose, setVerbose, tryExec} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {dirname, relative} from "node:path";
-import {cwd, exit} from "node:process";
+import {cwd, exit, stdout, stderr} from "node:process";
 import {readFileSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
 
@@ -31,6 +31,11 @@ function stringArgs(values: unknown): string[] {
 }
 
 async function main(): Promise<void> {
+  // exit() discards queued writes on a non-blocking stream, losing diagnostics under CI pipes
+  for (const stream of [stdout, stderr]) {
+    (stream as any)?._handle?.setBlocking?.(true);
+  }
+
   const result = parseArgs({
     strict: false,
     allowPositionals: true,
@@ -266,7 +271,7 @@ async function main(): Promise<void> {
     if (!repoInfo) {
       errors.push("--release: could not detect a forge from the git remote URL");
     } else if (!tokens.length) {
-      errors.push(`--release: no ${forgeName(repoInfo)} token found in environment`);
+      errors.push(`--release: no ${forgeName(repoInfo)} token found for ${repoInfo.host}, set VERSIONS_FORGE_TOKENS=${repoInfo.host}:<token>`);
     } else if (pingResult) {
       errors.push(`--release: ${pingResult}`);
     }

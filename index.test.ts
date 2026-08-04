@@ -1,12 +1,13 @@
+import {Buffer} from "node:buffer";
 import {readFileSync} from "node:fs";
-import {readFile, writeFile, rm, mkdir, mkdtemp} from "node:fs/promises";
+import {readFile, writeFile, rm, mkdir, mkdtemp, realpath} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {
   isSemver, incrementSemver, replaceTokens, esc,
   joinStrings, findUp, getFileChanges, write,
   readVersionFile,
-  removeIgnoredFiles, getGithubTokens, getGiteaTokens,
+  removeIgnoredFiles, getForgeTokens, githubTokenEnvNames, giteaTokenEnvNames,
   getRepoInfo, writeResult, createForgeRelease, pingForge,
   readChangelogEntry, updateChangelogHeadingDate,
   type RepoInfo,
@@ -588,7 +589,7 @@ test("release rejects detached HEAD", () => withTmpDir(async (tmpDir) => {
   await exec("git", ["checkout", "--detach"], opts);
 
   const err = await runFail(["--release", "patch", "package.json"], {
-    ...opts, env: {...opts.env, GITEA_TOKEN: "tok"},
+    ...opts, env: {...opts.env, VERSIONS_FORGE_TOKENS: "gitea.invalid:tok"},
   });
   expect(err.exitCode).toEqual(1);
 }));
@@ -605,7 +606,7 @@ test("validate aborts before any mutation", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), pkgContent);
 
   const {bareDir, opts} = await setupReleaseRepo(tmpDir);
-  const tokenOpts = {...opts, env: {...opts.env, GITEA_TOKEN: "fake-token"}};
+  const tokenOpts = {...opts, env: {...opts.env, VERSIONS_FORGE_TOKENS: "gitea.invalid:fake-token"}};
   const {stdout: preHead} = await exec("git", ["rev-parse", "HEAD"], opts);
 
   const expectUntouched = async () => {
@@ -803,7 +804,7 @@ test("--remote with --release uses that remote for forge detection", () => withT
   // If --remote was ignored, getRepoInfo would return null for file:/// and the error would
   // be "Could not determine repository type" instead.
   const err = await runFail(["--remote", "upstream", "--release", "patch", "package.json"], {
-    ...opts, env: {...opts.env, GITEA_TOKEN: "fake-token"},
+    ...opts, env: {...opts.env, VERSIONS_FORGE_TOKENS: "gitea.invalid:fake-token"},
   });
   expect(err.exitCode).toEqual(1);
   // The forge ping during validate hits the upstream host; if --remote were ignored,
@@ -1222,30 +1223,56 @@ test("write", () => withTmpDir(async (tmpDir) => {
   expect(await readFile(file, "utf8")).toEqual("new");
 }));
 
-test("getGithubTokens", async () => {
-  const saved = {...process.env};
-  delete process.env.VERSIONS_FORGE_TOKEN;
-  delete process.env.GITHUB_API_TOKEN;
-  delete process.env.GITHUB_TOKEN;
-  delete process.env.GH_TOKEN;
-  delete process.env.HOMEBREW_GITHUB_API_TOKEN;
-  await getGithubTokens(); // may contain gh auth token if gh is installed
-  process.env.GH_TOKEN = "test-token";
-  expect(await getGithubTokens()).toContain("test-token");
-  Object.assign(process.env, saved);
-});
+const tokenEnvNames = [...githubTokenEnvNames, ...giteaTokenEnvNames, "VERSIONS_FORGE_TOKENS", "GITEA_URL"];
 
-test("getGiteaTokens", () => {
+async function withTokenEnv(env: Record<string, string>, fn: () => Promise<void>): Promise<void> {
   const saved = {...process.env};
-  delete process.env.VERSIONS_FORGE_TOKEN;
-  delete process.env.GITEA_API_TOKEN;
-  delete process.env.GITEA_AUTH_TOKEN;
-  delete process.env.GITEA_TOKEN;
-  expect(getGiteaTokens()).toEqual([]);
-  process.env.GITEA_TOKEN = "gitea-tok";
-  expect(getGiteaTokens()).toContain("gitea-tok");
-  Object.assign(process.env, saved);
-});
+  for (const name of tokenEnvNames) delete process.env[name];
+  Object.assign(process.env, env);
+  try {
+    await fn();
+  } finally {
+    for (const name of tokenEnvNames) delete process.env[name];
+    Object.assign(process.env, saved);
+  }
+}
+
+const giteaHost = (host: string): RepoInfo => ({...giteaInfo, host});
+
+test("getForgeTokens reads GitHub env names", () => withTokenEnv({GH_TOKEN: "gh-tok"}, async () => {
+  expect(await getForgeTokens(githubInfo)).toContain("gh-tok");
+}));
+
+test("getForgeTokens sends Gitea env tokens only to the GITEA_URL host", () => withTokenEnv({
+  GITEA_TOKEN: "gitea-tok", GITEA_URL: "https://gitea.example.com",
+}, async () => {
+  expect(await getForgeTokens(giteaHost("gitea.example.com"))).toEqual(["gitea-tok"]);
+  expect(await getForgeTokens(giteaHost("other.example.com"))).toEqual([]);
+}));
+
+test("getForgeTokens matches a VERSIONS_FORGE_TOKENS host carrying a port", () => withTokenEnv({
+  VERSIONS_FORGE_TOKENS: "localhost:3500:pair-tok", GITEA_TOKEN: "gitea-tok", GITEA_URL: "https://localhost:3500",
+}, async () => {
+  expect(await getForgeTokens(giteaHost("localhost:3500"))).toEqual(["pair-tok"]);
+  // the bare host must not claim the ported entry, which would hand back `3500:pair-tok`
+  expect(await getForgeTokens(giteaHost("localhost"))).toEqual([]);
+}));
+
+// mirrors what actions/checkout writes, includeIf and all, so a regression to `git config --local` fails here
+test("getForgeTokens recovers the CI token from the git config extraheader", () => withTmpDir(async (rawDir) => {
+  // includeIf.gitdir matches the resolved path, and tmpdir() is a symlink on macOS
+  const tmpDir = await realpath(rawDir);
+  await exec("git", ["init", "-q"], {cwd: tmpDir});
+  const credentials = join(tmpDir, "credentials.config");
+  const basic = Buffer.from("x-access-token:ci-tok").toString("base64");
+  await exec("git", ["config", "--file", credentials, "http.https://ci.example.com/.extraheader", `AUTHORIZATION: basic ${basic}`], {cwd: tmpDir});
+  await exec("git", ["config", `includeIf.gitdir:${join(tmpDir, ".git")}.path`, credentials], {cwd: tmpDir});
+
+  await withTokenEnv({}, async () => {
+    expect(await getForgeTokens(giteaHost("ci.example.com"), tmpDir)).toEqual(["ci-tok"]);
+    expect(await getForgeTokens(giteaHost("elsewhere.example.com"), tmpDir)).toEqual([]);
+  });
+}));
 
 test("getRepoInfo", async () => {
   const info = await getRepoInfo();
