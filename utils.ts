@@ -43,6 +43,7 @@ type ExecOptions = {
   stdin?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  timeout?: number;
 };
 
 export const reNewline = /\r?\n/;
@@ -149,7 +150,7 @@ export async function tryExec(file: string, args: readonly string[], options?: E
 export function exec(file: string, args: readonly string[], options?: ExecOptions): Promise<Result> {
   if (verbose) logVerbose(`$ ${args.length ? `${file} ${args.map(quoteArg).join(" ")}` : file}`);
   return new Promise((resolve, reject) => {
-    const child = execFileCb(file, args as string[], {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env}, (error, stdout, stderr) => {
+    const child = execFileCb(file, args as string[], {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env, timeout: options?.timeout}, (error, stdout, stderr) => {
       if (error) {
         reject(new SubprocessError(error.message.split(reNewline)[0], stdout, stderr, typeof error.code === "number" ? error.code : null));
       } else {

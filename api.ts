@@ -317,12 +317,13 @@ function pairToken(host: string): string | null {
   return null;
 }
 
+const probeTimeout = 5000;
 const reExtraheader = /^http\.(\S+)\/\.extraheader AUTHORIZATION:\s*basic\s+(\S+)$/i;
 
 // actions/checkout leaves the CI token in `http.<origin>/.extraheader`, base64 of
 // `x-access-token:<token>`. `--local` misses it, the credentials file arrives via includeIf.
 async function extraheaderToken(host: string, cwd?: string): Promise<string | null> {
-  const config = await tryExec("git", ["config", "--get-regexp", "^http\\..*\\.extraheader$"], {cwd});
+  const config = await tryExec("git", ["config", "--get-regexp", "^http\\..*\\.extraheader$"], {cwd, timeout: probeTimeout});
   for (const line of config?.split(reNewline) ?? []) {
     const match = reExtraheader.exec(line);
     if (!match || urlHost(match[1]) !== host) continue;
@@ -349,7 +350,7 @@ export async function getForgeTokens(repoInfo: RepoInfo, cwd?: string): Promise<
 
   // appended, not preferred, so a read-only configured token cannot lock out a working one
   const [ghToken, header] = await Promise.all([
-    isGithub ? tryExec("gh", ["auth", "token"]) : null,
+    isGithub ? tryExec("gh", ["auth", "token"], {timeout: probeTimeout}) : null,
     extraheaderToken(repoInfo.host, cwd),
   ]);
   return Array.from(new Set([...tokens, ghToken, header].filter(Boolean) as string[]));
