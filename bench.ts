@@ -7,7 +7,7 @@ import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 
-const ITERATIONS_MACRO = 30;
+const ITERATIONS_MACRO = Number(process.env.BENCH_RUNS) || 30;
 
 const formatMs = (ms: number) => `${ms.toFixed(2)}ms`;
 const delta = (before: number, after: number) => `${((1 - after / before) * 100).toFixed(1)}% faster`;
