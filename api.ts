@@ -31,7 +31,7 @@ export function isSemver(str: string): boolean {
 }
 
 export function replaceTokens(str: string, newVersion: string): string {
-  const [major, minor, patch] = newVersion.split(".");
+  const [, major, minor, patch] = reSemver.exec(stripV(newVersion)) ?? [];
   return str
     .replaceAll("_VER_", newVersion)
     .replaceAll("_MAJOR_", major)
@@ -106,12 +106,13 @@ export function readDeclaredVersion(file: string, data: string): string | null {
   }
 }
 
-const packageManagerLockfiles: Record<string, readonly string[]> = {
-  npm: ["package-lock.json"],
-  pnpm: ["pnpm-lock.yaml"],
-  yarn: ["yarn.lock"],
-  bun: ["bun.lock", "bun.lockb"],
-};
+// a Map, not an object: a `packageManager` naming an Object.prototype key would yield a function
+const packageManagerLockfiles = new Map<string, readonly string[]>([
+  ["npm", ["package-lock.json"]],
+  ["pnpm", ["pnpm-lock.yaml"]],
+  ["yarn", ["yarn.lock"]],
+  ["bun", ["bun.lock", "bun.lockb"]],
+]);
 
 // a packageManager pin binds the lockfile to the manifest, both belong in one commit
 export function findCompanionLockfile(file: string): string | null {
@@ -124,40 +125,45 @@ export function findCompanionLockfile(file: string): string | null {
   }
   if (typeof packageManager !== "string") return null;
   const dir = dirname(file);
-  for (const name of packageManagerLockfiles[packageManager.split("@")[0]] ?? []) {
+  for (const name of packageManagerLockfiles.get(packageManager.split("@")[0]) ?? []) {
     const path = findUp(name, dir, dir); // stopDir === dir: only look next to the manifest
     if (path) return path;
   }
   return null;
 }
 
-type BaseVersion = {baseVersion: string, baseSource: string, describeTag: string};
+type BaseVersion = {baseVersion: string, baseSource: string};
 
-export async function resolveBaseVersion(base: string | undefined, gitless: boolean, projectRoot: string, stopDir?: string): Promise<BaseVersion> {
+type ResolveBaseVersionOpts = {
+  base?: string,
+  gitless: boolean,
+  lastTag: () => Promise<string>, // a thunk, so an explicit base never runs the slow `git describe`
+  projectRoot: string,
+  stopDir?: string,
+};
+
+export async function resolveBaseVersion({base, gitless, lastTag, projectRoot, stopDir}: ResolveBaseVersionOpts): Promise<BaseVersion> {
   if (base !== undefined) {
     if (!isSemver(base)) throw new Error(`Invalid base version: ${base}`);
-    return {baseVersion: stripV(base), baseSource: "--base", describeTag: ""};
+    return {baseVersion: stripV(base), baseSource: "--base"};
   }
 
-  let describeTag = "";
   if (!gitless) {
-    describeTag = await tryExec("git", ["describe", "--tags", "--abbrev=0"]) ?? "";
-    if (isSemver(describeTag)) {
-      return {baseVersion: stripV(describeTag), baseSource: "git describe", describeTag};
-    }
+    const describeTag = await lastTag();
+    if (isSemver(describeTag)) return {baseVersion: stripV(describeTag), baseSource: "git describe"};
 
     const tagList = await tryExec("git", ["tag", "--list", "--sort=-creatordate"]);
     const tag = tagList?.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
-    if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", describeTag};
+    if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list"};
   }
 
   for (const filename of ["package.json", "pyproject.toml"]) {
     const version = readVersionFile(filename, projectRoot, stopDir);
-    if (version) return {baseVersion: version, baseSource: filename, describeTag};
+    if (version) return {baseVersion: version, baseSource: filename};
   }
 
-  if (!gitless) return {baseVersion: "0.0.0", baseSource: "default", describeTag};
-  return {baseVersion: "", baseSource: "", describeTag};
+  if (!gitless) return {baseVersion: "0.0.0", baseSource: "default"};
+  return {baseVersion: "", baseSource: ""};
 }
 
 const reHeading = /^(#+)\s+(.*?)\s*$/;

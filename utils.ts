@@ -47,7 +47,8 @@ type ExecOptions = {
 };
 
 export const reNewline = /\r?\n/;
-const reTomlSection = /^\[([^[\]]+)\]/;
+// anchored so a bracketed element of a multi-line array is not read as a table header
+const reTomlSection = /^\[\[?([^[\]]+)\]\]?\s*(?:#.*)?$/;
 
 export function detectEol(s: string): string {
   return reNewline.exec(s)?.[0] ?? "\n";
@@ -61,8 +62,9 @@ function visitTomlSection(content: string, sections: readonly string[], visit: T
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed || trimmed[0] === "#") continue;
-    if (trimmed[0] === "[") {
-      section = reTomlSection.exec(trimmed)?.[1].trim() ?? null;
+    const header = reTomlSection.exec(trimmed);
+    if (header) {
+      section = header[1].trim();
       continue;
     }
     if (section && sections.includes(section) && visit(lines[i], i, lines)) break;

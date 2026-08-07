@@ -22,7 +22,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -b, --base <version>  Base version. Default is from latest git tag, package.json, pyproject.toml, or 0.0.0
     -p, --prefix          Prefix version string with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
-    -d, --date [<date>]   Replace dates in format YYYY-MM-DD with current or given date
+    -d, --date            Replace dates in format YYYY-MM-DD with current date
     -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc
     -m, --message <str>   Custom tag and commit message
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"

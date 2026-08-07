@@ -13,7 +13,7 @@ import {cwd, exit, stdout, stderr} from "node:process";
 import {readFileSync} from "node:fs";
 import pkg from "./package.json" with {type: "json"};
 
-const reReplaceString = /^s#([^#]+)#([^#]+)#(.*)$/;
+const reReplaceString = /^s#([^#]+)#([^#]*)#(.*)$/; // an empty replacement deletes, as in sed
 const commands = new Set(["patch", "minor", "major", "prerelease"]);
 
 function end(err?: unknown): void {
@@ -125,7 +125,6 @@ async function main(): Promise<void> {
 
   // dedupe after normalizing, so `foo` and `./foo` collapse to one entry
   files = Array.from(new Set(files.map(file => relative(pwd, file))));
-  const specifiedFiles = new Set(files);
 
   const wantRelease = Boolean(args.release);
   const willCommit = !args.gitless && !args.dry;
@@ -133,12 +132,18 @@ async function main(): Promise<void> {
 
   // Fire every independent I/O probe in parallel. Each resolves to a value validate awaits;
   // the chain repoInfo → tokens → pingForge is the only inherently sequential one.
-  const baseVersionP = resolveBaseVersion(
-    typeof args.base === "string" ? args.base : undefined,
-    Boolean(args.gitless),
+  // Bounds both the base-version detection and the `git log` changelog fallback. Lazy and
+  // memoized: --base needs it only for the changelog, and --gitless/--dry never ask at all.
+  let lastTagP: Promise<string> | undefined;
+  const lastTag = (): Promise<string> =>
+    lastTagP ??= (async () => await tryExec("git", ["describe", "--tags", "--abbrev=0"]) ?? "")();
+  const baseVersionP = resolveBaseVersion({
+    base: typeof args.base === "string" ? args.base : undefined,
+    gitless: Boolean(args.gitless),
+    lastTag,
     projectRoot,
-    repoRoot,
-  );
+    stopDir: repoRoot,
+  });
   const pushBranchP = willPush ? (async () => {
     if (typeof args.branch === "string") return args.branch;
     const {stdout} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -155,7 +160,7 @@ async function main(): Promise<void> {
   // baseVersion + pushBranch unblock tagRef/branchRef computation; throw the two fatal
   // configuration errors that can't sensibly be deferred to validate (incrementSemver
   // would otherwise blow up on an empty base).
-  const [{baseVersion, baseSource, describeTag}, pushBranch] = await Promise.all([baseVersionP, pushBranchP]);
+  const [{baseVersion, baseSource}, pushBranch] = await Promise.all([baseVersionP, pushBranchP]);
   if (args.gitless && !baseVersion) {
     throw new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`);
   }
@@ -168,11 +173,14 @@ async function main(): Promise<void> {
   logVerbose(`new version ${newVersion}`);
 
   const replacements = stringArgs(args.replace).map(replaceStr => {
-    const [, re, replacement, flags] = reReplaceString.exec(replaceStr) || [];
-    if (!re || !replacement) {
-      throw new Error(`Invalid replace string: ${replaceStr}`);
+    const match = reReplaceString.exec(replaceStr);
+    if (!match) throw new Error(`Invalid replace string: ${replaceStr}`);
+    const [, re, replacement, flags] = match;
+    try {
+      return {re: new RegExp(re, flags), replacement: replaceTokens(replacement, newVersion)};
+    } catch (err: any) { // bad flags or an uncompilable pattern
+      throw new Error(`Invalid replace string: ${replaceStr}: ${err.message}`);
     }
-    return {re: new RegExp(re, flags), replacement: replaceTokens(replacement, newVersion)};
   });
 
   const msgs = stringArgs(args.message).map(msg => replaceTokens(msg, newVersion));
@@ -205,6 +213,9 @@ async function main(): Promise<void> {
   // generic baseVersion replacement would rewrite prior version headings in CHANGELOG.md
   const changelogRel = changelogInfo ? relative(pwd, changelogInfo.path) : null;
   if (changelogRel) files = files.filter(file => file !== changelogRel);
+
+  // built here so neither the changelog nor a companion lockfile counts as specified
+  const specifiedFiles = new Set(files);
 
   // lockfiles join their manifest in the commit, but never count as a bumped file
   files = Array.from(new Set(files.flatMap(file => {
@@ -333,7 +344,7 @@ async function main(): Promise<void> {
         return changelogInfo.entry;
       }
       // the tag is created further down, so priorLocalTagOid still reflects a pre-existing one
-      const since = priorLocalTagOid ? tagName : describeTag;
+      const since = priorLocalTagOid ? tagName : await lastTag();
       // https://git-scm.com/docs/pretty-formats
       const stdout = await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], `--pretty=format:* %s (%aN)`]);
       return stdout || undefined;

@@ -5,7 +5,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {
   isSemver, incrementSemver, replaceTokens, esc,
-  joinStrings, findUp, getFileChanges, write,
+  joinStrings, findUp, getFileChanges, write, findCompanionLockfile,
   readVersionFile,
   removeIgnoredFiles, getForgeTokens, githubTokenEnvNames, giteaTokenEnvNames,
   getRepoInfo, writeResult, createForgeRelease, pingForge,
@@ -845,6 +845,9 @@ test("replaceTokens", () => {
   expect(replaceTokens("v_MAJOR_._MINOR_._PATCH_", "2.3.4")).toEqual("v2.3.4");
   expect(replaceTokens("_VER_ _MAJOR_ _MINOR_ _PATCH_", "10.20.30")).toEqual("10.20.30 10 20 30");
   expect(replaceTokens("no tokens", "1.0.0")).toEqual("no tokens");
+  // the prerelease and build parts belong to _VER_ alone, never to _PATCH_
+  expect(replaceTokens("_VER_ _MAJOR_ _MINOR_ _PATCH_", "1.2.3-alpha.0")).toEqual("1.2.3-alpha.0 1 2 3");
+  expect(replaceTokens("_PATCH_", "1.2.3+build.5")).toEqual("3");
 });
 
 test("esc", () => {
@@ -930,9 +933,14 @@ test("prefix", () => withTmpDir(async (tmpDir) => {
 }));
 
 test("replace", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0\ncopyright YEAR_PLACEHOLDER");
-  await exec("node", [distPath, "--gitless", "--base", "1.0.0", "-r", "s#YEAR_PLACEHOLDER#_VER_#", "patch", "testfile.txt"], {cwd: tmpDir});
-  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1\ncopyright 1.0.1");
+  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0\ncopyright YEAR_PLACEHOLDER\nDROPME tail");
+  const base = ["--gitless", "--base", "1.0.0"];
+  // an empty replacement deletes, like sed
+  await exec("node", [distPath, ...base, "-r", "s#YEAR_PLACEHOLDER#_VER_#", "-r", "s#DROPME ##", "patch", "testfile.txt"], {cwd: tmpDir});
+  expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1\ncopyright 1.0.1\ntail");
+
+  const err = await runFail([...base, "-r", "s#a#b#q", "patch", "testfile.txt"], {cwd: tmpDir});
+  expect(err.output).toContain("Invalid replace string: s#a#b#q: Invalid flags");
 }));
 
 test("command", () => withTmpDir(async (tmpDir) => {
@@ -977,6 +985,12 @@ test("a packageManager pin carries the lockfile into the commit", () => withTmpD
   const {stdout: status} = await exec("git", ["status", "--porcelain", "--untracked-files=no"], opts);
   expect(status.trim()).toEqual("");
   expect(await readFile(join(tmpDir, "pnpm-lock.yaml"), "utf8")).toEqual("lockfileVersion: '9.0'\ntimerel: 5.8.8\n");
+}));
+
+test("a packageManager naming an Object.prototype key finds no lockfile", () => withTmpDir(async (tmpDir) => {
+  const manifest = join(tmpDir, "package.json");
+  await writeFile(manifest, JSON.stringify({name: "test-pkg", version: "1.0.0", packageManager: "constructor@1.0.0"}));
+  expect(findCompanionLockfile(manifest)).toBeNull();
 }));
 
 test("a companion package-lock.json is bumped, not just committed", () => withTmpDir(async (tmpDir) => {
@@ -1043,6 +1057,9 @@ test("tomlGetString edge cases", () => {
   expect(tomlGetString("# comment\n[project]\nversion = '1.0.0'", "project", "version")).toEqual("1.0.0");
   expect(tomlGetString("[project]\nname = 'test'", "project", "version")).toBeUndefined();
   expect(tomlGetString("[other]\nversion = '1.0.0'", "project", "version")).toBeUndefined();
+  expect(tomlGetString("[project] # note\nversion = '1.0.0'", "project", "version")).toEqual("1.0.0");
+  // a bracketed element of a multi-line array is not a table header
+  expect(tomlGetString("[project]\nm = [\n  [1, 2],\n]\nversion = '1.0.0'", "project", "version")).toEqual("1.0.0");
 });
 
 test("incrementSemver unknown level throws", () => {
@@ -1100,6 +1117,33 @@ test("CHANGELOG.md without entry falls back to git log", () => withTmpDir(async 
 
   const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
   expect(msg).toContain("tweak something");
+}));
+
+test("--base still bounds the git log fallback at the last tag", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
+  const {opts} = await setupReleaseRepo(tmpDir); // commits "Initial commit", tags 1.0.0
+
+  await exec("git", ["commit", "--allow-empty", "-m", "tweak something"], opts);
+
+  await exec("node", [distPath, "--no-push", "--base=1.0.0", "patch", "package.json"], opts);
+
+  const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(msg).toContain("tweak something");
+  expect(msg).not.toContain("Initial commit"); // the whole history, not the range after the tag
+}));
+
+test("a CHANGELOG.md-only bump is not read as a wrong base version", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
+  await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## 1.0.1\n- entry\n\n## 1.0.0\nold\n`);
+
+  const {opts} = await setupReleaseRepo(tmpDir);
+
+  await exec("node", [distPath, "--no-push", "patch", "CHANGELOG.md"], opts);
+
+  const today = new Date().toISOString().substring(0, 10);
+  expect(await readFile(join(tmpDir, "CHANGELOG.md"), "utf8")).toContain(`## 1.0.1 - ${today}`);
+  const {stdout: committed} = await exec("git", ["show", "--name-only", "--format=", "HEAD"], opts);
+  expect(committed.trim()).toEqual("CHANGELOG.md");
 }));
 
 test("CHANGELOG.md with existing date is left alone", () => withTmpDir(async (tmpDir) => {
