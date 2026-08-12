@@ -29,6 +29,10 @@ function stubGlobal(name: string, value: unknown) {
   }
 }
 
+// bun's --concurrent ignores `describe({concurrent: false})`, so tests touching global state opt out
+// one by one via its `test.serial`. vitest has no such thing and honors the describe option instead.
+const serialTest: typeof test = (test as any).serial ?? test;
+
 beforeAll(() => {
   vi.spyOn(console, "info").mockImplementation(() => {});
 });
@@ -428,7 +432,7 @@ const giteaInfo: RepoInfo = {owner: "o", repo: "r", host: "gitea.example.com", t
 
 // these stub globalThis.fetch; running them concurrently lets one test's stub leak into another
 describe("forge requests", {concurrent: false}, () => {
-  test("createForgeRelease github success skips cleanup on happy path", async () => {
+  serialTest("createForgeRelease github success skips cleanup on happy path", async () => {
     const mock = mockForgePost(Response.json({id: 4242, html_url: "https://github.com/o/r/releases/tag/1.0.1"}, {status: 201}));
     await createForgeRelease(githubInfo, "1.0.1", "changelog", ["gh-token"]);
     expect(mock).toHaveBeenCalledOnce();
@@ -443,7 +447,7 @@ describe("forge requests", {concurrent: false}, () => {
     expect(body.prerelease).toEqual(false);
   });
 
-  test("createForgeRelease gitea success skips cleanup on happy path", async () => {
+  serialTest("createForgeRelease gitea success skips cleanup on happy path", async () => {
     const mock = mockForgePost(Response.json({html_url: "https://gitea.example.com/o/r/releases/tag/2.0.0"}, {status: 201}));
     await createForgeRelease(giteaInfo, "2.0.0", "notes", ["gitea-tok"]);
     expect(mock).toHaveBeenCalledOnce();
@@ -452,13 +456,13 @@ describe("forge requests", {concurrent: false}, () => {
     expect(authOf(init)).toEqual("token gitea-tok");
   });
 
-  test("createForgeRelease prerelease tag", async () => {
+  serialTest("createForgeRelease prerelease tag", async () => {
     const mock = mockForgePost(Response.json({}, {status: 201}));
     await createForgeRelease(githubInfo, "1.0.0-beta.1", "body", ["tok"]);
     expect(JSON.parse(postCall(mock)[1]!.body as string).prerelease).toEqual(true);
   });
 
-  test.each([[401, "Unauthorized"], [403, "Forbidden"]])("createForgeRelease token fallback on %i", async (status, text) => {
+  serialTest.each([[401, "Unauthorized"], [403, "Forbidden"]])("createForgeRelease token fallback on %i", async (status, text) => {
     const mock = vi.fn()
       .mockResolvedValueOnce(new Response(text, {status}))
       .mockImplementation(() => Promise.resolve(Response.json({html_url: "https://github.com/o/r/releases/tag/1.0.0"}, {status: 201})));
@@ -467,24 +471,24 @@ describe("forge requests", {concurrent: false}, () => {
     expect(mock).toHaveBeenCalledTimes(2);
   });
 
-  test("createForgeRelease throws on non-conflict, non-auth error", async () => {
+  serialTest("createForgeRelease throws on non-conflict, non-auth error", async () => {
     stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Server error", {status: 500, statusText: "Internal Server Error"}))));
     await expect(createForgeRelease(githubInfo, "1.0.0", "body", ["tok"])).rejects.toThrow("500");
   });
 
-  test("createForgeRelease throws when all tokens fail", async () => {
+  serialTest("createForgeRelease throws when all tokens fail", async () => {
     stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Unauthorized", {status: 401, statusText: "Unauthorized"}))));
     await expect(createForgeRelease(githubInfo, "1.0.0", "body", ["tok1", "tok2"])).rejects.toThrow("401");
   });
 
-  test("createForgeRelease network error includes cause", async () => {
+  serialTest("createForgeRelease network error includes cause", async () => {
     stubGlobal("fetch", vi.fn().mockRejectedValue(
       new TypeError("fetch failed", {cause: new Error("getaddrinfo ENOTFOUND example.com")}),
     ));
     await expect(createForgeRelease(giteaInfo, "1.0.0", "body", ["tok"])).rejects.toThrow("getaddrinfo ENOTFOUND example.com");
   });
 
-  test("createForgeRelease cleans up draft on gitea 409 then retries", async () => {
+  serialTest("createForgeRelease cleans up draft on gitea 409 then retries", async () => {
     const mock = mockForgeConflictThenSuccess(
       409,
       [
@@ -503,7 +507,7 @@ describe("forge requests", {concurrent: false}, () => {
     expect(deleteCall[0]).toEqual("https://gitea.example.com/api/v1/repos/o/r/releases/35141");
   });
 
-  test("createForgeRelease cleans up draft on github 422 then retries", async () => {
+  serialTest("createForgeRelease cleans up draft on github 422 then retries", async () => {
     const mock = mockForgeConflictThenSuccess(
       422,
       [{id: 99, tag_name: "v1.0.0", draft: true}],
@@ -517,7 +521,7 @@ describe("forge requests", {concurrent: false}, () => {
     expect(authOf(deleteCall[1])).toEqual("Bearer tok");
   });
 
-  test("createForgeRelease propagates conflict when no matching draft to clean up", async () => {
+  serialTest("createForgeRelease propagates conflict when no matching draft to clean up", async () => {
     const mock = vi.fn((_url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
       if (method === "POST") return Promise.resolve(new Response("Release is has no Tag", {status: 409, statusText: "Conflict"}));
@@ -530,7 +534,7 @@ describe("forge requests", {concurrent: false}, () => {
     expect(methods).toEqual(["POST", "GET"]);
   });
 
-  test("createForgeRelease cleans up multiple matching drafts", async () => {
+  serialTest("createForgeRelease cleans up multiple matching drafts", async () => {
     const mock = mockForgeConflictThenSuccess(
       409,
       [
@@ -545,7 +549,7 @@ describe("forge requests", {concurrent: false}, () => {
     expect(deleteCalls).toHaveLength(2);
   });
 
-  test("createForgeRelease tolerates 404 on draft delete (already gone)", async () => {
+  serialTest("createForgeRelease tolerates 404 on draft delete (already gone)", async () => {
     let postCount = 0;
     const mock = vi.fn((_url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
@@ -564,7 +568,7 @@ describe("forge requests", {concurrent: false}, () => {
     expect(methods).toEqual(["POST", "GET", "DELETE", "POST"]);
   });
 
-  test("createForgeRelease throws if draft delete fails non-404", async () => {
+  serialTest("createForgeRelease throws if draft delete fails non-404", async () => {
     stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
       if (method === "POST") return Promise.resolve(new Response("conflict", {status: 409, statusText: "Conflict"}));
@@ -575,7 +579,7 @@ describe("forge requests", {concurrent: false}, () => {
     await expect(createForgeRelease(githubInfo, "v1.0.0", "body", ["tok"])).rejects.toThrow("Failed to delete draft release 5");
   });
 
-  test("pingForge names a disabled gitea releases unit, except for repo admins who bypass it", async () => {
+  serialTest("pingForge names a disabled gitea releases unit, except for repo admins who bypass it", async () => {
     mockForgePost(Response.json({has_releases: false, permissions: {push: true, admin: false}}, {status: 200}));
     expect(await pingForge(giteaInfo, ["tok"])).toEqual("the Releases unit is disabled on o/r; enable it in the repository settings");
     mockForgePost(Response.json({has_releases: false, permissions: {push: true, admin: true}}, {status: 200}));
@@ -1283,45 +1287,49 @@ async function withTokenEnv(env: Record<string, string>, fn: () => Promise<void>
 
 const giteaHost = (host: string): RepoInfo => ({...giteaInfo, host});
 
-test("getForgeTokens reads GitHub env names", () => withTokenEnv({GH_TOKEN: "gh-tok"}, async () => {
-  expect(await getForgeTokens(githubInfo)).toContain("gh-tok");
-}));
+// these swap token env vars in and out of process.env; running them concurrently lets one test
+// delete another's tokens
+describe("token env", {concurrent: false}, () => {
+  serialTest("getForgeTokens reads GitHub env names", () => withTokenEnv({GH_TOKEN: "gh-tok"}, async () => {
+    expect(await getForgeTokens(githubInfo)).toContain("gh-tok");
+  }));
 
-test("getForgeTokens sends Gitea env tokens only to the GITEA_URL host", () => withTokenEnv({
-  GITEA_TOKEN: "gitea-tok", GITEA_URL: "https://gitea.example.com",
-}, async () => {
-  expect(await getForgeTokens(giteaHost("gitea.example.com"))).toEqual(["gitea-tok"]);
-  expect(await getForgeTokens(giteaHost("other.example.com"))).toEqual([]);
-}));
+  serialTest("getForgeTokens sends Gitea env tokens only to the GITEA_URL host", () => withTokenEnv({
+    GITEA_TOKEN: "gitea-tok", GITEA_URL: "https://gitea.example.com",
+  }, async () => {
+    expect(await getForgeTokens(giteaHost("gitea.example.com"))).toEqual(["gitea-tok"]);
+    expect(await getForgeTokens(giteaHost("other.example.com"))).toEqual([]);
+  }));
 
-test("getForgeTokens matches a VERSIONS_FORGE_TOKENS host carrying a port", () => withTokenEnv({
-  VERSIONS_FORGE_TOKENS: "localhost:3500:pair-tok", GITEA_TOKEN: "gitea-tok", GITEA_URL: "https://localhost:3500",
-}, async () => {
-  expect(await getForgeTokens(giteaHost("localhost:3500"))).toEqual(["pair-tok"]);
-  // the bare host must not claim the ported entry, which would hand back `3500:pair-tok`
-  expect(await getForgeTokens(giteaHost("localhost"))).toEqual([]);
-}));
+  serialTest("getForgeTokens matches a VERSIONS_FORGE_TOKENS host carrying a port", () => withTokenEnv({
+    VERSIONS_FORGE_TOKENS: "localhost:3500:pair-tok", GITEA_TOKEN: "gitea-tok", GITEA_URL: "https://localhost:3500",
+  }, async () => {
+    expect(await getForgeTokens(giteaHost("localhost:3500"))).toEqual(["pair-tok"]);
+    // the bare host must not claim the ported entry, which would hand back `3500:pair-tok`
+    expect(await getForgeTokens(giteaHost("localhost"))).toEqual([]);
+  }));
 
-// mirrors what actions/checkout writes, includeIf and all, so a regression to `git config --local` fails here
-test("getForgeTokens recovers the CI token from the git config extraheader", () => withTmpDir(async (tmpDir) => {
-  await exec("git", ["init", "-q"], {cwd: tmpDir});
-  const globalConfig = join(tmpDir, "global.config");
-  const basic = Buffer.from("x-access-token:ci-tok").toString("base64");
-  await exec("git", ["config", "--file", globalConfig, "http.https://ci.example.com/.extraheader", `AUTHORIZATION: basic ${basic}`], {cwd: tmpDir});
+  // mirrors what actions/checkout writes, includeIf and all, so a regression to `git config --local` fails here
+  serialTest("getForgeTokens recovers the CI token from the git config extraheader", () => withTmpDir(async (tmpDir) => {
+    await exec("git", ["init", "-q"], {cwd: tmpDir});
+    const globalConfig = join(tmpDir, "global.config");
+    const basic = Buffer.from("x-access-token:ci-tok").toString("base64");
+    await exec("git", ["config", "--file", globalConfig, "http.https://ci.example.com/.extraheader", `AUTHORIZATION: basic ${basic}`], {cwd: tmpDir});
 
-  // checkout puts the credential outside .git/config, so a regression to `--local` fails here
-  const saved = process.env.GIT_CONFIG_GLOBAL;
-  process.env.GIT_CONFIG_GLOBAL = globalConfig;
-  try {
-    await withTokenEnv({}, async () => {
-      expect(await getForgeTokens(giteaHost("ci.example.com"), tmpDir)).toEqual(["ci-tok"]);
-      expect(await getForgeTokens(giteaHost("elsewhere.example.com"), tmpDir)).toEqual([]);
-    });
-  } finally {
-    if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL;
-    else process.env.GIT_CONFIG_GLOBAL = saved;
-  }
-}));
+    // checkout puts the credential outside .git/config, so a regression to `--local` fails here
+    const saved = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    try {
+      await withTokenEnv({}, async () => {
+        expect(await getForgeTokens(giteaHost("ci.example.com"), tmpDir)).toEqual(["ci-tok"]);
+        expect(await getForgeTokens(giteaHost("elsewhere.example.com"), tmpDir)).toEqual([]);
+      });
+    } finally {
+      if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = saved;
+    }
+  }));
+});
 
 test("getRepoInfo", async () => {
   const info = await getRepoInfo();
