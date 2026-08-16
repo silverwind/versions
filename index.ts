@@ -18,10 +18,12 @@ const commands = new Set(["patch", "minor", "major", "prerelease"]);
 
 function end(err?: unknown): void {
   if (!err) return exit(0);
-  const msg = err instanceof SubprocessError ? `${err.message}\n${err.output}` :
-    err instanceof Error ? (err.stack || err.message).trim() :
-      err;
-  console.error(msg);
+  if (err instanceof Error) {
+    if (err.stack) logVerbose(err.stack);
+    console.error(err instanceof SubprocessError ? `${err.message}\n${err.output}` : err.message);
+  } else {
+    console.error(err);
+  }
   exit(1);
 }
 
@@ -69,7 +71,7 @@ async function main(): Promise<void> {
     end();
   }
 
-  if (!commands.has(level) || args.help) {
+  if (!level || args.help) {
     console.info(`usage: versions [options] patch|minor|major|prerelease [files...]
 
   Options:
@@ -86,7 +88,7 @@ async function main(): Promise<void> {
     -R, --release         Create a GitHub or Gitea release with the changelog as body
     -n, --no-push         Skip pushing commit and tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
-    -B, --branch <name>   Git branch to push. Default is the current branch
+    -B, --branch <name>   Remote branch to push HEAD to. Default is the current branch
     -V, --verbose         Print verbose output to stderr
     -v, --version         Print the version
     -h, --help            Print this help
@@ -100,6 +102,10 @@ async function main(): Promise<void> {
     $ versions prerelease --preid=alpha package.json
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
     end();
+  }
+
+  if (!commands.has(level)) {
+    throw new Error(`invalid level: ${level}`);
   }
 
   if (level === "prerelease" && !args.preid) {
@@ -146,7 +152,7 @@ async function main(): Promise<void> {
   });
   const pushBranchP = willPush ? (async () => {
     if (typeof args.branch === "string") return args.branch;
-    const {stdout} = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const {stdout} = await exec("git", ["branch", "--show-current"]); // empty on detached HEAD, unlike rev-parse which fails on an unborn HEAD
     return stdout.trim();
   })() : Promise.resolve("");
   const identityOkP = (async () => !willCommit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
@@ -160,11 +166,11 @@ async function main(): Promise<void> {
   // baseVersion + pushBranch unblock tagRef/branchRef computation; throw the two fatal
   // configuration errors that can't sensibly be deferred to validate (incrementSemver
   // would otherwise blow up on an empty base).
-  const [{baseVersion, baseSource}, pushBranch] = await Promise.all([baseVersionP, pushBranchP]);
+  const [{baseVersion, baseSource, baseTag}, pushBranch] = await Promise.all([baseVersionP, pushBranchP]);
   if (args.gitless && !baseVersion) {
     throw new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`);
   }
-  if (willPush && pushBranch === "HEAD") {
+  if (willPush && !pushBranch) {
     throw new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push.");
   }
   logVerbose(`base version ${baseVersion} from ${baseSource}`);
@@ -196,23 +202,25 @@ async function main(): Promise<void> {
     return !state?.branch || await tryExec("git", ["merge-base", "--is-ancestor", state.branch, "HEAD"]) !== null;
   })();
 
+  const changelogPath = findUp("CHANGELOG.md", projectRoot, repoRoot);
   const changelogInfo = (() => {
-    const path = findUp("CHANGELOG.md", projectRoot, repoRoot);
-    if (!path) return null;
+    if (!changelogPath) return null;
     let original: string;
     try {
-      original = readFileSync(path, "utf8");
+      original = readFileSync(changelogPath, "utf8");
     } catch {
       return null;
     }
     const entry = readChangelogEntry(original, newVersion);
     if (!entry) return null;
-    return {path, original, entry, updated: updateChangelogHeadingDate(original, newVersion, today)};
+    return {original, entry, updated: updateChangelogHeadingDate(original, newVersion, today)};
   })();
 
   // generic baseVersion replacement would rewrite prior version headings in CHANGELOG.md
-  const changelogRel = changelogInfo ? relative(pwd, changelogInfo.path) : null;
-  if (changelogRel) files = files.filter(file => file !== changelogRel);
+  const changelogRel = changelogPath ? relative(pwd, changelogPath) : null;
+  // it is found on its own, so naming it without a matching entry is a mistake, not a no-op
+  const namedChangelogUnused = !changelogInfo && changelogRel !== null && files.includes(changelogRel);
+  files = files.filter(file => file !== changelogRel);
 
   // built here so neither the changelog nor a companion lockfile counts as specified
   const specifiedFiles = new Set(files);
@@ -262,6 +270,9 @@ async function main(): Promise<void> {
   // and a companion lockfile is not a bump. --gitless has no commit to be empty.
   if (!args.gitless && specifiedFiles.size > 0 && fileChanges.every(f => !f.changed || !f.specified)) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
+  }
+  if (namedChangelogUnused) {
+    errors.push(`${changelogRel} has no entry for ${newVersion}`);
   }
   if (!identityOk) {
     errors.push("git author identity unavailable; configure user.name + user.email or set GIT_AUTHOR_NAME + GIT_AUTHOR_EMAIL");
@@ -340,11 +351,11 @@ async function main(): Promise<void> {
     const filesToAdd = !args.all && allFiles.length ? await removeIgnoredFiles(allFiles) : [];
     const changelogBody = await (async () => {
       if (changelogInfo) {
-        logVerbose(`using changelog entry from ${changelogInfo.path}`);
+        logVerbose(`using changelog entry from ${changelogPath}`);
         return changelogInfo.entry;
       }
       // the tag is created further down, so priorLocalTagOid still reflects a pre-existing one
-      const since = priorLocalTagOid ? tagName : await lastTag();
+      const since = priorLocalTagOid ? tagName : baseTag ?? await lastTag();
       // https://git-scm.com/docs/pretty-formats
       const stdout = await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], `--pretty=format:* %s (%aN)`]);
       return stdout || undefined;
@@ -354,7 +365,7 @@ async function main(): Promise<void> {
     const commitArgs = args.all ?
       ["commit", "-a", "--allow-empty", "-F", "-"] :
       filesToAdd.length ?
-        ["commit", "-i", "-F", "-", "--", ...filesToAdd] :
+        ["commit", "-o", "-F", "-", "--", ...filesToAdd] :
         ["commit", "--allow-empty", "-F", "-"];
 
     writeResult(await exec("git", commitArgs, {stdin: commitMsg}));
@@ -375,7 +386,7 @@ async function main(): Promise<void> {
 
     // --atomic: server-side all-or-nothing. Either both refs update or neither does;
     // partial state (the orphan-tag bug) is impossible.
-    writeResult(await exec("git", ["push", "--atomic", pushRemote, pushBranch, tagName]));
+    writeResult(await exec("git", ["push", "--atomic", pushRemote, `HEAD:${branchRef}`, tagRef]));
     pushed = true;
 
     if (wantRelease) {

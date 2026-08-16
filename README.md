@@ -31,7 +31,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -R, --release         Create a GitHub or Gitea release with the changelog as body
     -n, --no-push         Skip pushing commit and tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
-    -B, --branch <name>   Git branch to push. Default is the current branch
+    -B, --branch <name>   Remote branch to push HEAD to. Default is the current branch
     -V, --verbose         Print verbose output to stderr
     -v, --version         Print the version
     -h, --help            Print this help
@@ -49,6 +49,8 @@ usage: versions [options] patch|minor|major|prerelease [files...]
 ## Lockfiles
 
 When a `package.json` with a `packageManager` pin changes, its lockfile joins the same commit. A `package-lock.json` also gets the new version, other lockfiles are committed untouched.
+
+In a `pyproject.toml` the version is read and written in `[project]` and `[tool.poetry]`. A `uv.lock` is not picked up automatically, name it as a file to get its own package entry bumped, which requires the `pyproject.toml` next to it.
 
 ## Signing commits and tags
 
@@ -75,7 +77,7 @@ If a `CHANGELOG.md` is present at the project root with a heading for the new ve
 
 ## Creating releases
 
-When using the `--release` option, `versions` will automatically create a GitHub or Gitea release after pushing the tag. The release body will contain the same changelog as the commit message. `--release` requires the push and is incompatible with `--no-push`.
+When using the `--release` option, `versions` will automatically create a GitHub or Gitea release after pushing the tag. The release body is the same changelog entry or `git log` summary the commit message carries, without the leading tag name line and any `--message` strings, or just the tag name if there is neither. `--release` requires the push and is incompatible with `--no-push`.
 
 The tool will automatically detect whether you're using GitHub or Gitea based on your git remote URL.
 

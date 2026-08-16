@@ -876,7 +876,7 @@ test("findUp", () => withTmpDir(async (tmpDir) => {
   expect(findUp("nonexistent.txt", subDir, tmpDir)).toBeNull();
 }));
 
-// no level hits the first operand of the `!commands.has(level) || args.help` guard, --help on a
+// no level hits the first operand of the `!level || args.help` guard, --help on a
 // valid level hits the second
 test.each([[[]], [["patch", "--help"]]])("prints help for %j", async (args) => {
   const {stdout} = await exec("node", [distPath, ...args]);

@@ -34,7 +34,7 @@ test-coverage: node_modules build
 .PHONY: build
 build: node_modules $(DIST_FILES)
 
-$(DIST_FILES): $(SOURCE_FILES) pnpm-lock.yaml package.json tsdown.config.ts
+$(DIST_FILES): $(SOURCE_FILES) pnpm-lock.yaml package.json tsdown.config.ts | node_modules
 	pnpm exec tsdown
 	chmod +x $(DIST_FILES)
 
@@ -49,7 +49,7 @@ update-js: node_modules
 	@touch node_modules
 
 .PHONY: publish
-publish: node_modules
+publish: node_modules build
 	pnpm publish --no-git-checks
 
 .PHONY: patch minor major

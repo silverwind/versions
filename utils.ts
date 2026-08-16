@@ -47,6 +47,12 @@ type ExecOptions = {
 };
 
 export const reNewline = /\r?\n/;
+const reUrlCredential = /(\/\/)[^/\s@]+@/g;
+
+// a token embedded in a remote URL must reach neither the log nor an error message
+function redactCredentials(message: string): string {
+  return message.replace(reUrlCredential, "$1***@");
+}
 // anchored so a bracketed element of a multi-line array is not read as a table header
 const reTomlSection = /^\[\[?([^[\]]+)\]\]?\s*(?:#.*)?$/;
 
@@ -54,7 +60,7 @@ export function detectEol(s: string): string {
   return reNewline.exec(s)?.[0] ?? "\n";
 }
 
-type TomlVisitor = (line: string, lineIndex: number, lines: string[]) => boolean | void;
+type TomlVisitor = (line: string, lineIndex: number, lines: string[], section: string) => boolean | void;
 
 function visitTomlSection(content: string, sections: readonly string[], visit: TomlVisitor): string[] {
   const lines = content.split(reNewline);
@@ -67,7 +73,7 @@ function visitTomlSection(content: string, sections: readonly string[], visit: T
       section = header[1].trim();
       continue;
     }
-    if (section && sections.includes(section) && visit(lines[i], i, lines)) break;
+    if (section && sections.includes(section) && visit(lines[i], i, lines, section)) break;
   }
   return lines;
 }
@@ -82,15 +88,15 @@ export function tomlGetString(content: string, section: string, key: string): st
   return value;
 }
 
+// replaces the first match in each listed section, as a pyproject may carry the version in both
 export function tomlReplaceFirst(content: string, sections: readonly string[], lineRe: RegExp, replacement: string): string {
-  let changed = false;
-  const lines = visitTomlSection(content, sections, (line, i, ls) => {
-    if (!lineRe.test(line)) return false;
+  const done = new Set<string>();
+  const lines = visitTomlSection(content, sections, (line, i, ls, section) => {
+    if (done.has(section) || !lineRe.test(line)) return;
     ls[i] = line.replace(lineRe, replacement);
-    changed = true;
-    return true;
+    done.add(section);
   });
-  return changed ? lines.join(detectEol(content)) : content;
+  return done.size ? lines.join(detectEol(content)) : content;
 }
 
 const reJsonWhitespace = /[ \t\n\r]/;
@@ -150,17 +156,20 @@ export async function tryExec(file: string, args: readonly string[], options?: E
 }
 
 export function exec(file: string, args: readonly string[], options?: ExecOptions): Promise<Result> {
-  if (verbose) logVerbose(`$ ${args.length ? `${file} ${args.map(quoteArg).join(" ")}` : file}`);
+  if (verbose) logVerbose(redactCredentials(`$ ${[file, ...args.map(quoteArg)].join(" ")}`));
   return new Promise((resolve, reject) => {
-    const child = execFileCb(file, args as string[], {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env, timeout: options?.timeout}, (error, stdout, stderr) => {
+    // must stay under MAX_STRING_LENGTH: above it node throws RangeError inside its own exit
+    // handler, so the callback never fires and the promise never settles
+    const child = execFileCb(file, args as string[], {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env, timeout: options?.timeout, maxBuffer: 256 * 1024 * 1024}, (error, stdout, stderr) => {
       if (error) {
-        reject(new SubprocessError(error.message.split(reNewline)[0], stdout, stderr, typeof error.code === "number" ? error.code : null));
+        // node puts the full argv in the message, so this is the second place a credential escapes
+        reject(new SubprocessError(redactCredentials(error.message.split(reNewline)[0]), stdout, stderr, typeof error.code === "number" ? error.code : null));
       } else {
         resolve({stdout: stdout.trimEnd(), stderr: stderr.trimEnd()});
       }
     });
-    if (options?.stdin !== undefined) {
-      child.stdin!.end(options.stdin);
-    }
+    const stdin = child.stdin!;
+    stdin.on("error", () => {}); // EPIPE when the child already exited, its exit code reports that
+    stdin.end(options?.stdin ?? ""); // always close, or a command reading stdin hangs forever
   });
 }

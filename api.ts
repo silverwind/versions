@@ -132,7 +132,7 @@ export function findCompanionLockfile(file: string): string | null {
   return null;
 }
 
-type BaseVersion = {baseVersion: string, baseSource: string};
+type BaseVersion = {baseVersion: string, baseSource: string, baseTag?: string};
 
 type ResolveBaseVersionOpts = {
   base?: string,
@@ -150,11 +150,11 @@ export async function resolveBaseVersion({base, gitless, lastTag, projectRoot, s
 
   if (!gitless) {
     const describeTag = await lastTag();
-    if (isSemver(describeTag)) return {baseVersion: stripV(describeTag), baseSource: "git describe"};
+    if (isSemver(describeTag)) return {baseVersion: stripV(describeTag), baseSource: "git describe", baseTag: describeTag};
 
     const tagList = await tryExec("git", ["tag", "--list", "--sort=-creatordate"]);
     const tag = tagList?.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
-    if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list"};
+    if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", baseTag: tag};
   }
 
   for (const filename of ["package.json", "pyproject.toml"]) {
@@ -259,7 +259,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
     // scope to [project] / [tool.poetry] — other sections may have unrelated `version` keys
-    const versionLine = /^(version\s*=\s*["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)$/;
+    const versionLine = /^(\s*version\s*=\s*["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)$/;
     newData = tomlReplaceFirst(oldData, pyprojectSections, versionLine, `$1${newVersion}$2`);
   } else if (fileName === "uv.lock") {
     const projStr = readFileSync(file.replace(/uv\.lock$/, "pyproject.toml"), "utf8");
@@ -316,7 +316,7 @@ function urlHost(url = ""): string {
 
 // host may carry a port, so the last colon separates host from token
 function pairToken(host: string): string | null {
-  for (const entry of (env.VERSIONS_FORGE_TOKENS ?? "").split(",")) {
+  for (const entry of (env.VERSIONS_FORGE_TOKENS ?? "").split(",").map(pair => pair.trim())) {
     const sep = entry.lastIndexOf(":");
     if (sep > 0 && entry.slice(0, sep) === host) return entry.slice(sep + 1);
   }
