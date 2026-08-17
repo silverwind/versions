@@ -512,15 +512,18 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
       }
       await ensureOk(response, label);
       // Both GitHub and Gitea return `permissions: {push, admin, pull, ...}` on authenticated
-      // repo GETs. If the field is present and push/admin are both false, release creation
-      // will 403 — abort now rather than after the push has landed. Throw `AuthRetryable`
-      // so `withTokens` falls through to the next token: a different token may have push.
+      // repo GETs. If push/admin are both false, release creation will 403 — abort now rather
+      // than after the push has landed. Throw `AuthRetryable` so `withTokens` falls through to
+      // the next token: a different token may have push. A `pull: false` after a successful read
+      // is not about this token: installation tokens report every permission false.
+      // https://github.com/orgs/community/discussions/73397
+      // https://github.com/orgs/community/discussions/159031
       let body: any = null;
       try {
         body = await response.json();
       } catch {}
       const perms = body?.permissions;
-      if (perms && perms.push !== true && perms.admin !== true) {
+      if (perms?.pull === true && perms.push !== true && perms.admin !== true) {
         throw new AuthRetryable(`token lacks push permission on ${repoInfo.owner}/${repoInfo.repo}`);
       }
       // Gitea 403s every /releases route when the repo's Releases unit is off, with a message

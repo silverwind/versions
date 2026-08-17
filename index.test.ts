@@ -579,6 +579,13 @@ describe("forge requests", {concurrent: false}, () => {
     await expect(createForgeRelease(githubInfo, "v1.0.0", "body", ["tok"])).rejects.toThrow("Failed to delete draft release 5");
   });
 
+  serialTest("pingForge gates on push permission, except on the all-false set of installation tokens", async () => {
+    mockForgePost(Response.json({permissions: {push: false, admin: false, pull: true}}, {status: 200}));
+    expect(await pingForge(githubInfo, ["tok"])).toEqual("token lacks push permission on o/r");
+    mockForgePost(Response.json({permissions: {push: false, admin: false, pull: false}}, {status: 200}));
+    expect(await pingForge(githubInfo, ["tok"])).toBeNull();
+  });
+
   serialTest("pingForge names a disabled gitea releases unit, except for repo admins who bypass it", async () => {
     mockForgePost(Response.json({has_releases: false, permissions: {push: true, admin: false}}, {status: 200}));
     expect(await pingForge(giteaInfo, ["tok"])).toEqual("the Releases unit is disabled on o/r; enable it in the repository settings");
