@@ -348,6 +348,22 @@ old
   expect(readChangelogEntry(md, "v1.2.3")).toEqual("### Added\n- new thing\n\n### Fixed\n- broken thing");
   expect(readChangelogEntry(md, "9.9.9")).toBeNull();
 
+  // Keep a Changelog trails link definitions below every section, so the newest
+  // entry must not swallow them just because no heading follows it.
+  const links = `# Changelog
+
+## [1.0.0] - 2024-01-15
+- thing
+
+[unreleased]: https://example.com/compare/v1.0.0...HEAD
+[1.0.0]: https://example.com/compare/v0.9.0...v1.0.0
+`;
+  expect(readChangelogEntry(links, "1.0.0")).toEqual("- thing");
+  // a reference-style link cited by the entry itself is kept, only the trailing run goes
+  expect(readChangelogEntry("## 1.0.0\n\n[pr]: https://e.com/1\n\n- see [pr]\n\n[1.0.0]: https://e.com/c\n", "1.0.0"))
+    .toEqual("[pr]: https://e.com/1\n\n- see [pr]");
+  expect(readChangelogEntry("## 1.0.0\n\n[1.0.0]: https://e.com/c\n", "1.0.0")).toBeNull();
+
   expect(readChangelogEntry("# 1.0.0\n\nbody\n", "1.0.0")).toEqual("body");
   expect(readChangelogEntry("# 1.0.0\n\nbody\n", "1.0.10")).toBeNull();
   expect(readChangelogEntry("## 1.0.0\n## 1.0.1\nb\n", "1.0.0")).toBeNull();

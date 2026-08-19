@@ -170,6 +170,7 @@ const reHeading = /^(#+)\s+(.*?)\s*$/;
 // Three groups of 2-4 chars from Y/M/D/X/? separated by `-`, `/`, `.`, or whitespace.
 // Covers YYYY-MM-DD, xxxx-xx-xx, ????-??-??, DD-MM-YYYY, YYYY/MM/DD etc.
 const rePlaceholderDate = /[YMDX?]{2,4}[-/. ][YMDX?]{2,4}[-/. ][YMDX?]{2,4}/i;
+const reLinkDefinition = /^\[[^\]]+\]:\s/;
 
 function findVersionHeading(lines: string[], version: string): {index: number, level: number} | null {
   // Non-version-char boundaries so "1.2.3" doesn't match "1.2.30" or "1.2.3-rc.1".
@@ -190,7 +191,11 @@ function extractEntry(lines: string[], head: {index: number, level: number}): st
       break;
     }
   }
-  return lines.slice(head.index + 1, end).join("\n").trim() || null;
+  const entry = lines.slice(head.index + 1, end);
+  // Keep a Changelog puts its link definitions last, below every section, so the
+  // newest entry would otherwise swallow them when no heading follows it.
+  while (entry.length && (reLinkDefinition.test(entry.at(-1)!) || !entry.at(-1)!.trim())) entry.pop();
+  return entry.join("\n").trim() || null;
 }
 
 function updateHeadingDateInLines(lines: string[], index: number, date: string, eol: string): string | null {
