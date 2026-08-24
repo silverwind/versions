@@ -5,15 +5,17 @@ import {
 import {basename, dirname, join} from "node:path";
 import {Buffer} from "node:buffer";
 import {env, platform, stderr, stdout} from "node:process";
-import {readFileSync, writeFileSync, accessSync, truncateSync} from "node:fs";
+import {readFileSync, writeFileSync, accessSync, existsSync, truncateSync} from "node:fs";
 import {EOL} from "node:os";
 import {styleText} from "node:util";
 
 const reEscapeChars = /[|\\{}()[\]^$+*?.-]/g;
 const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const rePrereleaseIdNum = /^([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*)\.(\d+)$/;
-const reDatePattern = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/g;
-const reDate = /(?<=[^0-9]|^)[0-9]{4}-[0-9]{2}-[0-9]{2}(?=[^0-9]|$)/;
+const reDateGlobal = /(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)/g;
+const reDate = /(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)/;
+// scope to [project] / [tool.poetry], other sections may have unrelated `version` keys
+const reTomlVersionLine = /^(\s*version\s*=\s*["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)$/;
 const pyprojectSections: readonly string[] = ["project", "tool.poetry"];
 const handledLockfiles = new Set(["package-lock.json", "uv.lock"]);
 const reLockfileName = /(?:^|[.-])lock/i;
@@ -31,7 +33,7 @@ export function isSemver(str: string): boolean {
 }
 
 export function replaceTokens(str: string, newVersion: string): string {
-  const [, major, minor, patch] = reSemver.exec(stripV(newVersion)) ?? [];
+  const [, major, minor, patch] = reSemver.exec(stripV(newVersion))!;
   return str
     .replaceAll("_VER_", newVersion)
     .replaceAll("_MAJOR_", major)
@@ -86,13 +88,12 @@ export function readVersionFile(filename: string, dir: string, stopDir?: string)
 
 function pyprojectGet(content: string, key: string): string | undefined {
   for (const section of pyprojectSections) {
-    const v = tomlGetString(content, section, key);
-    if (v) return v;
+    const version = tomlGetString(content, section, key);
+    if (version) return version;
   }
   return undefined;
 }
 
-// The version a manifest declares about itself, from content already in hand.
 export function readDeclaredVersion(file: string, data: string): string | null {
   const fileName = basename(file);
   try {
@@ -126,8 +127,8 @@ export function findCompanionLockfile(file: string): string | null {
   if (typeof packageManager !== "string") return null;
   const dir = dirname(file);
   for (const name of packageManagerLockfiles.get(packageManager.split("@")[0]) ?? []) {
-    const path = findUp(name, dir, dir); // stopDir === dir: only look next to the manifest
-    if (path) return path;
+    const path = join(dir, name);
+    if (existsSync(path)) return path;
   }
   return null;
 }
@@ -153,7 +154,7 @@ export async function resolveBaseVersion({base, gitless, lastTag, projectRoot, s
     if (isSemver(describeTag)) return {baseVersion: stripV(describeTag), baseSource: "git describe", baseTag: describeTag};
 
     const tagList = await tryExec("git", ["tag", "--list", "--sort=-creatordate"]);
-    const tag = tagList?.split(reNewline).map(v => v.trim()).find(t => t && isSemver(t));
+    const tag = tagList?.split(reNewline).find(isSemver);
     if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", baseTag: tag};
   }
 
@@ -167,14 +168,13 @@ export async function resolveBaseVersion({base, gitless, lastTag, projectRoot, s
 }
 
 const reHeading = /^(#+)\s+(.*?)\s*$/;
-// Three groups of 2-4 chars from Y/M/D/X/? separated by `-`, `/`, `.`, or whitespace.
-// Covers YYYY-MM-DD, xxxx-xx-xx, ????-??-??, DD-MM-YYYY, YYYY/MM/DD etc.
+// YYYY-MM-DD, xxxx-xx-xx, ????-??-??, DD-MM-YYYY, YYYY/MM/DD
 const rePlaceholderDate = /[YMDX?]{2,4}[-/. ][YMDX?]{2,4}[-/. ][YMDX?]{2,4}/i;
 const reLinkDefinition = /^\[[^\]]+\]:\s/;
 
 function findVersionHeading(lines: string[], version: string): {index: number, level: number} | null {
   // Non-version-char boundaries so "1.2.3" doesn't match "1.2.30" or "1.2.3-rc.1".
-  const re = new RegExp(`(?:^|[^\\d.\\-])v?${esc(stripV(version))}(?:[^\\d.\\-]|$)`, "i");
+  const re = new RegExp(`(?<![\\d.-])v?${esc(stripV(version))}(?![\\d.-])`, "i");
   for (let i = 0; i < lines.length; i++) {
     const m = reHeading.exec(lines[i]);
     if (m && re.test(m[2])) return {index: i, level: m[1].length};
@@ -192,26 +192,11 @@ function extractEntry(lines: string[], head: {index: number, level: number}): st
     }
   }
   const entry = lines.slice(head.index + 1, end);
-  // Keep a Changelog puts its link definitions last, below every section, so the
-  // newest entry would otherwise swallow them when no heading follows it.
+  // Keep a Changelog trails link definitions below every section, the last entry would swallow them
   while (entry.length && (reLinkDefinition.test(entry.at(-1)!) || !entry.at(-1)!.trim())) entry.pop();
   return entry.join("\n").trim() || null;
 }
 
-function updateHeadingDateInLines(lines: string[], index: number, date: string, eol: string): string | null {
-  const heading = lines[index];
-  if (rePlaceholderDate.test(heading)) {
-    lines[index] = heading.replace(rePlaceholderDate, date);
-  } else if (reDate.test(heading)) {
-    return null;
-  } else {
-    lines[index] = `${heading.trimEnd()} - ${date}`;
-  }
-  return lines.join(eol);
-}
-
-// Lenient about heading shape: matches "# 1.2.3", "## v1.2.3", "## [1.2.3]",
-// "## [1.2.3] - 2024-01-15", "## 1.2.3 (2024-01-15)", etc.
 export function readChangelogEntry(content: string, version: string): string | null {
   const lines = content.split(reNewline);
   const head = findVersionHeading(lines, version);
@@ -221,14 +206,23 @@ export function readChangelogEntry(content: string, version: string): string | n
 export function updateChangelogHeadingDate(content: string, version: string, date: string): string | null {
   const lines = content.split(reNewline);
   const head = findVersionHeading(lines, version);
-  return head ? updateHeadingDateInLines(lines, head.index, date, detectEol(content)) : null;
+  if (!head) return null;
+  const heading = lines[head.index];
+  if (rePlaceholderDate.test(heading)) {
+    lines[head.index] = heading.replace(rePlaceholderDate, date);
+  } else if (reDate.test(heading)) {
+    return null; // already dated
+  } else {
+    lines[head.index] = `${heading.trimEnd()} - ${date}`;
+  }
+  return lines.join(detectEol(content));
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
   // check-ignore exits 1 when nothing is ignored and 128 on error, both meaning "keep everything"
-  const stdout = await tryExec("git", ["check-ignore", "--", ...files], {cwd});
-  if (!stdout) return files;
-  const ignoredFiles = new Set<string>(stdout.split(reNewline));
+  const ignored = await tryExec("git", ["check-ignore", "--", ...files], {cwd});
+  if (!ignored) return files;
+  const ignoredFiles = new Set<string>(ignored.split(reNewline));
   return files.filter(file => !ignoredFiles.has(file));
 }
 
@@ -242,7 +236,6 @@ type GetFileChangesOpts = {
 
 type FileChanges = {newData: string, oldData: string};
 
-// Returns null for files that must not be touched at all.
 export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): FileChanges | null {
   const fileName = basename(file);
 
@@ -263,22 +256,19 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     if (lockFile.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
-    // scope to [project] / [tool.poetry] — other sections may have unrelated `version` keys
-    const versionLine = /^(\s*version\s*=\s*["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)$/;
-    newData = tomlReplaceFirst(oldData, pyprojectSections, versionLine, `$1${newVersion}$2`);
+    newData = tomlReplaceFirst(oldData, pyprojectSections, reTomlVersionLine, `$1${newVersion}$2`);
   } else if (fileName === "uv.lock") {
-    const projStr = readFileSync(file.replace(/uv\.lock$/, "pyproject.toml"), "utf8");
+    const projStr = readFileSync(join(dirname(file), "pyproject.toml"), "utf8");
     const name = pyprojectGet(projStr, "name");
     if (!name) throw new Error(`Could not determine project name from pyproject.toml for ${file}`);
     const re = new RegExp(`(\\[\\[package\\]\\]\r?\nname = "${esc(name)}"\r?\nversion = ").+?(")`);
     newData = oldData.replace(re, `$1${newVersion}$2`);
   } else {
-    const re = new RegExp(esc(baseVersion), "g");
-    newData = oldData.replace(re, newVersion);
+    newData = oldData.replaceAll(baseVersion, newVersion);
   }
 
   if (date) {
-    newData = newData.replace(reDatePattern, date);
+    newData = newData.replace(reDateGlobal, date);
   }
 
   for (const replacement of replacements ?? []) {
@@ -299,7 +289,6 @@ export function write(file: string, content: string): void {
   writeFileSync(file, content);
 }
 
-// join strings, ignoring falsy values and trimming the result
 export function joinStrings(strings: Array<string | undefined>, separator: string): string {
   return strings.filter(Boolean).join(separator).trim();
 }
@@ -349,8 +338,7 @@ export function forgeName(repoInfo: RepoInfo): "GitHub" | "Gitea" {
   return repoInfo.type === "github" ? "GitHub" : "Gitea";
 }
 
-// Every credential is bound to one host: pairs and extraheader keys name theirs, the generic env
-// names mean github.com and the GITEA_URL instance. Any other host gets only a pair entry.
+// every credential is host-bound: the generic env names mean github.com and the GITEA_URL instance
 export async function getForgeTokens(repoInfo: RepoInfo, cwd?: string): Promise<string[]> {
   const pair = pairToken(repoInfo.host);
   if (pair) return [pair];
@@ -374,7 +362,6 @@ export type RepoInfo = {
   type: "github" | "gitea";
 };
 
-// Parse git URLs: https://[user[:pass]@]host/owner/repo[.git][/] or git@host:owner/repo[.git][/]
 // The scp-style form cannot express an HTTP port, so a ported instance needs an https remote.
 const reHttpsRemote = /^https:\/\/(?:[^@/]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?\/?$/;
 const reSshRemote = /^git@([^:]+):([^/]+)\/(.+?)(?:\.git)?\/?$/;
@@ -400,8 +387,7 @@ async function forgeFetch(method: string, url: string, authHeader: string, label
   return response;
 }
 
-// Thrown by attempt callbacks of withTokens to signal that the next token should be tried.
-class AuthRetryable extends Error {}
+class AuthRetryable extends Error {} // signals withTokens to try the next token
 
 function forgeApiBase(repoInfo: RepoInfo): string {
   const host = repoInfo.type === "github" ? "api.github.com" : `${repoInfo.host}/api/v1`;
@@ -438,7 +424,7 @@ async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName:
   const listResponse = await forgeFetch("GET", `${apiUrl}?draft=true&limit=50&per_page=100`, authHeader, listLabel);
   await ensureOk(listResponse, listLabel);
   const releases = await listResponse.json() as Array<{id: number; tag_name: string; draft: boolean}>;
-  const drafts = releases.filter(r => r.draft && r.tag_name === tagName);
+  const drafts = releases.filter(release => release.draft && release.tag_name === tagName);
   for (const draft of drafts) {
     const label = `Failed to delete draft release ${draft.id}`;
     const deleteResponse = await forgeFetch("DELETE", `${apiUrl}/${draft.id}`, authHeader, label);
@@ -478,31 +464,31 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
 }
 
 export function writeResult(result: Result): void {
-  for (const s of [result.stdout, result.stderr]) {
-    if (s) stdout.write(`${s}${EOL}`);
+  for (const output of [result.stdout, result.stderr]) {
+    if (output) stdout.write(`${output}${EOL}`);
   }
 }
 
 type RemoteState = {branch: string | null; tag: string | null};
 
+const reWhitespace = /\s+/;
+
 // ls-remote needs the push URL explicitly: the default fetch URL can differ from the push URL.
 export async function probeRemote(pushRemote: string, branchRef: string, tagRef: string): Promise<RemoteState | null> {
   const pushUrl = await tryExec("git", ["remote", "get-url", "--push", pushRemote]);
   if (pushUrl === null) return null;
-  const stdout = await tryExec("git", ["ls-remote", pushUrl, branchRef, tagRef]);
-  if (stdout === null) return null;
+  const refs = await tryExec("git", ["ls-remote", pushUrl, branchRef, tagRef]);
+  if (refs === null) return null;
   let branch: string | null = null, tag: string | null = null;
-  for (const line of stdout.split(reNewline)) {
-    const [oid, ref] = line.split(/\s+/);
+  for (const line of refs.split(reNewline)) {
+    const [oid, ref] = line.split(reWhitespace);
     if (ref === branchRef) branch = oid;
     else if (ref === tagRef) tag = oid;
   }
   return {branch, tag};
 }
 
-// Authenticated GET on the forge repo endpoint — verifies host reachability, token validity,
-// and (where the forge exposes it) the token's push permission. Catches the common failure
-// modes before the push so create-release after a successful push is unlikely to fail.
+// verify the forge before the push, so create-release after a landed push is unlikely to fail
 export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<string | null> {
   const url = forgeApiBase(repoInfo);
   const label = "forge ping";
@@ -516,11 +502,7 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
         throw new AuthRetryable(`404 (token may lack access to ${repoInfo.owner}/${repoInfo.repo})`);
       }
       await ensureOk(response, label);
-      // Both GitHub and Gitea return `permissions: {push, admin, pull, ...}` on authenticated
-      // repo GETs. If push/admin are both false, release creation will 403 — abort now rather
-      // than after the push has landed. Throw `AuthRetryable` so `withTokens` falls through to
-      // the next token: a different token may have push. A `pull: false` after a successful read
-      // is not about this token: installation tokens report every permission false.
+      // installation tokens report every permission false, so only a `pull: true` body is worth gating on
       // https://github.com/orgs/community/discussions/73397
       // https://github.com/orgs/community/discussions/159031
       let body: any = null;

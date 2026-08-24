@@ -23,10 +23,6 @@ test: node_modules build
 	pnpm exec vitest
 	bun test --timeout 180000 --only-failures --concurrent
 
-.PHONY: test-update
-test-update: node_modules build
-	pnpm exec vitest -u
-
 .PHONY: test-coverage
 test-coverage: node_modules build
 	pnpm exec vitest --coverage
@@ -34,7 +30,7 @@ test-coverage: node_modules build
 .PHONY: build
 build: node_modules $(DIST_FILES)
 
-$(DIST_FILES): $(SOURCE_FILES) pnpm-lock.yaml package.json tsdown.config.ts | node_modules
+$(DIST_FILES): $(SOURCE_FILES) pnpm-lock.yaml package.json tsconfig.json tsdown.config.ts | node_modules
 	pnpm exec tsdown
 	chmod +x $(DIST_FILES)
 

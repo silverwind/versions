@@ -65,7 +65,6 @@ function getIsolatedGitEnv(tmpDir: string) {
   };
 }
 
-// returns the exec options every later git call in that repo needs
 async function initGitRepo(tmpDir: string) {
   const env = getIsolatedGitEnv(tmpDir);
   const opts = {cwd: tmpDir, env: {...process.env, ...env}};
@@ -83,10 +82,8 @@ async function withTmpDir(fn: (tmpDir: string) => Promise<void>): Promise<void> 
   }
 }
 
-// initial commit, fetch URL with local bare push, tag 1.0.0. Caller must have written
-// any tracked files into tmpDir before invocation since this stages everything via `git add .`.
-// The fetch URL is a non-resolvable gitea host so --release tests fail at DNS lookup without
-// ever hitting the network, while pushes still reach the local bare repo via the push URL.
+// callers must write tracked files first, this stages everything via `git add .`
+// the fetch URL is a non-resolvable gitea host so --release tests fail at DNS without touching the network
 async function setupReleaseRepo(tmpDir: string) {
   const [opts, bareDir] = await Promise.all([initGitRepo(tmpDir), createBareRemote(tmpDir)]);
   await exec("git", ["add", "."], opts);
@@ -243,7 +240,6 @@ test("warns only when a manifest disagrees with a detected base version", () => 
 
   expect((await exec("node", [distPath, "-D", "patch", "package.json"], opts)).stderr)
     .toContain("warning: package.json declares 9.9.9 but the base version is 1.0.0");
-  // an explicit base is the user overriding detection, so a stale manifest says nothing
   expect((await exec("node", [distPath, "-D", "--base=7.0.0", "patch", "package.json"], opts)).stderr).not.toContain("warning:");
 
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test-pkg", version: "1.0.0"}));
@@ -259,8 +255,7 @@ test("prerelease without preid fails", async () => {
   expect((await runFail(["--gitless", "prerelease", "testfile.txt"])).output).toContain("prerelease requires --preid option");
 });
 
-// level + --preid pass-through is unit-tested in `incrementSemver prerelease`; one CLI smoke test
-// is enough to prove the flag wires through.
+// incrementSemver covers the level matrix, this only proves the flag wires through
 test("patch with preid creates prerelease", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
@@ -348,8 +343,7 @@ old
   expect(readChangelogEntry(md, "v1.2.3")).toEqual("### Added\n- new thing\n\n### Fixed\n- broken thing");
   expect(readChangelogEntry(md, "9.9.9")).toBeNull();
 
-  // Keep a Changelog trails link definitions below every section, so the newest
-  // entry must not swallow them just because no heading follows it.
+  // Keep a Changelog trails link definitions below the last entry
   const links = `# Changelog
 
 ## [1.0.0] - 2024-01-15
@@ -425,7 +419,6 @@ function mockForgePost(create: Response) {
   return mock;
 }
 
-// First POST returns conflictStatus; cleanup GET returns drafts; DELETE 204; retry POST returns success.
 function mockForgeConflictThenSuccess(conflictStatus: number, drafts: Array<{id: number; tag_name: string; draft: boolean}>, success: Response) {
   let postCount = 0;
   const mock = vi.fn((_url: string, init?: RequestInit) => {
@@ -627,7 +620,6 @@ test.each(["--gitless", "--no-push"])("%s and --release are mutually exclusive",
   expect(err.output).toContain(`${flag} and --release are mutually exclusive`);
 });
 
-// Both triggers abort in validate, before any write, commit, tag or push. One repo, two runs.
 test("validate aborts before any mutation", () => withTmpDir(async (tmpDir) => {
   const pkgContent = pkgJson("1.0.0");
   await writeFile(join(tmpDir, "package.json"), pkgContent);
@@ -644,7 +636,6 @@ test("validate aborts before any mutation", () => withTmpDir(async (tmpDir) => {
     expect((await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir})).stdout).toEqual(preHead);
   };
 
-  // gitea.invalid does not resolve, so the forge ping fails
   expect((await runFail(["--release", "patch", "package.json"], tokenOpts)).output).toContain("--release: forge ping");
   await expectUntouched();
 
@@ -664,8 +655,7 @@ test("rollback - push failure restores commit, prior annotated tag, and the user
 
   // --base pins the bump at the pre-existing ANNOTATED tag, which rollback must restore, not delete
   await exec("git", ["tag", "-a", "1.0.1", "-m", "annotated"], opts);
-  // partial staged hunk (index sits between HEAD and worktree) plus a staged addition: a bare
-  // --soft reset would leave the committed package.json bump staged on top of them
+  // index between HEAD and worktree: a bare --soft reset would leave the bump staged on top
   await writeFile(join(tmpDir, "tracked.txt"), "base\nstaged hunk\n");
   await exec("git", ["add", "tracked.txt"], opts);
   await writeFile(join(tmpDir, "tracked.txt"), "base\nstaged hunk\nworktree only\n");
@@ -690,22 +680,18 @@ test("rollback - push failure restores commit, prior annotated tag, and the user
 }));
 
 test("validate - aborts when remote branch has advanced beyond local", () => withTmpDir(async (tmpDir) => {
-  // Regression: a prior failed run left orphan tags because remote master had advanced
-  // (locally invisible without fetch) and the next run pushed only the tag while branch
-  // push was rejected. Validate now catches this before any commit/tag.
+  // remote master advanced invisibly, so a bump pushed the tag while the branch push was rejected
   const pkgContent = pkgJson("1.0.0");
   await writeFile(join(tmpDir, "package.json"), pkgContent);
 
   const {bareDir, opts} = await setupReleaseRepo(tmpDir);
 
-  // Simulate "someone else pushed to origin/master": advance remote HEAD without
-  // updating the local tracking ref. Local repo is now behind without knowing it.
+  // advance origin/master without updating the local tracking ref
   await writeFile(join(tmpDir, "other.txt"), "remote work");
   await exec("git", ["add", "other.txt"], opts);
   await exec("git", ["commit", "-m", "remote work"], opts);
   await exec("git", ["push", "origin", "master"], opts);
   await exec("git", ["reset", "--hard", "HEAD^"], opts);
-  // Now: local HEAD is at the initial commit, but origin's master is one commit ahead.
   await writeFile(join(tmpDir, "package.json"), pkgContent);
 
   const {stdout: preLocalHead} = await exec("git", ["rev-parse", "HEAD"], opts);
@@ -716,7 +702,6 @@ test("validate - aborts when remote branch has advanced beyond local", () => wit
   expect(err.exitCode).toEqual(1);
   expect(err.output).toMatch(/not a descendant/);
 
-  // No mutation must have happened — neither locally nor on the remote.
   expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
   const {stdout: postLocalHead} = await exec("git", ["rev-parse", "HEAD"], opts);
   expect(postLocalHead).toEqual(preLocalHead);
@@ -760,7 +745,6 @@ test("rollback - -c failure leaves no commit or tag in git mode", () => withTmpD
   await runFail(["--no-push", "-c", "exit 1", "patch", "package.json"], opts);
 
   expect(await readFile(join(tmpDir, "package.json"), "utf8")).toEqual(pkgContent);
-  // -c runs before commit/tag, so neither should exist
   const {stdout: tags} = await exec("git", ["tag", "--list"], opts);
   expect(tags.trim().split("\n").filter(Boolean)).toEqual(["1.0.0"]);
   const {stdout: postHead} = await exec("git", ["rev-parse", "HEAD"], opts);
@@ -827,16 +811,11 @@ test("--remote with --release uses that remote for forge detection", () => withT
   await exec("git", ["push", "upstream", "master"], opts);
   await exec("git", ["tag", "1.0.0"], opts);
 
-  // forge call to gitea.invalid fails at DNS; the error proves the upstream URL was used.
-  // If --remote was ignored, getRepoInfo would return null for file:/// and the error would
-  // be "Could not determine repository type" instead.
   const err = await runFail(["--remote", "upstream", "--release", "patch", "package.json"], {
     ...opts, env: {...opts.env, VERSIONS_FORGE_TOKENS: "gitea.invalid:fake-token"},
   });
   expect(err.exitCode).toEqual(1);
-  // The forge ping during validate hits the upstream host; if --remote were ignored,
-  // getRepoInfo would have returned null for file:/// and the error would be "could not
-  // detect a forge" instead. The mention of gitea.invalid proves upstream's URL was used.
+  // gitea.invalid in the output proves upstream's URL was used, a null repoInfo would say "could not detect a forge"
   expect(err.output).toContain("gitea.invalid");
   expect(err.output).not.toContain("could not detect a forge");
 }));
@@ -899,8 +878,7 @@ test("findUp", () => withTmpDir(async (tmpDir) => {
   expect(findUp("nonexistent.txt", subDir, tmpDir)).toBeNull();
 }));
 
-// no level hits the first operand of the `!level || args.help` guard, --help on a
-// valid level hits the second
+// no level hits the first operand of `!level || args.help`, `patch --help` the second
 test.each([[[]], [["patch", "--help"]]])("prints help for %j", async (args) => {
   const {stdout} = await exec("node", [distPath, ...args]);
   expect(stdout).toContain("usage: versions");
@@ -1139,7 +1117,6 @@ test("CHANGELOG.md without entry falls back to git log", () => withTmpDir(async 
 
   await exec("node", [distPath, "--no-push", "patch", "package.json"], opts);
 
-  // unchanged because no entry for 1.0.1
   expect(await readFile(join(tmpDir, "CHANGELOG.md"), "utf8")).toEqual(`# Changelog\n\n## 1.0.0\nold\n`);
 
   const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
@@ -1310,8 +1287,7 @@ async function withTokenEnv(env: Record<string, string>, fn: () => Promise<void>
 
 const giteaHost = (host: string): RepoInfo => ({...giteaInfo, host});
 
-// these swap token env vars in and out of process.env; running them concurrently lets one test
-// delete another's tokens
+// these swap token env vars in process.env, concurrent runs would delete each other's
 describe("token env", {concurrent: false}, () => {
   serialTest("getForgeTokens reads GitHub env names", () => withTokenEnv({GH_TOKEN: "gh-tok"}, async () => {
     expect(await getForgeTokens(githubInfo)).toContain("gh-tok");
@@ -1339,7 +1315,6 @@ describe("token env", {concurrent: false}, () => {
     const basic = Buffer.from("x-access-token:ci-tok").toString("base64");
     await exec("git", ["config", "--file", globalConfig, "http.https://ci.example.com/.extraheader", `AUTHORIZATION: basic ${basic}`], {cwd: tmpDir});
 
-    // checkout puts the credential outside .git/config, so a regression to `--local` fails here
     const saved = process.env.GIT_CONFIG_GLOBAL;
     process.env.GIT_CONFIG_GLOBAL = globalConfig;
     try {

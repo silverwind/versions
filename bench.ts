@@ -1,13 +1,12 @@
 #!/usr/bin/env node
-// CLI macro-benchmark. Pass `--before <path>` and `--after <path>` pointing at
-// two built `dist/index.js` bundles to compare end-to-end runs.
 import {parseArgs} from "node:util";
 import {execFileSync, spawnSync} from "node:child_process";
 import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {env} from "node:process";
 
-const ITERATIONS_MACRO = Number(process.env.BENCH_RUNS) || 30;
+const iterations = Number(env.BENCH_RUNS) || 30;
 
 const formatMs = (ms: number) => `${ms.toFixed(2)}ms`;
 const delta = (before: number, after: number) => `${((1 - after / before) * 100).toFixed(1)}% faster`;
@@ -69,14 +68,14 @@ function benchCli(before: string, after: string): void {
 
     const beforeSamples: number[] = [];
     const afterSamples: number[] = [];
-    for (let i = 0; i < ITERATIONS_MACRO; i++) {
+    for (let i = 0; i < iterations; i++) {
       beforeSamples.push(runOnce(before, dir, files)); resetRepo(dir);
       afterSamples.push(runOnce(after, dir, files)); resetRepo(dir);
     }
 
     const beforeStats = stats(beforeSamples);
     const afterStats = stats(afterSamples);
-    console.info(`\nCLI run (${ITERATIONS_MACRO} iter, \`patch\` with ${files.length} files, --dry --no-push):`);
+    console.info(`\nCLI run (${iterations} iter, \`patch\` with ${files.length} files, --dry --no-push):`);
     console.info(`  before:  mean ${formatMs(beforeStats.mean)}  min ${formatMs(beforeStats.min)}  p50 ${formatMs(beforeStats.p50)}`);
     console.info(`  after:   mean ${formatMs(afterStats.mean)}  min ${formatMs(afterStats.min)}  p50 ${formatMs(afterStats.p50)}`);
     console.info(`  delta:   mean ${delta(beforeStats.mean, afterStats.mean)}  (p50 ${delta(beforeStats.p50, afterStats.p50)})`);

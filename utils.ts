@@ -49,15 +49,14 @@ type ExecOptions = {
 export const reNewline = /\r?\n/;
 const reUrlCredential = /(\/\/)[^/\s@]+@/g;
 
-// a token embedded in a remote URL must reach neither the log nor an error message
 function redactCredentials(message: string): string {
   return message.replace(reUrlCredential, "$1***@");
 }
 // anchored so a bracketed element of a multi-line array is not read as a table header
 const reTomlSection = /^\[\[?([^[\]]+)\]\]?\s*(?:#.*)?$/;
 
-export function detectEol(s: string): string {
-  return reNewline.exec(s)?.[0] ?? "\n";
+export function detectEol(content: string): string {
+  return reNewline.exec(content)?.[0] ?? "\n";
 }
 
 type TomlVisitor = (line: string, lineIndex: number, lines: string[], section: string) => boolean | void;
@@ -88,7 +87,7 @@ export function tomlGetString(content: string, section: string, key: string): st
   return value;
 }
 
-// replaces the first match in each listed section, as a pyproject may carry the version in both
+// first match per section, as a pyproject may carry the version in both
 export function tomlReplaceFirst(content: string, sections: readonly string[], lineRe: RegExp, replacement: string): string {
   const done = new Set<string>();
   const lines = visitTomlSection(content, sections, (line, i, ls, section) => {
@@ -101,9 +100,7 @@ export function tomlReplaceFirst(content: string, sections: readonly string[], l
 
 const reJsonWhitespace = /[ \t\n\r]/;
 
-// Replace the top-level "version" value in a JSON document, preserving all other bytes (works on
-// minified manifests too). Brace/bracket depth skips nested "version" keys; the trailing `:`
-// distinguishes a key from a value equal to "version". Returns input unchanged if none found.
+// replaces the top-level "version" byte-for-byte, so formatting and minification survive
 export function replaceJsonVersion(data: string, newVersion: string): string {
   const stack: string[] = [];
   let inString = false;
@@ -112,7 +109,7 @@ export function replaceJsonVersion(data: string, newVersion: string): string {
     const char = data[pos];
     if (inString) {
       if (char === "\\") {
-        pos++; // skip the escaped character
+        pos++;
       } else if (char === '"') {
         inString = false;
         const atTopLevel = stack.length === 1 && stack[0] === "{";
@@ -144,9 +141,7 @@ export function replaceJsonVersion(data: string, newVersion: string): string {
   return data;
 }
 
-// exec variant for probes where a nonzero exit is an expected answer, not an error.
-// Returns trimmed stdout, or null if the command failed. Note that success with no
-// output yields "", so callers must test against null, not falsiness.
+// null on failure, "" on success with no output, so callers must test against null
 export async function tryExec(file: string, args: readonly string[], options?: ExecOptions): Promise<string | null> {
   try {
     return (await exec(file, args, options)).stdout.trim();

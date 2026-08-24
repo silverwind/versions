@@ -77,7 +77,7 @@ If a `CHANGELOG.md` is present at the project root with a heading for the new ve
 
 ## Creating releases
 
-When using the `--release` option, `versions` will automatically create a GitHub or Gitea release after pushing the tag. The release body is the same changelog entry or `git log` summary the commit message carries, without the leading tag name line and any `--message` strings, or just the tag name if there is neither. `--release` requires the push and is incompatible with `--no-push`.
+When using the `--release` option, `versions` will automatically create a GitHub or Gitea release after pushing the tag. The release body is the same changelog entry or `git log` summary the commit message carries, without the leading tag name line and any `--message` strings, or just the tag name if there is neither. `--release` requires the push and is incompatible with `--no-push` and `--gitless`.
 
 The tool will automatically detect whether you're using GitHub or Gitea based on your git remote URL.
 
