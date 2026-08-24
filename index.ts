@@ -340,15 +340,14 @@ async function main(): Promise<void> {
       const since = priorLocalTagOid ? tagName : baseTag ?? await lastTag();
       return await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], "--pretty=format:* %s (%aN)"]) || undefined;
     })();
-    const commitMsg = joinStrings([tagName, ...msgs, changelogBody], "\n\n");
-    const tagMsg = joinStrings([...msgs, changelogBody], "\n\n");
+    const message = joinStrings([tagName, ...msgs, changelogBody], "\n\n");
     const commitArgs = args.all ?
       ["commit", "-a", "--allow-empty", "-F", "-"] :
       filesToAdd.length ?
         ["commit", "-o", "-F", "-", "--", ...filesToAdd] :
         ["commit", "--allow-empty", "-F", "-"];
 
-    writeResult(await exec("git", commitArgs, {stdin: commitMsg}));
+    writeResult(await exec("git", commitArgs, {stdin: message}));
     rollbacks.push(async () => {
       if (await tryExec("git", ["rev-parse", "HEAD^"]) !== null) await exec("git", ["reset", "--soft", "HEAD^"]);
       else await exec("git", ["update-ref", "-d", "HEAD"]);
@@ -356,7 +355,7 @@ async function main(): Promise<void> {
     });
 
     // adding explicit -a here seems to make git no longer sign the tag
-    writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: tagMsg}));
+    writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: message}));
     rollbacks.push(async () => {
       if (priorLocalTagOid) await exec("git", ["update-ref", tagRef, priorLocalTagOid]);
       else await exec("git", ["tag", "-d", tagName]);

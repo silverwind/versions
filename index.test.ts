@@ -1084,6 +1084,7 @@ test("--message tokens are substituted in commit and tag", () => withTmpDir(asyn
 
   const {stdout: tagMsg} = await exec("git", ["tag", "-l", "1.0.1", "--format=%(contents)"], opts);
   expect(tagMsg).toContain("Release 1.0.1");
+  expect(tagMsg.split("\n")[0]).toEqual("1.0.1");
 }));
 
 test("CHANGELOG.md drives commit body and gets dated heading", () => withTmpDir(async (tmpDir) => {
