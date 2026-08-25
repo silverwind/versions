@@ -1,17 +1,19 @@
 # versions
 [![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions) [![](https://packagephobia.com/badge?p=versions)](https://packagephobia.com/result?p=versions) [![](https://depx.co/api/badge/versions)](https://depx.co/pkg/versions)
 
->  CLI to increment a project's version and optionally publish release to Github/Gitea
+> CLI to release a project: bump the version, commit, tag, push, and create a GitHub or Gitea release
 
 ## Usage
 
-To increment patch version of current project:
+To release a patch version of the current project:
 
 ```bash
 npx versions patch package.json
 ```
 
-Unless `--gitless`, at least one given file must change. With no files, only a commit and tag are created.
+This bumps `package.json` to the next patch version, commits it, creates an annotated tag, and pushes both to `origin` atomically. Add `--release` to also create the GitHub or Gitea release.
+
+With no files given, the commit and tag are still created, and a matching undated `CHANGELOG.md` entry is updated and committed with them.
 
 ## Options
 ```
@@ -67,25 +69,20 @@ To automatically sign commits and tags created by `versions` with GPG add this t
   gpgSign = if-asked
 ```
 
-## Pushing
-
-By default, `versions` pushes the commit and tag to `origin` after creating them. Pass `--no-push` to skip the push and keep changes local. Use `--remote` and `--branch` to override the target remote and branch.
-
 ## Changelog
 
-If a `CHANGELOG.md` is present at the project root with a heading for the new version, its body is used as the commit message, tag annotation, and release body. Heading matching is lenient — `# 1.2.3`, `## v1.2.3`, `## [1.2.3]`, `## [1.2.3] - 2024-01-15`, `## 1.2.3 (YYYY-MM-DD)` all work. If the heading has no date or a placeholder (`YYYY-MM-DD`, `xxxx-xx-xx`, etc.), it gets rewritten to today's date and included in the commit. With no matching entry, the tool falls back to a `git log` summary.
+If a `CHANGELOG.md` is present in the current directory or any directory above it up to the repository root, and it has a heading for the new version, its body is used as the commit message, tag annotation, and release body. Heading matching is lenient — `# 1.2.3`, `## v1.2.3`, `## [1.2.3]`, `## [1.2.3] - 2024-01-15`, `## 1.2.3 (YYYY-MM-DD)` all work. If the heading has no date or a placeholder (`YYYY-MM-DD`, `xxxx-xx-xx`, etc.), it gets rewritten to today's date and included in the commit. With no matching entry, the tool falls back to a `git log` summary.
 
 ## Creating releases
 
-When using the `--release` option, `versions` will automatically create a GitHub or Gitea release after pushing the tag. The release body is the same changelog entry or `git log` summary the commit message carries, without the leading tag name line and any `--message` strings, or just the tag name if there is neither. `--release` requires the push and is incompatible with `--no-push` and `--gitless`.
-
-The tool will automatically detect whether you're using GitHub or Gitea based on your git remote URL.
+`--release` creates a GitHub or Gitea release after pushing the tag, with the forge detected from the git remote URL. The body is the changelog entry or `git log` summary the commit message carries, without the leading tag name line and any `--message` strings, or just the tag name if there is neither. It requires the push, so it is incompatible with `--no-push` and `--gitless`.
 
 ### API Tokens
 
 `VERSIONS_FORGE_TOKENS` wins over everything else and is the only way to reach more than one
 Gitea or Forgejo instance. It holds comma-separated `host:token` pairs whose host must match the
-remote exactly, port included, so a ported instance needs an https remote:
+remote exactly, port included, so a ported instance needs an https remote. An `ssh://` remote's port is
+transport-only and never part of the host, so key its token to the bare host:
 
 ```bash
 export VERSIONS_FORGE_TOKENS="git.example.com:tok_xxx,localhost:3000:tok_yyy"
