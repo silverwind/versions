@@ -128,7 +128,7 @@ async function main(): Promise<void> {
   const gitDir = findUp(".git", pwd);
   // bound version-file lookup at the repo root so a stray parent manifest can't set the base
   const repoRoot = gitDir ? dirname(gitDir) : undefined;
-  const projectRoot = repoRoot ?? pwd;
+  const projectRoot = pwd;
   const pushRemote = stringArg(args.remote) ?? "origin";
 
   files = Array.from(new Set(files.map(file => relative(pwd, file)))); // so `foo` and `./foo` dedupe
@@ -330,16 +330,18 @@ async function main(): Promise<void> {
     }
 
     const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
-    const filesToAdd = !args.all && allFiles.length ? await removeIgnoredFiles(allFiles) : [];
-    const changelogBody = await (async () => {
-      if (changelogInfo) {
-        logVerbose(`using changelog entry from ${changelogPath}`);
-        return changelogInfo.entry;
-      }
-      // the tag is created further down, so priorLocalTagOid still reflects a pre-existing one
-      const since = priorLocalTagOid ? tagName : baseTag ?? await lastTag();
-      return await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], "--pretty=format:* %s (%aN)"]) || undefined;
-    })();
+    const [filesToAdd, changelogBody] = await Promise.all([
+      !args.all && allFiles.length ? removeIgnoredFiles(allFiles) : [],
+      (async () => {
+        if (changelogInfo) {
+          logVerbose(`using changelog entry from ${changelogPath}`);
+          return changelogInfo.entry;
+        }
+        // the tag is created further down, so priorLocalTagOid still reflects a pre-existing one
+        const since = priorLocalTagOid ? tagName : baseTag ?? await lastTag();
+        return await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], "--pretty=format:* %s (%aN)"]) || undefined;
+      })(),
+    ]);
     const message = joinStrings([tagName, ...msgs, changelogBody], "\n\n");
     const commitArgs = args.all ?
       ["commit", "-a", "--allow-empty", "-F", "-"] :

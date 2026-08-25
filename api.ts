@@ -41,9 +41,15 @@ export function replaceTokens(str: string, newVersion: string): string {
     .replaceAll("_PATCH_", patch);
 }
 
+// checked against the prerelease group, as a bare isSemver would read a `+` as build metadata
+function isPrereleaseId(str: string): boolean {
+  return reSemver.exec(`0.0.0-${str}`)?.[4] === str;
+}
+
 export function incrementSemver(str: string, level: string, preid?: string): string {
   const match = reSemver.exec(stripV(str));
   if (!match) throw new Error(`Invalid semver: ${str}`);
+  if (preid && !isPrereleaseId(preid)) throw new Error(`Invalid prerelease identifier: ${preid}`);
   const [, majStr, minStr, patStr, prerelease] = match;
   const major = Number(majStr), minor = Number(minStr), patch = Number(patStr);
   const tail = preid ? `-${preid}.0` : "";
@@ -311,7 +317,7 @@ function urlHost(url = ""): string {
 function pairToken(host: string): string | null {
   for (const entry of (env.VERSIONS_FORGE_TOKENS ?? "").split(",").map(pair => pair.trim())) {
     const sep = entry.lastIndexOf(":");
-    if (sep > 0 && entry.slice(0, sep) === host) return entry.slice(sep + 1);
+    if (sep > 0 && entry.slice(0, sep).toLowerCase() === host) return entry.slice(sep + 1);
   }
   return null;
 }
@@ -348,7 +354,7 @@ export async function getForgeTokens(repoInfo: RepoInfo, cwd?: string): Promise<
 
   // appended, not preferred, so a read-only configured token cannot lock out a working one
   const [ghToken, header] = await Promise.all([
-    isGithub ? tryExec("gh", ["auth", "token"], {timeout: probeTimeout}) : null,
+    isGithub ? tryExec("gh", ["auth", "token", "--hostname", repoInfo.host], {timeout: probeTimeout}) : null,
     extraheaderToken(repoInfo.host, cwd),
   ]);
   return Array.from(new Set([...tokens, ghToken, header].filter(Boolean) as string[]));
@@ -364,12 +370,32 @@ export type RepoInfo = {
 // the scp-style form cannot express a port, so a ported instance needs an https remote
 const reHttpsRemote = /^https:\/\/(?:[^@/]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?\/?$/;
 const reSshRemote = /^git@([^:]+):([^/]+)\/(.+?)(?:\.git)?\/?$/;
+const reGitSuffix = /\.git\/?$/;
+const reIpv6Brackets = /^\[|\]$/g;
+
+// parsed rather than matched, so the port is validated and an optional user and IPv6 literals work
+function parseSshUrl(url: string): string[] | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const [owner, ...rest] = parsed.pathname.replace(reGitSuffix, "").split("/").filter(Boolean);
+  const repo = rest.join("/");
+  // the ssh port is transport-only and the API may sit elsewhere, so it stays out of the host
+  return owner && repo ? [parsed.hostname.replace(reIpv6Brackets, ""), owner, repo] : null;
+}
 
 export async function getRepoInfo(cwd?: string, remote: string = "origin"): Promise<RepoInfo | null> {
   const url = await tryExec("git", ["remote", "get-url", remote], {cwd});
-  const match = url ? reHttpsRemote.exec(url) ?? reSshRemote.exec(url) : null;
+  if (!url) return null;
+  const match = url.startsWith("ssh://") ?
+    parseSshUrl(url) :
+    (reHttpsRemote.exec(url) ?? reSshRemote.exec(url))?.slice(1);
   if (!match) return null;
-  return {owner: match[2], repo: match[3], host: match[1], type: match[1] === "github.com" ? "github" : "gitea"};
+  const host = match[0].toLowerCase(); // DNS is case-insensitive, the path segments are not
+  return {owner: match[1], repo: match[2], host, type: host === "github.com" ? "github" : "gitea"};
 }
 
 async function forgeFetch(method: string, url: string, authHeader: string, label: string, jsonBody?: string): Promise<Response> {
