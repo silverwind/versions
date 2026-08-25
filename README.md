@@ -11,16 +11,16 @@ To increment patch version of current project:
 npx versions patch package.json
 ```
 
-If files are given, at least one must contain the version. With no files, only a commit and tag are created.
+Unless `--gitless`, at least one given file must change. With no files, only a commit and tag are created.
 
 ## Options
 ```
 usage: versions [options] patch|minor|major|prerelease [files...]
 
   Options:
-    -a, --all             Add all changed files to the commit
-    -b, --base <version>  Base version. Default is from latest git tag, package.json, pyproject.toml, or 0.0.0
-    -p, --prefix          Prefix version string with a "v" character. Default is none
+    -a, --all             Add all tracked changes to the commit
+    -b, --base <version>  Base version. Default is from latest semver git tag, package.json, pyproject.toml, or 0.0.0
+    -p, --prefix          Prefix tag name with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date            Replace dates in format YYYY-MM-DD with current date
     -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc
@@ -38,7 +38,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
 
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
-  If files are given, at least one must contain the version.
+  Unless --gitless, at least one given file must change.
 
   Examples:
     $ versions patch package.json

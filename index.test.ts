@@ -1089,7 +1089,7 @@ test("--message tokens are substituted in commit and tag", () => withTmpDir(asyn
 
 test("CHANGELOG.md drives commit body and gets dated heading", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
-  await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## [1.0.1]\n- Fixed thing X\n- Added thing Y\n\n## 1.0.0\nold stuff\n`);
+  await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## [1.0.1]\n### Added\n- Fixed thing X\n- Added thing Y\n\n## 1.0.0\nold stuff\n`);
 
   const {opts} = await setupReleaseRepo(tmpDir);
 
@@ -1104,6 +1104,10 @@ test("CHANGELOG.md drives commit body and gets dated heading", () => withTmpDir(
   expect(msg).toContain("- Added thing Y");
   // git log fallback (commit subjects) must not leak in
   expect(msg).not.toContain("Initial commit");
+
+  // default tag cleanup strips markdown headings
+  const {stdout: tagMsg} = await exec("git", ["tag", "-l", "1.0.1", "--format=%(contents)"], opts);
+  expect(tagMsg).toContain("### Added");
 }));
 
 test("CHANGELOG.md without entry falls back to git log", () => withTmpDir(async (tmpDir) => {

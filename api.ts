@@ -173,7 +173,7 @@ const rePlaceholderDate = /[YMDX?]{2,4}[-/. ][YMDX?]{2,4}[-/. ][YMDX?]{2,4}/i;
 const reLinkDefinition = /^\[[^\]]+\]:\s/;
 
 function findVersionHeading(lines: string[], version: string): {index: number, level: number} | null {
-  // Non-version-char boundaries so "1.2.3" doesn't match "1.2.30" or "1.2.3-rc.1".
+  // non-version-char boundaries, so "1.2.3" does not match "1.2.30" or "1.2.3-rc.1"
   const re = new RegExp(`(?<![\\d.-])v?${esc(stripV(version))}(?![\\d.-])`, "i");
   for (let i = 0; i < lines.length; i++) {
     const m = reHeading.exec(lines[i]);
@@ -250,8 +250,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
   if (fileName === "package.json") {
     newData = replaceJsonVersion(oldData, newVersion);
   } else if (fileName === "package-lock.json") {
-    // regex replace would corrupt nested dependency versions
-    const lockFile = JSON.parse(oldData);
+    const lockFile = JSON.parse(oldData); // regex replace would hit nested dependency versions
     if (lockFile.version) lockFile.version = newVersion; // v1 and v2
     if (lockFile.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
@@ -362,7 +361,7 @@ export type RepoInfo = {
   type: "github" | "gitea";
 };
 
-// The scp-style form cannot express an HTTP port, so a ported instance needs an https remote.
+// the scp-style form cannot express a port, so a ported instance needs an https remote
 const reHttpsRemote = /^https:\/\/(?:[^@/]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?\/?$/;
 const reSshRemote = /^git@([^:]+):([^/]+)\/(.+?)(?:\.git)?\/?$/;
 
@@ -450,8 +449,7 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
   await withTokens(repoInfo, tokens, async (authHeader) => {
     let response = await post(authHeader);
 
-    // Stale draft for the same tag blocks creation: Gitea returns 409 "Release is has no Tag",
-    // GitHub returns 422 "already_exists". Clean up matching drafts and retry once.
+    // a stale draft for the same tag blocks creation, Gitea 409 and GitHub 422
     if (response.status === 409 || response.status === 422) {
       const cleaned = await deleteMatchingDrafts(apiUrl, authHeader, tagName);
       if (cleaned) response = await post(authHeader);
@@ -473,7 +471,7 @@ type RemoteState = {branch: string | null; tag: string | null};
 
 const reWhitespace = /\s+/;
 
-// ls-remote needs the push URL explicitly: the default fetch URL can differ from the push URL.
+// ls-remote needs the push URL, which can differ from the fetch URL it defaults to
 export async function probeRemote(pushRemote: string, branchRef: string, tagRef: string): Promise<RemoteState | null> {
   const pushUrl = await tryExec("git", ["remote", "get-url", "--push", pushRemote]);
   if (pushUrl === null) return null;
@@ -495,9 +493,7 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
   try {
     await withTokens(repoInfo, tokens, async (authHeader) => {
       const response = await forgeFetch("GET", url, authHeader, label);
-      // Both GitHub and Gitea return 404 (not 403) for private repos when the token
-      // lacks read access, to avoid leaking repo existence; treat it like 401/403 so
-      // withTokens falls through to the next token.
+      // both forges 404 rather than 403 on a private repo the token cannot read, so retry like 401/403
       if (response.status === 404) {
         throw new AuthRetryable(`404 (token may lack access to ${repoInfo.owner}/${repoInfo.repo})`);
       }
@@ -513,9 +509,8 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
       if (perms?.pull === true && perms.push !== true && perms.admin !== true) {
         throw new AuthRetryable(`token lacks push permission on ${repoInfo.owner}/${repoInfo.repo}`);
       }
-      // Gitea 403s every /releases route when the repo's Releases unit is off, with a message
-      // that reads like a token problem. Repo admins bypass that check, so don't flag it for
-      // them. GitHub never sends the field.
+      // Gitea 403s every /releases route with a token-shaped message when the Releases unit is off,
+      // admins bypass that check and GitHub never sends the field
       if (body?.has_releases === false && perms?.admin !== true) {
         throw new AuthRetryable(`the Releases unit is disabled on ${repoInfo.owner}/${repoInfo.repo}; enable it in the repository settings`);
       }

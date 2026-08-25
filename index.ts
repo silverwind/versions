@@ -27,7 +27,7 @@ function end(err?: unknown): void {
   exit(1);
 }
 
-// parseArgs `strict: false` lets a bare `-r`/`-m` flag through as `true`; keep strings only.
+// parseArgs `strict: false` lets a bare `-r`/`-m` through as `true`
 function stringArg(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
@@ -78,9 +78,9 @@ async function main(): Promise<void> {
     console.info(`usage: versions [options] patch|minor|major|prerelease [files...]
 
   Options:
-    -a, --all             Add all changed files to the commit
-    -b, --base <version>  Base version. Default is from latest git tag, package.json, pyproject.toml, or 0.0.0
-    -p, --prefix          Prefix version string with a "v" character. Default is none
+    -a, --all             Add all tracked changes to the commit
+    -b, --base <version>  Base version. Default is from latest semver git tag, package.json, pyproject.toml, or 0.0.0
+    -p, --prefix          Prefix tag name with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
     -d, --date            Replace dates in format YYYY-MM-DD with current date
     -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
 
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
-  If files are given, at least one must contain the version.
+  Unless --gitless, at least one given file must change.
 
   Examples:
     $ versions patch package.json
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     throw new Error("--no-push and --release are mutually exclusive");
   }
 
-  // === GATHER === pure reads + computation, no side effects.
+  // === GATHER === pure reads, no side effects
   const today = new Date().toISOString().substring(0, 10);
 
   const pwd = cwd();
@@ -233,13 +233,13 @@ async function main(): Promise<void> {
     fileChanges.push({path: file, ...changes, changed: changes.newData !== changes.oldData, specified: specifiedFiles.has(file)});
   }
 
-  // === VALIDATE === single await collects every probe, the checks below are pure.
+  // === VALIDATE === one await collects every probe, the checks below are pure
   const [remoteState, {repoInfo, tokens, pingResult}, identityOk, mergeBaseOk] = await Promise.all([
     remoteStateP, forgeP, identityOkP, mergeBaseOkP,
   ]);
 
   // manifest rewrites set the version outright, so the no-diff check below can never catch a wrong base
-  if (baseSource !== "--base") { // an explicit base overrides detection on purpose
+  if (baseSource !== "--base") {
     for (const change of fileChanges) {
       const declared = readDeclaredVersion(change.path, change.oldData);
       // only a warning, a deliberately out-of-sync manifest is a legitimate setup
@@ -299,14 +299,14 @@ async function main(): Promise<void> {
     return;
   }
 
-  // === EXECUTE === mutations only, every realistic failure mode was caught above.
+  // === EXECUTE === mutations only, every realistic failure mode was caught above
   // preserve user's staged hunks on rollback (--soft would leave our changes staged)
   const [preIndexTreeOid, priorLocalTagOid] = willCommit ? await Promise.all([
     tryExec("git", ["write-tree"]),
     tryExec("git", ["rev-parse", "--verify", tagRef]),
   ]) : [null, null];
 
-  // Pre-push rollback only, once the atomic push lands we leave the remote alone.
+  // rollback is pre-push only, a landed atomic push stays
   const rollbacks: Array<() => Promise<void> | void> = [];
   let pushed = false;
 
@@ -354,8 +354,8 @@ async function main(): Promise<void> {
       if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
     });
 
-    // adding explicit -a here seems to make git no longer sign the tag
-    writeResult(await exec("git", ["tag", "-f", "-F", "-", tagName], {stdin: message}));
+    // explicit -a seems to stop git signing the tag, and the default cleanup `strip` would eat markdown headings
+    writeResult(await exec("git", ["tag", "-f", "--cleanup=whitespace", "-F", "-", tagName], {stdin: message}));
     rollbacks.push(async () => {
       if (priorLocalTagOid) await exec("git", ["update-ref", tagRef, priorLocalTagOid]);
       else await exec("git", ["tag", "-d", tagName]);

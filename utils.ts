@@ -153,9 +153,9 @@ export async function tryExec(file: string, args: readonly string[], options?: E
 export function exec(file: string, args: readonly string[], options?: ExecOptions): Promise<Result> {
   if (verbose) logVerbose(redactCredentials(`$ ${[file, ...args.map(quoteArg)].join(" ")}`));
   return new Promise((resolve, reject) => {
-    // must stay under MAX_STRING_LENGTH: above it node throws RangeError inside its own exit
-    // handler, so the callback never fires and the promise never settles
-    const child = execFileCb(file, args as string[], {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env, timeout: options?.timeout, maxBuffer: 256 * 1024 * 1024}, (error, stdout, stderr) => {
+    // must stay under MAX_STRING_LENGTH: node throws RangeError inside its own exit handler,
+    // so the callback never fires and the promise never settles
+    const child = execFileCb(file, args, {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env, timeout: options?.timeout, maxBuffer: 256 * 1024 * 1024}, (error, stdout, stderr) => {
       if (error) {
         // node puts the full argv in the message, so this is the second place a credential escapes
         reject(new SubprocessError(redactCredentials(error.message.split(reNewline)[0]), stdout, stderr, typeof error.code === "number" ? error.code : null));
