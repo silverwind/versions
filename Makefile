@@ -27,6 +27,10 @@ test: node_modules build
 test-coverage: node_modules build
 	pnpm exec vitest --coverage
 
+.PHONY: bench
+bench:
+	node bench.ts $(if $(BEFORE),--before $(BEFORE)) $(if $(AFTER),--after $(AFTER))
+
 .PHONY: build
 build: node_modules $(DIST_FILES)
 
