@@ -9,7 +9,7 @@ import {
   readVersionFile,
   removeIgnoredFiles, getForgeTokens, githubTokenEnvNames, giteaTokenEnvNames,
   getRepoInfo, writeResult, createForgeRelease, pingForge,
-  readChangelogEntry, updateChangelogHeadingDate,
+  readChangelogEntry, updateChangelogHeadingDate, processChangelog,
   type RepoInfo,
 } from "./api.ts";
 import {exec, tomlGetString, SubprocessError} from "./utils.ts";
@@ -397,6 +397,15 @@ test("updateChangelogHeadingDate", () => {
   expect(updateChangelogHeadingDate("## [1.2.3] - 2024-01-15\n\nbody\n", "1.2.3", today)).toBeNull();
 
   expect(updateChangelogHeadingDate("## 1.0.0\nbody\n", "9.9.9", today)).toBeNull();
+});
+
+test("processChangelog", () => {
+  const today = "2026-04-30";
+  expect(processChangelog("## 1.2.3\r\n\r\nbody\r\n", "1.2.3", today)).toEqual({
+    entry: "body",
+    updated: "## 1.2.3 - 2026-04-30\r\n\r\nbody\r\n",
+  });
+  expect(processChangelog("## 1.2.3\n\n## 1.2.2\nbody\n", "1.2.3", today)).toBeNull();
 });
 
 function getCalls(mock: ReturnType<typeof vi.fn>) {
@@ -1195,6 +1204,9 @@ test("readVersionFile pyproject.toml", () => withTmpDir(async (tmpDir) => {
 
   await writeFile(file, `[tool.poetry]\nname = "test"\nversion = "2.0.0"\n`);
   expect(readVersionFile("pyproject.toml", tmpDir)).toEqual("2.0.0");
+
+  await writeFile(file, `[tool.poetry]\nversion = "2.0.0"\n[project]\nversion = "3.0.0"\n`);
+  expect(readVersionFile("pyproject.toml", tmpDir)).toEqual("3.0.0");
 }));
 
 test.each([undefined, 2])("getFileChanges package.json with indent %s leaves nested version fields alone", (indent) => withTmpDir(async (tmpDir) => {
@@ -1218,9 +1230,9 @@ test("getFileChanges package-lock.json", () => withTmpDir(async (tmpDir) => {
 
 test("getFileChanges pyproject.toml", () => withTmpDir(async (tmpDir) => {
   const file = join(tmpDir, "pyproject.toml");
-  await writeFile(file, `[project]\nname = "test"\nversion = "1.0.0"\n`);
+  await writeFile(file, `[project]\nname = "test"\nversion = "1.0.0"\n[tool.poetry]\nversion = "1.0.0"\n`);
   const content = getFileChanges({file, baseVersion: "1.0.0", newVersion: "1.1.0"})?.newData;
-  expect(content).toContain(`version = "1.1.0"`);
+  expect(content?.match(/version = "1\.1\.0"/g)).toHaveLength(2);
 }));
 
 test("getFileChanges pyproject.toml leaves unrelated section version alone", () => withTmpDir(async (tmpDir) => {

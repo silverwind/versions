@@ -2,7 +2,7 @@
 import {
   findUp, resolveBaseVersion, incrementSemver, replaceTokens, getFileChanges, readDeclaredVersion,
   findCompanionLockfile,
-  readChangelogEntry, updateChangelogHeadingDate, removeIgnoredFiles, joinStrings,
+  processChangelog, removeIgnoredFiles, joinStrings,
   write, writeResult, getRepoInfo, getForgeTokens, forgeName, probeRemote,
   pingForge, createForgeRelease,
 } from "./api.ts";
@@ -200,8 +200,8 @@ async function main(): Promise<void> {
     if (!changelogPath) return null;
     try {
       const original = readFileSync(changelogPath, "utf8");
-      const entry = readChangelogEntry(original, newVersion);
-      return entry ? {original, entry, updated: updateChangelogHeadingDate(original, newVersion, today)} : null;
+      const processed = processChangelog(original, newVersion, today);
+      return processed ? {original, ...processed} : null;
     } catch {
       return null;
     }

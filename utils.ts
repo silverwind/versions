@@ -67,7 +67,7 @@ function visitTomlSection(content: string, sections: readonly string[], visit: T
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed || trimmed[0] === "#") continue;
-    const header = reTomlSection.exec(trimmed);
+    const header = trimmed[0] === "[" ? reTomlSection.exec(trimmed) : null;
     if (header) {
       section = header[1].trim();
       continue;
@@ -94,6 +94,7 @@ export function tomlReplaceFirst(content: string, sections: readonly string[], l
     if (done.has(section) || !lineRe.test(line)) return;
     ls[i] = line.replace(lineRe, replacement);
     done.add(section);
+    return done.size === sections.length;
   });
   return done.size ? lines.join(detectEol(content)) : content;
 }
@@ -102,7 +103,8 @@ const reJsonWhitespace = /[ \t\n\r]/;
 
 // replaces the top-level "version" byte-for-byte, so formatting and minification survive
 export function replaceJsonVersion(data: string, newVersion: string): string {
-  const stack: string[] = [];
+  let depth = 0;
+  let rootIsObject = false;
   let inString = false;
   let stringStart = -1;
   for (let pos = 0; pos < data.length; pos++) {
@@ -112,8 +114,7 @@ export function replaceJsonVersion(data: string, newVersion: string): string {
         pos++;
       } else if (char === '"') {
         inString = false;
-        const atTopLevel = stack.length === 1 && stack[0] === "{";
-        if (atTopLevel && data.slice(stringStart + 1, pos) === "version") {
+        if (depth === 1 && rootIsObject && pos === stringStart + 8 && data.startsWith("version", stringStart + 1)) {
           let valuePos = pos + 1;
           while (valuePos < data.length && reJsonWhitespace.test(data[valuePos])) valuePos++;
           if (data[valuePos] !== ":") continue;
@@ -133,9 +134,10 @@ export function replaceJsonVersion(data: string, newVersion: string): string {
       inString = true;
       stringStart = pos;
     } else if (char === "{" || char === "[") {
-      stack.push(char);
-    } else if (char === "}" || char === "]") {
-      stack.pop();
+      if (depth === 0) rootIsObject = char === "{";
+      depth++;
+    } else if ((char === "}" || char === "]") && depth > 0) {
+      depth--;
     }
   }
   return data;

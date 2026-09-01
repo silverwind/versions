@@ -209,10 +209,7 @@ export function readChangelogEntry(content: string, version: string): string | n
   return head ? extractEntry(lines, head) : null;
 }
 
-export function updateChangelogHeadingDate(content: string, version: string, date: string): string | null {
-  const lines = content.split(reNewline);
-  const head = findVersionHeading(lines, version);
-  if (!head) return null;
+function updateChangelogHeadingDateInLines(lines: string[], head: {index: number}, date: string, content: string): string | null {
   const heading = lines[head.index];
   if (rePlaceholderDate.test(heading)) {
     lines[head.index] = heading.replace(rePlaceholderDate, date);
@@ -222,6 +219,20 @@ export function updateChangelogHeadingDate(content: string, version: string, dat
     lines[head.index] = `${heading.trimEnd()} - ${date}`;
   }
   return lines.join(detectEol(content));
+}
+
+export function updateChangelogHeadingDate(content: string, version: string, date: string): string | null {
+  const lines = content.split(reNewline);
+  const head = findVersionHeading(lines, version);
+  return head ? updateChangelogHeadingDateInLines(lines, head, date, content) : null;
+}
+
+export function processChangelog(content: string, version: string, date: string): {entry: string, updated: string | null} | null {
+  const lines = content.split(reNewline);
+  const head = findVersionHeading(lines, version);
+  if (!head) return null;
+  const entry = extractEntry(lines, head);
+  return entry ? {entry, updated: updateChangelogHeadingDateInLines(lines, head, date, content)} : null;
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
