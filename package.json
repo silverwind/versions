@@ -22,24 +22,24 @@
   "files": [
     "dist"
   ],
-  "packageManager": "pnpm@11.22.0",
+  "packageManager": "pnpm@11.25.0",
   "engines": {
     "node": ">=22",
     "bun": "*"
   },
   "devDependencies": {
-    "@types/node": "26.2.0",
+    "@types/node": "26.4.1",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
-    "@vitest/coverage-v8": "4.1.11",
-    "eslint": "10.8.1",
-    "eslint-config-silverwind": "145.0.0",
+    "@vitest/coverage-v8": "5.0.0",
+    "eslint": "10.9.1",
+    "eslint-config-silverwind": "146.0.0",
     "tsdown": "0.22.14",
     "tsdown-config-silverwind": "4.0.3",
     "typescript": "6.0.3",
     "typescript-config-silverwind": "20.0.3",
-    "updates": "18.0.2",
+    "updates": "18.0.8",
     "updates-config-silverwind": "4.0.5",
-    "vitest": "4.1.11",
-    "vitest-config-silverwind": "11.6.0"
+    "vitest": "5.0.0",
+    "vitest-config-silverwind": "12.0.0"
   }
 }
