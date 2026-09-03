@@ -1,6 +1,6 @@
 {
   "name": "versions",
-  "version": "15.3.7",
+  "version": "15.3.8",
   "description": "CLI to release a project: bump the version, commit, tag, push, and create a GitHub or Gitea release",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/versions",
