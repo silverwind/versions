@@ -31,6 +31,8 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Change nothing, just print what would be done
     -R, --release         Create a GitHub or Gitea release with the changelog as body
+    -L, --login <host>    Verify and store a forge API token
+    -O, --logout <host>   Remove a stored forge API token
     -n, --no-push         Skip pushing commit and tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
     -B, --branch <name>   Remote branch to push HEAD to. Default is the current branch
@@ -79,9 +81,12 @@ If a `CHANGELOG.md` is present in the current directory or any directory above i
 
 ### API Tokens
 
-`VERSIONS_FORGE_TOKENS` wins over everything else and is the only way to reach more than one
-Gitea or Forgejo instance. It holds comma-separated `host:token` pairs whose host must match the
-remote exactly, port included, so a ported instance needs an https remote. An `ssh://` remote's port is
+`versions --login <host>` reads a token from stdin or a prompt and stores it for that forge,
+`versions --logout <host>` removes it. `VERSIONS_FORGE_TOKENS` wins over a stored token, which wins
+over the environment variables below.
+
+`VERSIONS_FORGE_TOKENS` holds comma-separated `host:token` pairs whose host must match the remote
+exactly, port included, so a ported instance needs an https remote. An `ssh://` remote's port is
 transport-only and never part of the host, so key its token to the bare host:
 
 ```bash

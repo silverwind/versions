@@ -8,6 +8,7 @@ import {env, platform, stderr, stdout} from "node:process";
 import {readFileSync, writeFileSync, accessSync, existsSync, truncateSync} from "node:fs";
 import {EOL} from "node:os";
 import {styleText} from "node:util";
+import {readTokens} from "./tokens.ts";
 
 const reEscapeChars = /[|\\{}()[\]^$+*?.-]/g;
 const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
@@ -359,12 +360,13 @@ export async function getForgeTokens(repoInfo: RepoInfo, cwd?: string): Promise<
   const pair = pairToken(repoInfo.host);
   if (pair) return [pair];
 
+  const stored = (await readTokens())[repoInfo.host];
   const tokens = repoInfo.host === "github.com" ? envTokens(githubTokenEnvNames) :
     repoInfo.host === urlHost(env.GITEA_URL) ? envTokens(giteaTokenEnvNames) : [];
 
   // appended, not preferred, so a read-only configured token cannot lock out a working one
   const header = await extraheaderToken(repoInfo.host, cwd);
-  return Array.from(new Set([...tokens, header].filter(Boolean) as string[]));
+  return Array.from(new Set([stored, ...tokens, header].filter(Boolean) as string[]));
 }
 
 export type RepoInfo = {
@@ -420,17 +422,28 @@ async function forgeFetch(method: string, url: string, authHeader: string, label
 }
 
 class AuthRetryable extends Error {} // signals withTokens to try the next token
+class RejectedToken extends AuthRetryable {}
+
+function forgeApiRoot(host: string): string {
+  return host === "github.com" ? "https://api.github.com" : `https://${host}/api/v1`;
+}
 
 function forgeApiBase(repoInfo: RepoInfo): string {
-  const host = repoInfo.type === "github" ? "api.github.com" : `${repoInfo.host}/api/v1`;
-  return `https://${host}/repos/${repoInfo.owner}/${repoInfo.repo}`;
+  return `${forgeApiRoot(repoInfo.host)}/repos/${repoInfo.owner}/${repoInfo.repo}`;
+}
+
+function forgeAuthHeader(host: string, token: string): string {
+  return host === "github.com" ? `Bearer ${token}` : `token ${token}`;
 }
 
 async function ensureOk(response: Response, label: string, allow404 = false): Promise<void> {
   if (response.ok || (allow404 && response.status === 404)) return;
   const message = `${label}: ${response.status} ${response.statusText}\n${await response.text()}`;
-  throw response.status === 401 || response.status === 403 ? new AuthRetryable(message) : new Error(message);
+  throw response.status === 401 ? new RejectedToken(message) :
+    response.status === 403 ? new AuthRetryable(message) : new Error(message);
 }
+
+const rejectedTokens = new Set<string>();
 
 async function withTokens<T>(
   repoInfo: RepoInfo,
@@ -439,16 +452,30 @@ async function withTokens<T>(
 ): Promise<T> {
   let lastError: Error | undefined;
   for (const token of tokens) {
-    const authHeader = repoInfo.type === "github" ? `Bearer ${token}` : `token ${token}`;
+    if (rejectedTokens.has(token)) continue;
     try {
-      return await attempt(authHeader);
+      return await attempt(forgeAuthHeader(repoInfo.host, token));
     } catch (err: any) {
       if (!(err instanceof AuthRetryable)) throw err;
       lastError = err;
+      if (err instanceof RejectedToken && !rejectedTokens.has(token)) {
+        rejectedTokens.add(token);
+        if ((await readTokens())[repoInfo.host] === token) {
+          console.error(`stored token for ${repoInfo.host} was rejected, run "versions --login ${repoInfo.host}" to replace it`);
+        }
+      }
       logVerbose(`auth failed, trying next token`);
     }
   }
   throw lastError ?? new Error("No tokens provided");
+}
+
+export async function verifyToken(host: string, token: string): Promise<string> {
+  const label = `token verification for ${host}`;
+  const response = await forgeFetch("GET", `${forgeApiRoot(host)}/user`, forgeAuthHeader(host, token), label);
+  if (response.status === 401) throw new Error(`token for ${host} was rejected`);
+  if (!response.ok) throw new Error(`${label} failed with status ${response.status}`);
+  return (await response.json()).login;
 }
 
 async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName: string): Promise<boolean> {

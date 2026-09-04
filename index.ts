@@ -4,13 +4,17 @@ import {
   findCompanionLockfile,
   processChangelog, removeIgnoredFiles, joinStrings,
   write, writeResult, getRepoInfo, getForgeTokens, forgeName, probeRemote,
-  pingForge, createForgeRelease,
+  pingForge, createForgeRelease, verifyToken,
 } from "./api.ts";
+import {removeToken, storeToken} from "./tokens.ts";
 import {SubprocessError, exec, logVerbose, setVerbose, tryExec} from "./utils.ts";
 import {parseArgs} from "node:util";
 import {dirname, relative} from "node:path";
-import {cwd, exit, stdout, stderr} from "node:process";
+import {cwd, exit, stdin, stdout, stderr} from "node:process";
 import {readFileSync} from "node:fs";
+import {text} from "node:stream/consumers";
+import type {Readable} from "node:stream";
+import type {ReadStream} from "node:tty";
 import pkg from "./package.json" with {type: "json"};
 
 const reReplaceString = /^s#([^#]+)#([^#]*)#(.*)$/; // an empty replacement deletes, as in sed
@@ -36,6 +40,46 @@ function stringArgs(values: unknown): string[] {
   return Array.isArray(values) ? values.filter(value => typeof value === "string") : [];
 }
 
+function normalizeHost(value: unknown, option: string): string {
+  if (typeof value !== "string") throw new Error(`Missing value for --${option}`);
+  return new URL(value.includes("://") ? value : `https://${value}`).host;
+}
+
+function readHidden(stdin: ReadStream, prompt: string): Promise<string> {
+  stdin.setEncoding("utf8");
+  stdin.setRawMode(true);
+  stderr.write(prompt);
+  return new Promise(resolve => {
+    let value = "";
+    const onData = (chunk: string) => {
+      for (const char of chunk) {
+        if (char === "\u0003" || char === "\u0004") {
+          stdin.setRawMode(false);
+          stderr.write("\n");
+          exit(130);
+        } else if (char === "\r" || char === "\n") {
+          stdin.off("data", onData);
+          stdin.setRawMode(false);
+          stdin.pause();
+          stderr.write("\n");
+          return resolve(value);
+        } else {
+          value = char === "\b" || char === "\u007f" ? value.slice(0, -1) : value + char;
+        }
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+
+async function readToken(stdin: Readable | ReadStream, host: string): Promise<string> {
+  const raw = "isTTY" in stdin && stdin.isTTY ? await readHidden(stdin, `token for ${host}: `) : await text(stdin);
+  const token = raw.trim();
+  if (!token) throw new Error(`token for ${host} is empty`);
+  if (/[\s\p{C}]/u.test(token)) throw new Error(`token for ${host} contains invalid characters`);
+  return token;
+}
+
 async function main(): Promise<void> {
   // exit() discards queued writes on a non-blocking stream, losing diagnostics under CI pipes
   for (const stream of [stdout, stderr]) {
@@ -54,6 +98,8 @@ async function main(): Promise<void> {
       version: {short: "v", type: "boolean"},
       date: {short: "d", type: "boolean"},
       release: {short: "R", type: "boolean"},
+      login: {short: "L", type: "string"},
+      logout: {short: "O", type: "string"},
       "no-push": {short: "n", type: "boolean"},
       remote: {short: "o", type: "string"},
       branch: {short: "B", type: "string"},
@@ -74,6 +120,21 @@ async function main(): Promise<void> {
     end();
   }
 
+  if (args.login !== undefined) {
+    const host = normalizeHost(args.login, "login");
+    const token = await readToken(stdin, host);
+    const login = await verifyToken(host, token);
+    await storeToken(host, token);
+    console.info(`stored token for ${host} (${login})`);
+    end();
+  }
+  if (args.logout !== undefined) {
+    const host = normalizeHost(args.logout, "logout");
+    if (!await removeToken(host)) throw new Error(`no stored token for ${host}`);
+    console.info(`removed token for ${host}`);
+    end();
+  }
+
   if (!level || args.help) {
     console.info(`usage: versions [options] patch|minor|major|prerelease [files...]
 
@@ -89,6 +150,8 @@ async function main(): Promise<void> {
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Change nothing, just print what would be done
     -R, --release         Create a GitHub or Gitea release with the changelog as body
+    -L, --login <host>    Verify and store a forge API token
+    -O, --logout <host>   Remove a stored forge API token
     -n, --no-push         Skip pushing commit and tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
     -B, --branch <name>   Remote branch to push HEAD to. Default is the current branch
@@ -277,7 +340,7 @@ async function main(): Promise<void> {
     if (!repoInfo) {
       errors.push("--release: could not detect a forge from the git remote URL");
     } else if (!tokens.length) {
-      errors.push(`--release: no ${forgeName(repoInfo)} token found for ${repoInfo.host}, set VERSIONS_FORGE_TOKENS=${repoInfo.host}:<token>`);
+      errors.push(`--release: no ${forgeName(repoInfo)} token found for ${repoInfo.host}, set VERSIONS_FORGE_TOKENS=${repoInfo.host}:<token> or run "versions --login ${repoInfo.host}"`);
     } else if (pingResult) {
       errors.push(`--release: ${pingResult}`);
     }

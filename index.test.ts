@@ -1,6 +1,6 @@
 import {Buffer} from "node:buffer";
 import {readFileSync} from "node:fs";
-import {readFile, writeFile, rm, mkdir, mkdtemp} from "node:fs/promises";
+import {readFile, writeFile, rm, mkdir, mkdtemp, stat} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {
@@ -8,10 +8,11 @@ import {
   joinStrings, findUp, getFileChanges, write, findCompanionLockfile,
   readVersionFile,
   removeIgnoredFiles, getForgeTokens, githubTokenEnvNames, giteaTokenEnvNames,
-  getRepoInfo, writeResult, createForgeRelease, pingForge,
+  getRepoInfo, writeResult, createForgeRelease, pingForge, verifyToken,
   readChangelogEntry, updateChangelogHeadingDate, processChangelog,
   type RepoInfo,
 } from "./api.ts";
+import {removeToken, storeToken} from "./tokens.ts";
 import {exec, tomlGetString, SubprocessError} from "./utils.ts";
 
 const distPath = join(process.cwd(), "dist/index.js");
@@ -20,6 +21,8 @@ const pep621 = (version: string) => `[project]\nname = "test-project"\nversion =
 
 // bun's vitest-compat `vi` lacks stubGlobal/unstubAllGlobals, so fall back to manual restore.
 const stubbedGlobals = new Map<string, unknown>();
+const savedConfigHome = process.env.XDG_CONFIG_HOME;
+let testConfigHome: string;
 function stubGlobal(name: string, value: unknown) {
   if (typeof vi.stubGlobal === "function") {
     vi.stubGlobal(name, value);
@@ -33,8 +36,16 @@ function stubGlobal(name: string, value: unknown) {
 // one by one via its `test.serial`. vitest has no such thing and honors the describe option instead.
 const serialTest: typeof test = (test as any).serial ?? test;
 
-beforeAll(() => {
+beforeAll(async () => {
+  testConfigHome = await mkdtemp(join(tmpdir(), "versions-config-test-"));
+  process.env.XDG_CONFIG_HOME = testConfigHome;
   vi.spyOn(console, "info").mockImplementation(() => {});
+});
+
+afterAll(async () => {
+  if (savedConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = savedConfigHome;
+  await rm(testConfigHome, {recursive: true, force: true});
 });
 
 afterEach(() => {
@@ -485,7 +496,7 @@ describe("forge requests", {concurrent: false}, () => {
       .mockResolvedValueOnce(new Response(text, {status}))
       .mockImplementation(() => Promise.resolve(Response.json({html_url: "https://github.com/o/r/releases/tag/1.0.0"}, {status: 201})));
     stubGlobal("fetch", mock);
-    await createForgeRelease(githubInfo, "1.0.0", "body", ["bad-token", "good-token"]);
+    await createForgeRelease(githubInfo, "1.0.0", "body", [`bad-token-${status}`, `good-token-${status}`]);
     expect(mock).toHaveBeenCalledTimes(2);
   });
 
@@ -497,6 +508,59 @@ describe("forge requests", {concurrent: false}, () => {
   serialTest("createForgeRelease throws when all tokens fail", async () => {
     stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("Unauthorized", {status: 401, statusText: "Unauthorized"}))));
     await expect(createForgeRelease(githubInfo, "1.0.0", "body", ["tok1", "tok2"])).rejects.toThrow("401");
+  });
+
+  serialTest("stored 401 tokens warn once and are skipped while 403 tokens do not warn", async () => {
+    await storeToken("github.com", "stored-rejected-token");
+    await storeToken("gitea.example.com", "stored-forbidden-token");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mock = vi.fn((_url: string, init?: RequestInit) => {
+      const auth = authOf(init);
+      if (auth === "Bearer stored-rejected-token") return Promise.resolve(new Response("Unauthorized", {status: 401}));
+      if (auth === "token stored-forbidden-token") return Promise.resolve(new Response("Forbidden", {status: 403}));
+      return Promise.resolve(Response.json({html_url: "https://example.com/release"}, {status: 201}));
+    });
+    stubGlobal("fetch", mock);
+    try {
+      await withTokenEnv({GH_TOKEN: "github-env-token"}, async () => {
+        const tokens = await getForgeTokens(githubInfo);
+        await createForgeRelease(githubInfo, "1.0.0", "body", tokens);
+        await createForgeRelease(githubInfo, "1.0.1", "body", tokens);
+      });
+      await withTokenEnv({GITEA_URL: "https://gitea.example.com", GITEA_TOKEN: "gitea-env-token"}, async () => {
+        await createForgeRelease(giteaInfo, "1.0.0", "body", await getForgeTokens(giteaInfo));
+      });
+      expect(getCalls(mock).map(([, init]) => authOf(init))).toEqual([
+        "Bearer stored-rejected-token",
+        "Bearer github-env-token",
+        "Bearer github-env-token",
+        "token stored-forbidden-token",
+        "token gitea-env-token",
+      ]);
+      expect(error.mock.calls).toEqual([[
+        "stored token for github.com was rejected, run \"versions --login github.com\" to replace it",
+      ]]);
+    } finally {
+      error.mockRestore();
+      await removeToken("github.com");
+      await removeToken("gitea.example.com");
+    }
+  });
+
+  serialTest("verifyToken uses each forge API and rejects a 401", async () => {
+    const mock = vi.fn()
+      .mockResolvedValueOnce(Response.json({login: "octocat"}, {status: 200}))
+      .mockResolvedValueOnce(Response.json({login: "tea-user"}, {status: 200}))
+      .mockResolvedValueOnce(new Response("Unauthorized", {status: 401}));
+    stubGlobal("fetch", mock);
+    expect(await verifyToken("github.com", "github-token")).toEqual("octocat");
+    expect(await verifyToken("gitea.example.com:3000", "gitea-token")).toEqual("tea-user");
+    await expect(verifyToken("github.com", "bad-token")).rejects.toThrow("token for github.com was rejected");
+    expect(getCalls(mock).map(([url, init]) => [url, authOf(init)])).toEqual([
+      ["https://api.github.com/user", "Bearer github-token"],
+      ["https://gitea.example.com:3000/api/v1/user", "token gitea-token"],
+      ["https://api.github.com/user", "Bearer bad-token"],
+    ]);
   });
 
   serialTest("createForgeRelease network error includes cause", async () => {
@@ -893,6 +957,20 @@ test.each([[[]], [["patch", "--help"]]])("prints help for %j", async (args) => {
   expect(stdout).toContain("usage: versions");
   expect(stdout).toContain("--replace");
 });
+
+test("login and logout dispatch without a release level", () => withTmpDir(async (tmpDir) => {
+  const env = {...process.env, XDG_CONFIG_HOME: tmpDir};
+  expect((await runFail(["--login"], {env})).output).toContain("Missing value for --login");
+  expect((await runFail(["--logout", "ABSENT.example.com"], {env})).output).toContain(
+    "no stored token for absent.example.com",
+  );
+  const path = join(tmpDir, "versions", "tokens.json");
+  await mkdir(join(tmpDir, "versions"), {recursive: true});
+  await writeFile(path, JSON.stringify({"gitea.example.com:3000": "token"}));
+  const {stdout} = await exec("node", [distPath, "--logout", "https://GITEA.example.com:3000/path"], {env});
+  expect(stdout).toEqual("removed token for gitea.example.com:3000");
+  expect(JSON.parse(await readFile(path, "utf8"))).toEqual({});
+}));
 
 test("dry mode", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
@@ -1308,6 +1386,15 @@ const giteaHost = (host: string): RepoInfo => ({...giteaInfo, host});
 describe("token env", {concurrent: false}, () => {
   serialTest("getForgeTokens reads GitHub env names", () => withTokenEnv({GH_TOKEN: "gh-tok"}, async () => {
     expect(await getForgeTokens(githubInfo)).toContain("gh-tok");
+  }));
+
+  serialTest("getForgeTokens tries a stored token before environment tokens", () => withTokenEnv({
+    GH_TOKEN: "env-token",
+  }, async () => {
+    await storeToken("github.com", "stored-token");
+    expect((await stat(join(testConfigHome, "versions", "tokens.json"))).mode & 0o777).toEqual(0o600);
+    expect((await getForgeTokens(githubInfo)).slice(0, 2)).toEqual(["stored-token", "env-token"]);
+    await removeToken("github.com");
   }));
 
   serialTest("getForgeTokens sends Gitea env tokens only to the GITEA_URL host", () => withTokenEnv({
