@@ -1,6 +1,6 @@
 {
   "name": "versions",
-  "version": "15.3.8",
+  "version": "15.3.9",
   "description": "CLI to release a project: bump the version, commit, tag, push, and create a GitHub or Gitea release",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/versions",
@@ -31,15 +31,15 @@
     "@types/node": "26.4.1",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "@vitest/coverage-v8": "5.0.0",
-    "eslint": "10.9.1",
-    "eslint-config-silverwind": "146.0.0",
-    "tsdown": "0.22.14",
-    "tsdown-config-silverwind": "4.0.3",
+    "eslint": "10.10.0",
+    "eslint-config-silverwind": "146.0.2",
+    "tsdown": "0.23.0",
+    "tsdown-config-silverwind": "4.1.0",
     "typescript": "6.0.3",
-    "typescript-config-silverwind": "20.0.3",
-    "updates": "18.0.8",
-    "updates-config-silverwind": "4.0.5",
+    "typescript-config-silverwind": "20.0.4",
+    "updates": "18.1.0",
+    "updates-config-silverwind": "4.0.6",
     "vitest": "5.0.0",
-    "vitest-config-silverwind": "12.0.0"
+    "vitest-config-silverwind": "12.0.1"
   }
 }
