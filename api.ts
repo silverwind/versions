@@ -359,16 +359,12 @@ export async function getForgeTokens(repoInfo: RepoInfo, cwd?: string): Promise<
   const pair = pairToken(repoInfo.host);
   if (pair) return [pair];
 
-  const isGithub = repoInfo.host === "github.com";
-  const tokens = isGithub ? envTokens(githubTokenEnvNames) :
+  const tokens = repoInfo.host === "github.com" ? envTokens(githubTokenEnvNames) :
     repoInfo.host === urlHost(env.GITEA_URL) ? envTokens(giteaTokenEnvNames) : [];
 
   // appended, not preferred, so a read-only configured token cannot lock out a working one
-  const [ghToken, header] = await Promise.all([
-    isGithub ? tryExec("gh", ["auth", "token", "--hostname", repoInfo.host], {timeout: probeTimeout}) : null,
-    extraheaderToken(repoInfo.host, cwd),
-  ]);
-  return Array.from(new Set([...tokens, ghToken, header].filter(Boolean) as string[]));
+  const header = await extraheaderToken(repoInfo.host, cwd);
+  return Array.from(new Set([...tokens, header].filter(Boolean) as string[]));
 }
 
 export type RepoInfo = {

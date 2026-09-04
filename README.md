@@ -95,9 +95,6 @@ Otherwise every one of these that is set is tried in order, only ever against `g
 - `GITHUB_TOKEN`
 - `HOMEBREW_GITHUB_API_TOKEN`
 
-`gh auth token` follows as one more candidate, so a read-only env token cannot lock out a
-working `gh` login.
-
 The same for Gitea and Forgejo, only ever against the instance named by `GITEA_URL`. The names
 do not say which instance they belong to, so without a matching `GITEA_URL` they go unused:
 - `VERSIONS_GITEA_API_TOKEN`
