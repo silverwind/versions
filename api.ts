@@ -314,7 +314,7 @@ export const githubTokenEnvNames = ["VERSIONS_GITHUB_API_TOKEN", "GITHUB_API_TOK
 export const giteaTokenEnvNames = ["VERSIONS_GITEA_API_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN"];
 
 function envTokens(names: string[]): string[] {
-  return Array.from(new Set(names.map(name => env[name]).filter(Boolean) as string[]));
+  return names.map(name => env[name]).filter(Boolean) as string[];
 }
 
 function urlHost(url = ""): string {

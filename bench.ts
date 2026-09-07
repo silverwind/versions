@@ -40,11 +40,6 @@ function setupRepo(dir: string): void {
   }
 }
 
-function resetRepo(dir: string): void {
-  git(dir, ["reset", "--hard", "-q", "HEAD"]);
-  git(dir, ["clean", "-fdq"]);
-}
-
 function runOnce(binary: string, dir: string, files: string[]): number {
   const start = performance.now();
   const result = spawnSync("node", [binary, "patch", ...files, "--dry", "--no-push"], {cwd: dir, encoding: "utf8"});
@@ -62,15 +57,15 @@ function benchCli(before: string, after: string): void {
     const files = Array.from({length: 30}, (_, i) => `file${i}.txt`).concat("package.json");
 
     for (let i = 0; i < 3; i++) {
-      runOnce(before, dir, files); resetRepo(dir);
-      runOnce(after, dir, files); resetRepo(dir);
+      runOnce(before, dir, files);
+      runOnce(after, dir, files);
     }
 
     const beforeSamples: number[] = [];
     const afterSamples: number[] = [];
     for (let i = 0; i < iterations; i++) {
-      beforeSamples.push(runOnce(before, dir, files)); resetRepo(dir);
-      afterSamples.push(runOnce(after, dir, files)); resetRepo(dir);
+      beforeSamples.push(runOnce(before, dir, files));
+      afterSamples.push(runOnce(after, dir, files));
     }
 
     const beforeStats = stats(beforeSamples);

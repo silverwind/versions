@@ -150,7 +150,7 @@ test("versions", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), pkgStr);
   await writeFile(join(tmpDir, "testfile"), `testfile v${version} (1999-01-01)`);
 
-  const run = (args: string) => exec(`node ${distPath} ${args}`, [], {shell: true, cwd: tmpDir});
+  const run = (args: string[]) => exec("node", [distPath, ...args], {cwd: tmpDir});
   const verify = async (ver: string) => {
     expect(await readFile(join(tmpDir, "testfile"), "utf8")).toEqual(
       `testfile v${ver} (${(new Date()).toISOString().substring(0, 10)})`
@@ -158,17 +158,16 @@ test("versions", () => withTmpDir(async (tmpDir) => {
     return ver;
   };
 
-  await run(`--date --base ${version} --gitless patch testfile`);
+  await run(["--date", "--base", version, "--gitless", "patch", "testfile"]);
   version = await verify(incrementSemver(version, "patch"));
 
-  await run(`--date --base ${version} --gitless minor testfile`);
+  await run(["--date", "--base", version, "--gitless", "minor", "testfile"]);
   version = await verify(incrementSemver(version, "minor"));
 
-  await run(`--date --base ${version} --gitless major testfile`);
+  await run(["--date", "--base", version, "--gitless", "major", "testfile"]);
   version = await verify(incrementSemver(version, "major"));
 
-  // a file named twice must dedupe to a single replacement pass
-  await run(`--date --base ${version} --gitless major testfile testfile`);
+  await run(["--date", "--base", version, "--gitless", "major", "testfile", "testfile"]);
   version = await verify(incrementSemver(version, "major"));
 }));
 
@@ -178,7 +177,7 @@ test("poetry", () => withTmpDir(async (tmpDir) => {
   expect(tomlGetString(str, "tool.poetry.dependencies", "flask")).toEqual(versionBefore);
 
   await writeFile(join(tmpDir, "pyproject.toml"), str);
-  await exec(`node ${distPath} minor --gitless --date --base ${versionBefore} pyproject.toml`, [], {shell: true, cwd: tmpDir});
+  await exec("node", [distPath, "minor", "--gitless", "--date", "--base", versionBefore, "pyproject.toml"], {cwd: tmpDir});
 
   const afterStr = await readFile(join(tmpDir, "pyproject.toml"), "utf8");
   const versionAfter = incrementSemver(versionBefore, "minor");
@@ -195,7 +194,7 @@ test("uv", () => withTmpDir(async (tmpDir) => {
 
   await writeFile(join(tmpDir, "pyproject.toml"), pyproject);
   await writeFile(join(tmpDir, "uv.lock"), lock);
-  await exec(`node ${distPath} minor --gitless --date --base ${versionBefore} pyproject.toml uv.lock`, [], {shell: true, cwd: tmpDir});
+  await exec("node", [distPath, "minor", "--gitless", "--date", "--base", versionBefore, "pyproject.toml", "uv.lock"], {cwd: tmpDir});
 
   const afterStr = await readFile(join(tmpDir, "pyproject.toml"), "utf8");
   const versionAfter = incrementSemver(versionBefore, "minor");
@@ -972,7 +971,7 @@ test("login and logout dispatch without a release level", () => withTmpDir(async
   expect(JSON.parse(await readFile(path, "utf8"))).toEqual({});
 }));
 
-test("dry mode", () => withTmpDir(async (tmpDir) => {
+test("dry mode with gitless and prefix options", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
   await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
   const opts = await initGitRepo(tmpDir);
@@ -986,10 +985,12 @@ test("dry mode", () => withTmpDir(async (tmpDir) => {
   const {stdout: status} = await exec("git", ["status", "--porcelain"], opts);
   expect(status.trim()).toEqual("");
 
-  // --gitless creates neither, so promising them would be a lie
   const {stdout: gitless} = await exec("node", [distPath, "--dry", "--gitless", "patch", "testfile.txt"], opts);
   expect(gitless).toContain("Would update testfile.txt");
   expect(gitless).not.toContain("Would create");
+
+  expect((await exec("node", [distPath, "--dry", "--prefix", "patch", "testfile.txt"], opts)).stdout)
+    .toContain("Would create new tag and commit: v1.0.1");
 }));
 
 test("--all no longer exempts named files that produce no diff", () => withTmpDir(async (tmpDir) => {
@@ -1011,17 +1012,6 @@ test("no files still commits and tags", () => withTmpDir(async (tmpDir) => {
   expect(tags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
   const {stdout: log} = await exec("git", ["log", "--oneline"], opts);
   expect(log.trim().split("\n")).toHaveLength(2);
-}));
-
-test("prefix", () => withTmpDir(async (tmpDir) => {
-  await writeFile(join(tmpDir, "package.json"), JSON.stringify({name: "test", version: "1.0.0"}, null, 2));
-  await writeFile(join(tmpDir, "testfile.txt"), "version 1.0.0");
-  const opts = await initGitRepo(tmpDir);
-  await exec("git", ["add", "."], opts);
-  await exec("git", ["commit", "-m", "init"], opts);
-
-  const {stdout} = await exec("node", [distPath, "--dry", "--prefix", "patch", "testfile.txt"], opts);
-  expect(stdout).toContain("Would create new tag and commit: v1.0.1");
 }));
 
 test("replace", () => withTmpDir(async (tmpDir) => {
@@ -1136,12 +1126,7 @@ test("SubprocessError", () => {
 });
 
 test("exec error", async () => {
-  await expect(exec("false", [])).rejects.toThrow();
-  try {
-    await exec("false", []);
-  } catch (err) {
-    expect(err).toBeInstanceOf(SubprocessError);
-  }
+  await expect(exec("false", [])).rejects.toBeInstanceOf(SubprocessError);
 });
 
 test("tomlGetString edge cases", () => {
@@ -1397,8 +1382,8 @@ describe("token env", {concurrent: false}, () => {
     await removeToken("github.com");
   }));
 
-  serialTest("getForgeTokens sends Gitea env tokens only to the GITEA_URL host", () => withTokenEnv({
-    GITEA_TOKEN: "gitea-tok", GITEA_URL: "https://gitea.example.com",
+  serialTest("getForgeTokens deduplicates Gitea env tokens and restricts them to the GITEA_URL host", () => withTokenEnv({
+    GITEA_AUTH_TOKEN: "gitea-tok", GITEA_TOKEN: "gitea-tok", GITEA_URL: "https://gitea.example.com",
   }, async () => {
     expect(await getForgeTokens(giteaHost("gitea.example.com"))).toEqual(["gitea-tok"]);
     expect(await getForgeTokens(giteaHost("other.example.com"))).toEqual([]);

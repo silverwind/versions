@@ -160,7 +160,7 @@ export function exec(file: string, args: readonly string[], options?: ExecOption
     const child = execFileCb(file, args, {encoding: "utf8", shell: options?.shell, windowsHide: true, cwd: options?.cwd, env: options?.env, timeout: options?.timeout, maxBuffer: 256 * 1024 * 1024}, (error, stdout, stderr) => {
       if (error) {
         // node puts the full argv in the message, so this is the second place a credential escapes
-        reject(new SubprocessError(redactCredentials(error.message.split(reNewline)[0]), stdout, stderr, typeof error.code === "number" ? error.code : null));
+        reject(new SubprocessError(redactCredentials(error.message.split(reNewline, 1)[0]), stdout, stderr, typeof error.code === "number" ? error.code : null));
       } else {
         resolve({stdout: stdout.trimEnd(), stderr: stderr.trimEnd()});
       }
