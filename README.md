@@ -1,19 +1,39 @@
 # versions
 [![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions) [![](https://packagephobia.com/badge?p=versions)](https://packagephobia.com/result?p=versions) [![](https://depx.co/api/badge/versions)](https://depx.co/pkg/versions)
 
-> CLI to release a project: bump the version, commit, tag, push, and create a GitHub or Gitea release
+> Generic release automation: bump, commit, tag, push, and create a GitHub or Gitea release
+
+`versions` is language-agnostic release automation. Files are optional — the version can live in `package.json`, `pyproject.toml`, git tags, or only in the tag this tool creates.
+
+A typical run resolves the base version, increments it, updates given files, commits if anything actually changed, creates an annotated tag, and pushes `HEAD` and the tag to `origin` atomically. `--release` also opens the GitHub or Gitea release.
 
 ## Usage
 
-To release a patch version of the current project:
+Node:
 
 ```bash
 npx versions patch package.json
 ```
 
-This bumps `package.json` to the next patch version, commits it, creates an annotated tag, and pushes both to `origin` atomically. Add `--release` to also create the GitHub or Gitea release.
+Python:
 
-With no files given, the commit and tag are still created, and a matching undated `CHANGELOG.md` entry is updated and committed with them.
+```bash
+npx versions patch pyproject.toml
+```
+
+Tag-only, for repos whose version lives solely in git tags:
+
+```bash
+npx versions patch
+```
+
+With no files given, a matching undated `CHANGELOG.md` heading is still dated and committed. If nothing needs committing, the commit is skipped and only the tag is created.
+
+Add `--release` to also create the forge release:
+
+```bash
+npx versions --release patch package.json
+```
 
 ## Options
 ```
@@ -33,7 +53,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -R, --release         Create a GitHub or Gitea release with the changelog as body
     -L, --login <host>    Verify and store a forge API token
     -O, --logout <host>   Remove a stored forge API token
-    -n, --no-push         Skip pushing commit and tag
+    -n, --no-push         Skip pushing HEAD and the tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
     -B, --branch <name>   Remote branch to push HEAD to. Default is the current branch
     -V, --verbose         Print verbose output to stderr
@@ -43,8 +63,10 @@ usage: versions [options] patch|minor|major|prerelease [files...]
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
   Unless --gitless, at least one given file must change.
+  If nothing needs committing, the commit is skipped and only the tag is created.
 
   Examples:
+    $ versions patch
     $ versions patch package.json
     $ versions prerelease --preid=alpha package.json
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
@@ -77,7 +99,7 @@ If a `CHANGELOG.md` is present in the current directory or any directory above i
 
 ## Creating releases
 
-`--release` creates a GitHub or Gitea release after pushing the tag, with the forge detected from the git remote URL. The body is the changelog entry or `git log` summary the commit message carries, without the leading tag name line and any `--message` strings, or just the tag name if there is neither. It requires the push, so it is incompatible with `--no-push` and `--gitless`.
+`--release` creates a GitHub or Gitea release after pushing the tag, with the forge detected from the git remote URL. The body is the changelog entry or `git log` summary the tag annotation carries, without the leading tag name line and any `--message` strings, or just the tag name if there is neither. It requires the push, so it is incompatible with `--no-push` and `--gitless`.
 
 ### API Tokens
 

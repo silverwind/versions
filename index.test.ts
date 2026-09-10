@@ -59,7 +59,8 @@ afterEach(() => {
 
 async function createBareRemote(tmpDir: string): Promise<string> {
   const bareDir = join(tmpDir, "remote.git");
-  await exec("git", ["init", "--bare", "-q", bareDir]);
+  // pin master so a host init.defaultBranch of main does not leave HEAD dangling after pushing master
+  await exec("git", ["init", "--bare", "-q", "-b", "master", bareDir]);
   return bareDir;
 }
 
@@ -80,7 +81,7 @@ async function initGitRepo(tmpDir: string) {
   const env = getIsolatedGitEnv(tmpDir);
   const opts = {cwd: tmpDir, env: {...process.env, ...env}};
   await mkdir(env.HOME, {recursive: true});
-  await exec("git", ["init", "-q"], opts);
+  await exec("git", ["init", "-q", "-b", "master"], opts);
   return opts;
 }
 
@@ -955,6 +956,7 @@ test.each([[[]], [["patch", "--help"]]])("prints help for %j", async (args) => {
   const {stdout} = await exec("node", [distPath, ...args]);
   expect(stdout).toContain("usage: versions");
   expect(stdout).toContain("--replace");
+  expect(stdout).toContain("If nothing needs committing");
 });
 
 test("login and logout dispatch without a release level", () => withTmpDir(async (tmpDir) => {
@@ -991,6 +993,11 @@ test("dry mode with gitless and prefix options", () => withTmpDir(async (tmpDir)
 
   expect((await exec("node", [distPath, "--dry", "--prefix", "patch", "testfile.txt"], opts)).stdout)
     .toContain("Would create new tag and commit: v1.0.1");
+
+  const {stdout: noFiles} = await exec("node", [distPath, "--dry", "patch"], opts);
+  expect(noFiles).toContain("Would create new tag: 1.0.1");
+  expect(noFiles).not.toContain("commit");
+  expect(noFiles).not.toContain("Would update");
 }));
 
 test("--all no longer exempts named files that produce no diff", () => withTmpDir(async (tmpDir) => {
@@ -1002,16 +1009,65 @@ test("--all no longer exempts named files that produce no diff", () => withTmpDi
 }));
 
 // a tag-only release, the flow used by repos whose version lives solely in the git tag
-test("no files still commits and tags", () => withTmpDir(async (tmpDir) => {
+test.each([[[]], [["--all"]]])("no files tags without a commit %j", (flags) => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "README.md"), "docs"); // the initial commit needs a file
-  const {opts} = await setupReleaseRepo(tmpDir); // tags 1.0.0
+  const {bareDir, opts} = await setupReleaseRepo(tmpDir); // tags 1.0.0
+  const {stdout: preHead} = await exec("git", ["rev-parse", "HEAD"], opts);
+
+  await exec("node", [distPath, ...flags, "patch"], opts);
+
+  expect((await exec("git", ["rev-parse", "HEAD"], opts)).stdout).toEqual(preHead);
+  expect((await exec("git", ["tag", "--list"], opts)).stdout.trim().split("\n").filter(Boolean)).toContain("1.0.1");
+  expect((await exec("git", ["log", "--oneline"], opts)).stdout.trim().split("\n")).toHaveLength(1);
+  expect((await exec("git", ["tag", "--list"], {cwd: bareDir})).stdout.trim().split("\n").filter(Boolean)).toContain("1.0.1");
+  expect((await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir})).stdout).toEqual(preHead);
+}));
+
+test("no files still commits a changelog that needs dating", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## 1.0.1\n- entry\n\n## 1.0.0\nold\n`);
+  const {opts} = await setupReleaseRepo(tmpDir);
 
   await exec("node", [distPath, "--no-push", "patch"], opts);
 
-  const {stdout: tags} = await exec("git", ["tag", "--list"], opts);
-  expect(tags.trim().split("\n").filter(Boolean)).toContain("1.0.1");
-  const {stdout: log} = await exec("git", ["log", "--oneline"], opts);
-  expect(log.trim().split("\n")).toHaveLength(2);
+  const today = new Date().toISOString().substring(0, 10);
+  expect(await readFile(join(tmpDir, "CHANGELOG.md"), "utf8")).toContain(`## 1.0.1 - ${today}`);
+  expect((await exec("git", ["log", "--oneline"], opts)).stdout.trim().split("\n")).toHaveLength(2);
+  expect((await exec("git", ["show", "--name-only", "--format=", "HEAD"], opts)).stdout.trim()).toEqual("CHANGELOG.md");
+}));
+
+test("no files skips commit when the changelog is already dated", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## 1.0.1 - 2024-01-15\n- entry\n`);
+  const {opts} = await setupReleaseRepo(tmpDir);
+  const {stdout: preHead} = await exec("git", ["rev-parse", "HEAD"], opts);
+
+  await exec("node", [distPath, "--no-push", "patch"], opts);
+
+  expect((await exec("git", ["rev-parse", "HEAD"], opts)).stdout).toEqual(preHead);
+  expect((await exec("git", ["tag", "-l", "1.0.1", "--format=%(contents)"], opts)).stdout).toContain("- entry");
+}));
+
+test("--all commits tracked changes when no files need a bump", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "notes.txt"), "base\n");
+  const {opts} = await setupReleaseRepo(tmpDir);
+  await writeFile(join(tmpDir, "notes.txt"), "base\nextra\n");
+
+  await exec("node", [distPath, "--no-push", "--all", "patch"], opts);
+
+  expect((await exec("git", ["log", "--oneline"], opts)).stdout.trim().split("\n")).toHaveLength(2);
+  expect((await exec("git", ["show", "--name-only", "--format=", "HEAD"], opts)).stdout.trim()).toEqual("notes.txt");
+  expect((await exec("git", ["tag", "--list"], opts)).stdout).toContain("1.0.1");
+}));
+
+test("rollback - push failure after a tag-only release restores the tag and not HEAD", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "README.md"), "docs");
+  const {bareDir, opts} = await setupReleaseRepo(tmpDir);
+  await writeFile(join(bareDir, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n", {mode: 0o755});
+  const {stdout: preHead} = await exec("git", ["rev-parse", "HEAD"], opts);
+
+  expect((await runFail(["patch"], opts)).output).toContain("pre-receive hook declined");
+
+  expect((await exec("git", ["rev-parse", "HEAD"], opts)).stdout).toEqual(preHead);
+  expect((await exec("git", ["tag", "--list"], opts)).stdout.trim().split("\n").filter(Boolean)).toEqual(["1.0.0"]);
 }));
 
 test("replace", () => withTmpDir(async (tmpDir) => {
