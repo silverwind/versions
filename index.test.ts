@@ -955,6 +955,7 @@ test.each([[[]], [["patch", "--help"]]])("prints help for %j", async (args) => {
   const {stdout} = await exec("node", [distPath, ...args]);
   expect(stdout).toContain("usage: versions");
   expect(stdout).toContain("--replace");
+  expect(stdout).toContain("piped on stdin");
 });
 
 test("login and logout dispatch without a release level", () => withTmpDir(async (tmpDir) => {
@@ -1240,6 +1241,62 @@ test("CHANGELOG.md with existing date is left alone", () => withTmpDir(async (tm
 
   const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
   expect(msg).toContain("- existing entry");
+}));
+
+test("changelog piped on stdin drives commit and tag body", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
+
+  const {opts} = await setupReleaseRepo(tmpDir);
+  await exec("git", ["commit", "--allow-empty", "-m", "tweak something"], opts);
+
+  await exec("node", [distPath, "--no-push", "-m", "Release _VER_", "patch", "package.json"], {
+    ...opts,
+    stdin: "- Fixed thing X\n- Added thing Y\n",
+  });
+
+  const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(msg).toContain("Release 1.0.1");
+  expect(msg).toContain("- Fixed thing X");
+  expect(msg).toContain("- Added thing Y");
+  expect(msg).not.toContain("tweak something");
+  expect(msg.split("\n")[0]).toEqual("1.0.1");
+
+  const {stdout: tagMsg} = await exec("git", ["tag", "-l", "1.0.1", "--format=%(contents)"], opts);
+  expect(tagMsg).toContain("- Fixed thing X");
+}));
+
+test("stdin changelog takes precedence over CHANGELOG.md", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
+  await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## [1.0.1]\n- from file\n\n## 1.0.0\nold\n`);
+
+  const {opts} = await setupReleaseRepo(tmpDir);
+
+  await exec("node", [distPath, "--no-push", "patch", "package.json"], {
+    ...opts,
+    stdin: "- from stdin\n",
+  });
+
+  const today = new Date().toISOString().substring(0, 10);
+  expect(await readFile(join(tmpDir, "CHANGELOG.md"), "utf8")).toContain(`## [1.0.1] - ${today}`);
+
+  const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(msg).toContain("- from stdin");
+  expect(msg).not.toContain("- from file");
+}));
+
+test("whitespace-only stdin falls back to git log", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
+
+  const {opts} = await setupReleaseRepo(tmpDir);
+  await exec("git", ["commit", "--allow-empty", "-m", "tweak something"], opts);
+
+  await exec("node", [distPath, "--no-push", "patch", "package.json"], {
+    ...opts,
+    stdin: "  \n  ",
+  });
+
+  const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(msg).toContain("tweak something");
 }));
 
 test("readVersionFile package.json", () => withTmpDir(async (tmpDir) => {

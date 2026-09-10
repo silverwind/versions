@@ -80,6 +80,12 @@ async function readToken(stdin: Readable | ReadStream, host: string): Promise<st
   return token;
 }
 
+// a TTY would block waiting for Ctrl-D; empty or whitespace falls through to CHANGELOG.md / git log
+async function readStdinChangelog(input: Readable | ReadStream): Promise<string> {
+  if ("isTTY" in input && input.isTTY) return "";
+  return (await text(input)).trim();
+}
+
 async function main(): Promise<void> {
   // exit() discards queued writes on a non-blocking stream, losing diagnostics under CI pipes
   for (const stream of [stdout, stderr]) {
@@ -161,12 +167,15 @@ async function main(): Promise<void> {
 
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
+  A changelog piped on stdin is used as the commit, tag, and release body.
+
   Unless --gitless, at least one given file must change.
 
   Examples:
     $ versions patch package.json
     $ versions prerelease --preid=alpha package.json
-    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
+    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
+    $ versions --release patch package.json < notes.md`);
     end();
   }
 
@@ -216,6 +225,8 @@ async function main(): Promise<void> {
     (async () => stringArg(args.branch) ?? (await exec("git", ["branch", "--show-current"])).stdout)() :
     Promise.resolve("");
   const identityOkP = (async () => !willCommit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
+  // drain here so --dry still consumes a pipe, and before --command runs
+  const stdinChangelogP = readStdinChangelog(stdin);
   const forgeP = (async () => {
     const repoInfo = wantRelease && willCommit ? await getRepoInfo(undefined, pushRemote) : null;
     const tokens = repoInfo ? await getForgeTokens(repoInfo) : [];
@@ -297,8 +308,8 @@ async function main(): Promise<void> {
   }
 
   // === VALIDATE === one await collects every probe, the checks below are pure
-  const [remoteState, {repoInfo, tokens, pingResult}, identityOk, mergeBaseOk] = await Promise.all([
-    remoteStateP, forgeP, identityOkP, mergeBaseOkP,
+  const [remoteState, {repoInfo, tokens, pingResult}, identityOk, mergeBaseOk, stdinChangelog] = await Promise.all([
+    remoteStateP, forgeP, identityOkP, mergeBaseOkP, stdinChangelogP,
   ]);
 
   // manifest rewrites set the version outright, so the no-diff check below can never catch a wrong base
@@ -396,6 +407,10 @@ async function main(): Promise<void> {
     const [filesToAdd, changelogBody] = await Promise.all([
       !args.all && allFiles.length ? removeIgnoredFiles(allFiles) : [],
       (async () => {
+        if (stdinChangelog) {
+          logVerbose("using changelog from stdin");
+          return stdinChangelog;
+        }
         if (changelogInfo) {
           logVerbose(`using changelog entry from ${changelogPath}`);
           return changelogInfo.entry;
