@@ -152,7 +152,7 @@ async function main(): Promise<void> {
     -R, --release         Create a GitHub or Gitea release with the changelog as body
     -L, --login <host>    Verify and store a forge API token
     -O, --logout <host>   Remove a stored forge API token
-    -n, --no-push         Skip pushing commit and tag
+    -n, --no-push         Skip pushing HEAD and the tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
     -B, --branch <name>   Remote branch to push HEAD to. Default is the current branch
     -V, --verbose         Print verbose output to stderr
@@ -162,8 +162,10 @@ async function main(): Promise<void> {
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
   Unless --gitless, at least one given file must change.
+  If nothing needs committing, the commit is skipped and only the tag is created.
 
   Examples:
+    $ versions patch
     $ versions patch package.json
     $ versions prerelease --preid=alpha package.json
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
@@ -197,8 +199,8 @@ async function main(): Promise<void> {
   files = Array.from(new Set(files.map(file => relative(pwd, file)))); // so `foo` and `./foo` dedupe
 
   const wantRelease = Boolean(args.release);
-  const willCommit = !args.gitless && !args.dry;
-  const willPush = willCommit && !args["no-push"];
+  const willGit = !args.gitless && !args.dry;
+  const willPush = willGit && !args["no-push"];
 
   let lastTagP: Promise<string> | undefined;
   // memoized: --base needs it only for the changelog fallback, --gitless/--dry never ask at all
@@ -215,9 +217,9 @@ async function main(): Promise<void> {
   const pushBranchP = willPush ?
     (async () => stringArg(args.branch) ?? (await exec("git", ["branch", "--show-current"])).stdout)() :
     Promise.resolve("");
-  const identityOkP = (async () => !willCommit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
+  const identityOkP = (async () => !willGit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
   const forgeP = (async () => {
-    const repoInfo = wantRelease && willCommit ? await getRepoInfo(undefined, pushRemote) : null;
+    const repoInfo = wantRelease && willGit ? await getRepoInfo(undefined, pushRemote) : null;
     const tokens = repoInfo ? await getForgeTokens(repoInfo) : [];
     const pingResult = repoInfo && tokens.length ? await pingForge(repoInfo, tokens) : null;
     return {repoInfo, tokens, pingResult};
@@ -314,7 +316,7 @@ async function main(): Promise<void> {
 
   const errors: string[] = [];
 
-  // no files is a tag-only release, a lockfile is not a bump, and --gitless has no commit to be empty
+  // no files is a tag-only release, a lockfile is not a bump, and --gitless has no commit
   if (!args.gitless && specifiedFiles.size > 0 && fileChanges.every(change => !change.changed || !change.specified)) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
@@ -336,7 +338,7 @@ async function main(): Promise<void> {
       }
     }
   }
-  if (wantRelease && willCommit) {
+  if (wantRelease && willGit) {
     if (!repoInfo) {
       errors.push("--release: could not detect a forge from the git remote URL");
     } else if (!tokens.length) {
@@ -358,13 +360,16 @@ async function main(): Promise<void> {
 
   if (args.dry) {
     for (const update of writes) console.info(`Would update ${update.path}`);
-    if (!args.gitless) console.info(`Would create new tag and commit: ${tagName}`);
+    if (!args.gitless) {
+      const wouldCommit = writes.length > 0 || (Boolean(args.all) && Boolean(await tryExec("git", ["status", "--porcelain", "--untracked-files=no"])));
+      console.info(wouldCommit ? `Would create new tag and commit: ${tagName}` : `Would create new tag: ${tagName}`);
+    }
     return;
   }
 
   // === EXECUTE === mutations only, every realistic failure mode was caught above
   // preserve user's staged hunks on rollback (--soft would leave our changes staged)
-  const [preIndexTreeOid, priorLocalTagOid] = willCommit ? await Promise.all([
+  const [preIndexTreeOid, priorLocalTagOid] = willGit ? await Promise.all([
     tryExec("git", ["write-tree"]),
     tryExec("git", ["rev-parse", "--verify", tagRef]),
   ]) : [null, null];
@@ -393,7 +398,7 @@ async function main(): Promise<void> {
     }
 
     const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
-    const [filesToAdd, changelogBody] = await Promise.all([
+    const [filesToAdd, changelogBody, trackedDirty] = await Promise.all([
       !args.all && allFiles.length ? removeIgnoredFiles(allFiles) : [],
       (async () => {
         if (changelogInfo) {
@@ -404,20 +409,23 @@ async function main(): Promise<void> {
         const since = priorLocalTagOid ? tagName : baseTag ?? await lastTag();
         return await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], "--pretty=format:* %s (%aN)"]) || undefined;
       })(),
+      args.all ? tryExec("git", ["status", "--porcelain", "--untracked-files=no"]) : "",
     ]);
     const message = joinStrings([tagName, ...msgs, changelogBody], "\n\n");
     const commitArgs = args.all ?
-      ["commit", "-a", "--allow-empty", "-F", "-"] :
-      filesToAdd.length ?
-        ["commit", "-o", "-F", "-", "--", ...filesToAdd] :
-        ["commit", "--allow-empty", "-F", "-"];
+      trackedDirty ? ["commit", "-a", "-F", "-"] : null :
+      filesToAdd.length ? ["commit", "-o", "-F", "-", "--", ...filesToAdd] : null;
 
-    writeResult(await exec("git", commitArgs, {stdin: message}));
-    rollbacks.push(async () => {
-      if (await tryExec("git", ["rev-parse", "HEAD^"]) !== null) await exec("git", ["reset", "--soft", "HEAD^"]);
-      else await exec("git", ["update-ref", "-d", "HEAD"]);
-      if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
-    });
+    if (commitArgs) {
+      writeResult(await exec("git", commitArgs, {stdin: message}));
+      rollbacks.push(async () => {
+        if (await tryExec("git", ["rev-parse", "HEAD^"]) !== null) await exec("git", ["reset", "--soft", "HEAD^"]);
+        else await exec("git", ["update-ref", "-d", "HEAD"]);
+        if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
+      });
+    } else {
+      logVerbose("no file changes, skipping commit");
+    }
 
     // explicit -a seems to stop git signing the tag, and the default cleanup `strip` would eat markdown headings
     writeResult(await exec("git", ["tag", "-f", "--cleanup=whitespace", "-F", "-", tagName], {stdin: message}));
