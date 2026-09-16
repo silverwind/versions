@@ -1377,7 +1377,7 @@ describe("token env", {concurrent: false}, () => {
     GH_TOKEN: "env-token",
   }, async () => {
     await storeToken("github.com", "stored-token");
-    expect((await stat(join(testConfigHome, "versions", "tokens.json"))).mode & 0o777).toEqual(0o600);
+    expect((await stat(join(testConfigHome, "versions", "tokens.json"))).mode & 0o777).toEqual(process.platform === "win32" ? 0o666 : 0o600);
     expect((await getForgeTokens(githubInfo)).slice(0, 2)).toEqual(["stored-token", "env-token"]);
     await removeToken("github.com");
   }));
