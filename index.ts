@@ -91,6 +91,7 @@ async function main(): Promise<void> {
     allowPositionals: true,
     options: {
       all: {short: "a", type: "boolean"},
+      "skip-empty": {short: "e", type: "boolean"},
       dry: {short: "D", type: "boolean"},
       gitless: {short: "g", type: "boolean"},
       help: {short: "h", type: "boolean"},
@@ -141,6 +142,7 @@ async function main(): Promise<void> {
 
   Options:
     -a, --all             Add all tracked changes to the commit
+    -e, --skip-empty      Skip the release commit when nothing needs committing, only tag
     -b, --base <version>  Base version. Default is from latest semver git tag, package.json, pyproject.toml, or 0.0.0
     -p, --prefix          Prefix tag name with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
@@ -154,7 +156,7 @@ async function main(): Promise<void> {
     -R, --release         Create a GitHub or Gitea release with the changelog as body
     -L, --login <host>    Verify and store a forge API token
     -O, --logout <host>   Remove a stored forge API token
-    -n, --no-push         Skip pushing commit and tag
+    -n, --no-push         Skip pushing HEAD and the tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
     -B, --branch <name>   Remote branch to push HEAD to. Default is the current branch
     -V, --verbose         Print verbose output to stderr
@@ -166,6 +168,7 @@ async function main(): Promise<void> {
   Unless --gitless, at least one given file must change.
 
   Examples:
+    $ versions patch
     $ versions patch package.json
     $ versions prerelease --preid=alpha package.json
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
@@ -361,9 +364,15 @@ async function main(): Promise<void> {
     writes.push({path: changelogRel!, oldData: changelogInfo.original, newData: changelogInfo.updated});
   }
 
+  const shouldCommit = async (hasChanges: boolean): Promise<boolean> =>
+    !args["skip-empty"] || hasChanges ||
+    await tryExec("git", args.all ? ["diff", "--quiet", "HEAD"] : ["diff", "--cached", "--quiet"]) === null;
+
   if (args.dry) {
     for (const update of writes) console.info(`Would update ${update.path}`);
-    if (!args.gitless) console.info(`Would create new tag and commit: ${tagName}`);
+    if (!args.gitless) {
+      console.info(await shouldCommit(writes.length > 0) ? `Would create new tag and commit: ${tagName}` : `Would create new tag: ${tagName}`);
+    }
     return;
   }
 
@@ -421,12 +430,16 @@ async function main(): Promise<void> {
         ["commit", "-o", "-F", "-", "--", ...filesToAdd] :
         ["commit", "--allow-empty", "-F", "-"];
 
-    writeResult(await exec("git", commitArgs, {stdin: message}));
-    rollbacks.push(async () => {
-      if (await tryExec("git", ["rev-parse", "HEAD^"]) !== null) await exec("git", ["reset", "--soft", "HEAD^"]);
-      else await exec("git", ["update-ref", "-d", "HEAD"]);
-      if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
-    });
+    if (await shouldCommit(filesToAdd.length > 0)) {
+      writeResult(await exec("git", commitArgs, {stdin: message}));
+      rollbacks.push(async () => {
+        if (await tryExec("git", ["rev-parse", "HEAD^"]) !== null) await exec("git", ["reset", "--soft", "HEAD^"]);
+        else await exec("git", ["update-ref", "-d", "HEAD"]);
+        if (preIndexTreeOid) await exec("git", ["read-tree", preIndexTreeOid]);
+      });
+    } else {
+      logVerbose("no file changes, skipping commit");
+    }
 
     // explicit -a seems to stop git signing the tag, and the default cleanup `strip` would eat markdown headings
     writeResult(await exec("git", ["tag", "-f", "--cleanup=whitespace", "-F", "-", tagName], {stdin: message}));
