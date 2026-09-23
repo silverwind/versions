@@ -253,7 +253,7 @@ async function main(): Promise<void> {
   const replacements = stringArgs(args.replace).map(replaceStr => {
     const match = reReplaceString.exec(replaceStr);
     if (!match) throw new Error(`Invalid replace string: ${replaceStr}`);
-    const [, re, replacement, flags] = match;
+    const [re, replacement, flags] = match.slice(1);
     try {
       return {re: new RegExp(re, flags), replacement: replaceTokens(replacement, newVersion)};
     } catch (err: any) {

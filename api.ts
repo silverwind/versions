@@ -34,7 +34,7 @@ export function isSemver(str: string): boolean {
 }
 
 export function replaceTokens(str: string, newVersion: string): string {
-  const [, major, minor, patch] = reSemver.exec(stripV(newVersion))!;
+  const [major, minor, patch] = reSemver.exec(stripV(newVersion))!.slice(1);
   return str
     .replaceAll("_VER_", newVersion)
     .replaceAll("_MAJOR_", major)
@@ -51,7 +51,7 @@ export function incrementSemver(str: string, level: string, preid?: string): str
   const match = reSemver.exec(stripV(str));
   if (!match) throw new Error(`Invalid semver: ${str}`);
   if (preid && !isPrereleaseId(preid)) throw new Error(`Invalid prerelease identifier: ${preid}`);
-  const [, majStr, minStr, patStr, prerelease] = match;
+  const [majStr, minStr, patStr, prerelease] = match.slice(1);
   const major = Number(majStr), minor = Number(minStr), patch = Number(patStr);
   const tail = preid ? `-${preid}.0` : "";
 

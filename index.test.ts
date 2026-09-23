@@ -440,7 +440,7 @@ function getCalls(mock: ReturnType<typeof vi.fn>) {
 }
 
 function postCall(mock: ReturnType<typeof vi.fn>) {
-  const found = getCalls(mock).find(([, init]) => init?.method === "POST");
+  const found = getCalls(mock).find(([_url, init]) => init?.method === "POST");
   if (!found) throw new Error("no POST call recorded");
   return found;
 }
@@ -546,7 +546,7 @@ describe("forge requests", {concurrent: false}, () => {
       await withTokenEnv({GITEA_URL: "https://gitea.example.com", GITEA_TOKEN: "gitea-env-token"}, async () => {
         await createForgeRelease(giteaInfo, "1.0.0", "body", await getForgeTokens(giteaInfo));
       });
-      expect(getCalls(mock).map(([, init]) => authOf(init))).toEqual([
+      expect(getCalls(mock).map(([_url, init]) => authOf(init))).toEqual([
         "Bearer stored-rejected-token",
         "Bearer github-env-token",
         "Bearer github-env-token",
@@ -599,9 +599,9 @@ describe("forge requests", {concurrent: false}, () => {
     await createForgeRelease(giteaInfo, "v1.2.3", "notes", ["tok"]);
 
     const calls = getCalls(mock);
-    const methods = calls.map(([, init]) => init?.method ?? "GET");
+    const methods = calls.map(([_url, init]) => init?.method ?? "GET");
     expect(methods).toEqual(["POST", "GET", "DELETE", "POST"]);
-    const deleteCall = calls.find(([, init]) => init?.method === "DELETE")!;
+    const deleteCall = calls.find(([_url, init]) => init?.method === "DELETE")!;
     expect(deleteCall[0]).toEqual("https://gitea.example.com/api/v1/repos/o/r/releases/35141");
   });
 
@@ -614,7 +614,7 @@ describe("forge requests", {concurrent: false}, () => {
     await createForgeRelease(githubInfo, "v1.0.0", "body", ["tok"]);
 
     const calls = getCalls(mock);
-    const deleteCall = calls.find(([, init]) => init?.method === "DELETE")!;
+    const deleteCall = calls.find(([_url, init]) => init?.method === "DELETE")!;
     expect(deleteCall[0]).toEqual("https://api.github.com/repos/o/r/releases/99");
     expect(authOf(deleteCall[1])).toEqual("Bearer tok");
   });
@@ -628,7 +628,7 @@ describe("forge requests", {concurrent: false}, () => {
     });
     stubGlobal("fetch", mock);
     await expect(createForgeRelease(giteaInfo, "v1.0.0", "body", ["tok"])).rejects.toThrow("409");
-    const methods = getCalls(mock).map(([, init]) => init?.method ?? "GET");
+    const methods = getCalls(mock).map(([_url, init]) => init?.method ?? "GET");
     expect(methods).toEqual(["POST", "GET"]);
   });
 
@@ -643,7 +643,7 @@ describe("forge requests", {concurrent: false}, () => {
     );
     await createForgeRelease(giteaInfo, "v1.0.0", "body", ["tok"]);
 
-    const deleteCalls = getCalls(mock).filter(([, init]) => init?.method === "DELETE");
+    const deleteCalls = getCalls(mock).filter(([_url, init]) => init?.method === "DELETE");
     expect(deleteCalls).toHaveLength(2);
   });
 
@@ -662,7 +662,7 @@ describe("forge requests", {concurrent: false}, () => {
     });
     stubGlobal("fetch", mock);
     await createForgeRelease(githubInfo, "v1.0.0", "body", ["tok"]);
-    const methods = getCalls(mock).map(([, init]) => init?.method ?? "GET");
+    const methods = getCalls(mock).map(([_url, init]) => init?.method ?? "GET");
     expect(methods).toEqual(["POST", "GET", "DELETE", "POST"]);
   });
 
