@@ -1,6 +1,6 @@
 {
   "name": "versions",
-  "version": "15.4.0",
+  "version": "15.5.0",
   "description": "Release automation: bump the version, commit, tag, push and create a GitHub or Gitea release",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/versions",
