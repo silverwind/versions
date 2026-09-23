@@ -1,7 +1,7 @@
 {
   "name": "versions",
   "version": "15.4.0",
-  "description": "Generic release automation: bump, commit, tag, push, and create a GitHub or Gitea release",
+  "description": "Git-based release automation: bump the version, commit, tag, push and create a GitHub or Gitea release",
   "author": "silverwind <me@silverwind.io>",
   "repository": "silverwind/versions",
   "license": "BSD-2-Clause",

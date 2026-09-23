@@ -1,39 +1,19 @@
 # versions
 [![](https://img.shields.io/npm/v/versions.svg?style=flat)](https://www.npmjs.org/package/versions) [![](https://img.shields.io/npm/dm/versions.svg)](https://www.npmjs.org/package/versions) [![](https://packagephobia.com/badge?p=versions)](https://packagephobia.com/result?p=versions) [![](https://depx.co/api/badge/versions)](https://depx.co/pkg/versions)
 
-> Generic release automation: bump, commit, tag, push, and create a GitHub or Gitea release
+> Git-based release automation: bump the version, commit, tag, push and create a GitHub or Gitea release
 
-`versions` is language-agnostic release automation. Files are optional — the version can live in `package.json`, `pyproject.toml`, git tags, or only in the tag this tool creates.
-
-A typical run resolves the base version, increments it, updates given files, creates a commit and an annotated tag, and pushes `HEAD` and the tag to `origin` atomically. `--release` also opens the GitHub or Gitea release.
+The current version comes from the latest git tag, so any project works without a manifest. Files passed on the command line get the new version written into them. Release notes come from the matching `CHANGELOG.md` entry or a `git log` summary.
 
 ## Usage
 
-Node:
-
 ```bash
-npx versions patch package.json
+npx versions --release --prefix patch  # tag-only, e.g. a Go module
+npx versions patch package.json        # Node
+npx versions patch pyproject.toml      # Python
 ```
 
-Python:
-
-```bash
-npx versions patch pyproject.toml
-```
-
-Tag-only, for repos whose version lives solely in git tags:
-
-```bash
-npx versions patch
-```
-
-With no files given, a matching undated `CHANGELOG.md` heading is still dated and committed. An empty release commit is created if nothing needs committing. Use `--skip-empty` to skip that commit and only create the tag.
-
-Add `--release` to also create the forge release:
-
-```bash
-npx versions --release patch package.json
-```
+Each run commits, creates an annotated tag and pushes both atomically. Without files to commit, the release commit is empty, pass `--skip-empty` to only tag.
 
 ## Options
 ```
@@ -95,7 +75,7 @@ To automatically sign commits and tags created by `versions` with GPG add this t
 
 ## Changelog
 
-If a `CHANGELOG.md` is present in the current directory or any directory above it up to the repository root, and it has a heading for the new version, its body is used as the commit message, tag annotation, and release body. Heading matching is lenient — `# 1.2.3`, `## v1.2.3`, `## [1.2.3]`, `## [1.2.3] - 2024-01-15`, `## 1.2.3 (YYYY-MM-DD)` all work. If the heading has no date or a placeholder (`YYYY-MM-DD`, `xxxx-xx-xx`, etc.), it gets rewritten to today's date and included in the commit. With no matching entry, the tool falls back to a `git log` summary.
+If a `CHANGELOG.md` is present in the current directory or any directory above it up to the repository root, and it has a heading for the new version, its body is used as the commit message, tag annotation, and release body. Heading matching is lenient, `# 1.2.3`, `## v1.2.3`, `## [1.2.3]`, `## [1.2.3] - 2024-01-15`, `## 1.2.3 (YYYY-MM-DD)` all work. If the heading has no date or a placeholder (`YYYY-MM-DD`, `xxxx-xx-xx`, etc.), it gets rewritten to today's date and included in the commit. With no matching entry, the tool falls back to a `git log` summary.
 
 ## Creating releases
 
