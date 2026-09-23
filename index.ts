@@ -80,12 +80,6 @@ async function readToken(stdin: Readable | ReadStream, host: string): Promise<st
   return token;
 }
 
-// a TTY would block waiting for Ctrl-D; empty or whitespace falls through to CHANGELOG.md / git log
-async function readStdinChangelog(input: Readable | ReadStream): Promise<string> {
-  if ("isTTY" in input && input.isTTY) return "";
-  return (await text(input)).trim();
-}
-
 async function main(): Promise<void> {
   // exit() discards queued writes on a non-blocking stream, losing diagnostics under CI pipes
   for (const stream of [stdout, stderr]) {
@@ -113,6 +107,7 @@ async function main(): Promise<void> {
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
       message: {short: "m", type: "string", multiple: true},
+      notes: {short: "N", type: "string"},
       preid: {short: "i", type: "string"},
       verbose: {short: "V", type: "boolean"},
     },
@@ -152,6 +147,7 @@ async function main(): Promise<void> {
     -d, --date            Replace dates in format YYYY-MM-DD with current date
     -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc
     -m, --message <str>   Custom tag and commit message
+    -N, --notes <file>    Read changelog from file, "-" for stdin. Default is CHANGELOG.md or git log
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Change nothing, just print what would be done
@@ -167,15 +163,12 @@ async function main(): Promise<void> {
 
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
-  A changelog piped on stdin is used as the commit, tag, and release body.
-
   Unless --gitless, at least one given file must change.
 
   Examples:
     $ versions patch package.json
     $ versions prerelease --preid=alpha package.json
-    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
-    $ versions --release patch package.json < notes.md`);
+    $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
     end();
   }
 
@@ -194,6 +187,9 @@ async function main(): Promise<void> {
   }
 
   // === GATHER === pure reads, no side effects
+  if (args.notes !== undefined && typeof args.notes !== "string") throw new Error("Missing value for --notes");
+  const notes = args.notes === undefined ? undefined :
+    (args.notes === "-" ? await text(stdin) : readFileSync(args.notes, "utf8")).trim();
   const today = new Date().toISOString().substring(0, 10);
 
   const pwd = cwd();
@@ -225,8 +221,6 @@ async function main(): Promise<void> {
     (async () => stringArg(args.branch) ?? (await exec("git", ["branch", "--show-current"])).stdout)() :
     Promise.resolve("");
   const identityOkP = (async () => !willCommit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
-  // drain here so --dry still consumes a pipe, and before --command runs
-  const stdinChangelogP = readStdinChangelog(stdin);
   const forgeP = (async () => {
     const repoInfo = wantRelease && willCommit ? await getRepoInfo(undefined, pushRemote) : null;
     const tokens = repoInfo ? await getForgeTokens(repoInfo) : [];
@@ -308,8 +302,8 @@ async function main(): Promise<void> {
   }
 
   // === VALIDATE === one await collects every probe, the checks below are pure
-  const [remoteState, {repoInfo, tokens, pingResult}, identityOk, mergeBaseOk, stdinChangelog] = await Promise.all([
-    remoteStateP, forgeP, identityOkP, mergeBaseOkP, stdinChangelogP,
+  const [remoteState, {repoInfo, tokens, pingResult}, identityOk, mergeBaseOk] = await Promise.all([
+    remoteStateP, forgeP, identityOkP, mergeBaseOkP,
   ]);
 
   // manifest rewrites set the version outright, so the no-diff check below can never catch a wrong base
@@ -407,9 +401,9 @@ async function main(): Promise<void> {
     const [filesToAdd, changelogBody] = await Promise.all([
       !args.all && allFiles.length ? removeIgnoredFiles(allFiles) : [],
       (async () => {
-        if (stdinChangelog) {
-          logVerbose("using changelog from stdin");
-          return stdinChangelog;
+        if (notes !== undefined) {
+          logVerbose(`using changelog from ${args.notes === "-" ? "stdin" : args.notes}`);
+          return notes;
         }
         if (changelogInfo) {
           logVerbose(`using changelog entry from ${changelogPath}`);

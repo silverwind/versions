@@ -27,6 +27,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -d, --date            Replace dates in format YYYY-MM-DD with current date
     -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc
     -m, --message <str>   Custom tag and commit message
+    -N, --notes <file>    Read changelog from file, "-" for stdin. Default is CHANGELOG.md or git log
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Change nothing, just print what would be done
@@ -42,15 +43,12 @@ usage: versions [options] patch|minor|major|prerelease [files...]
 
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
-  A changelog piped on stdin is used as the commit, tag, and release body.
-
   Unless --gitless, at least one given file must change.
 
   Examples:
     $ versions patch package.json
     $ versions prerelease --preid=alpha package.json
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css
-    $ versions --release patch package.json < notes.md
 ```
 
 ## Lockfiles
@@ -76,11 +74,11 @@ To automatically sign commits and tags created by `versions` with GPG add this t
 
 ## Changelog
 
-A changelog piped on stdin is used as the commit message, tag annotation, and release body. Otherwise, if a `CHANGELOG.md` is present in the current directory or any directory above it up to the repository root, and it has a heading for the new version, its body is used. Heading matching is lenient — `# 1.2.3`, `## v1.2.3`, `## [1.2.3]`, `## [1.2.3] - 2024-01-15`, `## 1.2.3 (YYYY-MM-DD)` all work. If the heading has no date or a placeholder (`YYYY-MM-DD`, `xxxx-xx-xx`, etc.), it gets rewritten to today's date and included in the commit. With no matching entry and nothing on stdin, the tool falls back to a `git log` summary.
+If a `CHANGELOG.md` is present in the current directory or any directory above it up to the repository root, and it has a heading for the new version, its body is used as the commit message, tag annotation, and release body. Heading matching is lenient — `# 1.2.3`, `## v1.2.3`, `## [1.2.3]`, `## [1.2.3] - 2024-01-15`, `## 1.2.3 (YYYY-MM-DD)` all work. If the heading has no date or a placeholder (`YYYY-MM-DD`, `xxxx-xx-xx`, etc.), it gets rewritten to today's date and included in the commit. With no matching entry, the tool falls back to a `git log` summary.
 
 ## Creating releases
 
-`--release` creates a GitHub or Gitea release after pushing the tag, with the forge detected from the git remote URL. The body is the stdin changelog, the `CHANGELOG.md` entry, or `git log` summary the commit message carries, without the leading tag name line and any `--message` strings, or just the tag name if there is neither. It requires the push, so it is incompatible with `--no-push` and `--gitless`.
+`--release` creates a GitHub or Gitea release after pushing the tag, with the forge detected from the git remote URL. The body is the changelog entry or `git log` summary the commit message carries, without the leading tag name line and any `--message` strings, or just the tag name if there is neither. It requires the push, so it is incompatible with `--no-push` and `--gitless`.
 
 ### API Tokens
 
