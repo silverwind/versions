@@ -1242,6 +1242,38 @@ test("CHANGELOG.md with existing date is left alone", () => withTmpDir(async (tm
   expect(msg).toContain("- existing entry");
 }));
 
+test("-N - uses stdin over CHANGELOG.md for commit and tag", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
+  await writeFile(join(tmpDir, "CHANGELOG.md"), "# Changelog\n\n## [1.0.1]\n- from changelog\n");
+
+  const {opts} = await setupReleaseRepo(tmpDir);
+
+  await exec("node", [distPath, "--no-push", "-N", "-", "patch", "package.json"], {
+    ...opts,
+    stdin: "- from stdin\n",
+  });
+
+  const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(msg).toContain("- from stdin");
+  expect(msg).not.toContain("- from changelog");
+
+  const {stdout: tagMsg} = await exec("git", ["tag", "-l", "1.0.1", "--format=%(contents)"], opts);
+  expect(tagMsg).toContain("- from stdin");
+  expect(tagMsg).not.toContain("- from changelog");
+}));
+
+test("-N reads notes from a file for the commit body", () => withTmpDir(async (tmpDir) => {
+  await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
+  await writeFile(join(tmpDir, "notes.md"), "- from notes file\n");
+
+  const {opts} = await setupReleaseRepo(tmpDir);
+
+  await exec("node", [distPath, "--no-push", "-N", "notes.md", "patch", "package.json"], opts);
+
+  const {stdout: msg} = await exec("git", ["log", "-1", "--pretty=%B"], opts);
+  expect(msg).toContain("- from notes file");
+}));
+
 test("readVersionFile package.json", () => withTmpDir(async (tmpDir) => {
   expect(readVersionFile("package.json", tmpDir)).toBeNull();
 

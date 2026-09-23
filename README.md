@@ -27,6 +27,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -d, --date            Replace dates in format YYYY-MM-DD with current date
     -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc
     -m, --message <str>   Custom tag and commit message
+    -N, --notes <file>    Read changelog from file, "-" for stdin. Default is CHANGELOG.md or git log
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Change nothing, just print what would be done

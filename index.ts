@@ -107,6 +107,7 @@ async function main(): Promise<void> {
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
       message: {short: "m", type: "string", multiple: true},
+      notes: {short: "N", type: "string"},
       preid: {short: "i", type: "string"},
       verbose: {short: "V", type: "boolean"},
     },
@@ -146,6 +147,7 @@ async function main(): Promise<void> {
     -d, --date            Replace dates in format YYYY-MM-DD with current date
     -i, --preid <id>      Prerelease identifier, e.g., alpha, beta, rc
     -m, --message <str>   Custom tag and commit message
+    -N, --notes <file>    Read changelog from file, "-" for stdin. Default is CHANGELOG.md or git log
     -r, --replace <str>   Additional replacements in the format "s#regexp#replacement#flags"
     -g, --gitless         Do not perform any git action like creating commit and tag
     -D, --dry             Change nothing, just print what would be done
@@ -185,6 +187,9 @@ async function main(): Promise<void> {
   }
 
   // === GATHER === pure reads, no side effects
+  if (args.notes !== undefined && typeof args.notes !== "string") throw new Error("Missing value for --notes");
+  const notes = args.notes === undefined ? undefined :
+    (args.notes === "-" ? await text(stdin) : readFileSync(args.notes, "utf8")).trim();
   const today = new Date().toISOString().substring(0, 10);
 
   const pwd = cwd();
@@ -396,6 +401,10 @@ async function main(): Promise<void> {
     const [filesToAdd, changelogBody] = await Promise.all([
       !args.all && allFiles.length ? removeIgnoredFiles(allFiles) : [],
       (async () => {
+        if (notes !== undefined) {
+          logVerbose(`using changelog from ${args.notes === "-" ? "stdin" : args.notes}`);
+          return notes;
+        }
         if (changelogInfo) {
           logVerbose(`using changelog entry from ${changelogPath}`);
           return changelogInfo.entry;
