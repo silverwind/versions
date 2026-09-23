@@ -912,8 +912,7 @@ test("-R -p patch with no files commits the changelog entry, pushes and creates 
     expect((await exec("git", ["rev-parse", "HEAD"], {cwd: bareDir})).stdout).toEqual(head);
     expect((await exec("git", ["rev-parse", "v1.0.1^{}"], {cwd: bareDir})).stdout).toEqual(head);
   } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    server.close();
   }
 }));
 
