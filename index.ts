@@ -91,6 +91,7 @@ async function main(): Promise<void> {
     allowPositionals: true,
     options: {
       all: {short: "a", type: "boolean"},
+      "skip-empty": {short: "e", type: "boolean"},
       dry: {short: "D", type: "boolean"},
       gitless: {short: "g", type: "boolean"},
       help: {short: "h", type: "boolean"},
@@ -140,6 +141,7 @@ async function main(): Promise<void> {
 
   Options:
     -a, --all             Add all tracked changes to the commit
+    -e, --skip-empty      Skip the release commit when nothing needs committing, only tag
     -b, --base <version>  Base version. Default is from latest semver git tag, package.json, pyproject.toml, or 0.0.0
     -p, --prefix          Prefix tag name with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
@@ -162,7 +164,6 @@ async function main(): Promise<void> {
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
   Unless --gitless, at least one given file must change.
-  If nothing needs committing, the commit is skipped and only the tag is created.
 
   Examples:
     $ versions patch
@@ -199,8 +200,8 @@ async function main(): Promise<void> {
   files = Array.from(new Set(files.map(file => relative(pwd, file)))); // so `foo` and `./foo` dedupe
 
   const wantRelease = Boolean(args.release);
-  const willGit = !args.gitless && !args.dry;
-  const willPush = willGit && !args["no-push"];
+  const willCommit = !args.gitless && !args.dry;
+  const willPush = willCommit && !args["no-push"];
 
   let lastTagP: Promise<string> | undefined;
   // memoized: --base needs it only for the changelog fallback, --gitless/--dry never ask at all
@@ -217,9 +218,9 @@ async function main(): Promise<void> {
   const pushBranchP = willPush ?
     (async () => stringArg(args.branch) ?? (await exec("git", ["branch", "--show-current"])).stdout)() :
     Promise.resolve("");
-  const identityOkP = (async () => !willGit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
+  const identityOkP = (async () => !willCommit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
   const forgeP = (async () => {
-    const repoInfo = wantRelease && willGit ? await getRepoInfo(undefined, pushRemote) : null;
+    const repoInfo = wantRelease && willCommit ? await getRepoInfo(undefined, pushRemote) : null;
     const tokens = repoInfo ? await getForgeTokens(repoInfo) : [];
     const pingResult = repoInfo && tokens.length ? await pingForge(repoInfo, tokens) : null;
     return {repoInfo, tokens, pingResult};
@@ -316,7 +317,7 @@ async function main(): Promise<void> {
 
   const errors: string[] = [];
 
-  // no files is a tag-only release, a lockfile is not a bump, and --gitless has no commit
+  // no files is a tag-only release, a lockfile is not a bump, and --gitless has no commit to be empty
   if (!args.gitless && specifiedFiles.size > 0 && fileChanges.every(change => !change.changed || !change.specified)) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
@@ -338,7 +339,7 @@ async function main(): Promise<void> {
       }
     }
   }
-  if (wantRelease && willGit) {
+  if (wantRelease && willCommit) {
     if (!repoInfo) {
       errors.push("--release: could not detect a forge from the git remote URL");
     } else if (!tokens.length) {
@@ -358,18 +359,21 @@ async function main(): Promise<void> {
     writes.push({path: changelogRel!, oldData: changelogInfo.original, newData: changelogInfo.updated});
   }
 
+  const shouldCommit = async (hasChanges: boolean): Promise<boolean> =>
+    !args["skip-empty"] || hasChanges ||
+    await tryExec("git", args.all ? ["diff", "--quiet", "HEAD"] : ["diff", "--cached", "--quiet"]) === null;
+
   if (args.dry) {
     for (const update of writes) console.info(`Would update ${update.path}`);
     if (!args.gitless) {
-      const wouldCommit = writes.length > 0 || (Boolean(args.all) && Boolean(await tryExec("git", ["status", "--porcelain", "--untracked-files=no"])));
-      console.info(wouldCommit ? `Would create new tag and commit: ${tagName}` : `Would create new tag: ${tagName}`);
+      console.info(await shouldCommit(writes.length > 0) ? `Would create new tag and commit: ${tagName}` : `Would create new tag: ${tagName}`);
     }
     return;
   }
 
   // === EXECUTE === mutations only, every realistic failure mode was caught above
   // preserve user's staged hunks on rollback (--soft would leave our changes staged)
-  const [preIndexTreeOid, priorLocalTagOid] = willGit ? await Promise.all([
+  const [preIndexTreeOid, priorLocalTagOid] = willCommit ? await Promise.all([
     tryExec("git", ["write-tree"]),
     tryExec("git", ["rev-parse", "--verify", tagRef]),
   ]) : [null, null];
@@ -398,7 +402,7 @@ async function main(): Promise<void> {
     }
 
     const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
-    const [filesToAdd, changelogBody, trackedDirty] = await Promise.all([
+    const [filesToAdd, changelogBody] = await Promise.all([
       !args.all && allFiles.length ? removeIgnoredFiles(allFiles) : [],
       (async () => {
         if (changelogInfo) {
@@ -409,14 +413,15 @@ async function main(): Promise<void> {
         const since = priorLocalTagOid ? tagName : baseTag ?? await lastTag();
         return await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], "--pretty=format:* %s (%aN)"]) || undefined;
       })(),
-      args.all ? tryExec("git", ["status", "--porcelain", "--untracked-files=no"]) : "",
     ]);
     const message = joinStrings([tagName, ...msgs, changelogBody], "\n\n");
     const commitArgs = args.all ?
-      trackedDirty ? ["commit", "-a", "-F", "-"] : null :
-      filesToAdd.length ? ["commit", "-o", "-F", "-", "--", ...filesToAdd] : null;
+      ["commit", "-a", "--allow-empty", "-F", "-"] :
+      filesToAdd.length ?
+        ["commit", "-o", "-F", "-", "--", ...filesToAdd] :
+        ["commit", "--allow-empty", "-F", "-"];
 
-    if (commitArgs) {
+    if (await shouldCommit(filesToAdd.length > 0)) {
       writeResult(await exec("git", commitArgs, {stdin: message}));
       rollbacks.push(async () => {
         if (await tryExec("git", ["rev-parse", "HEAD^"]) !== null) await exec("git", ["reset", "--soft", "HEAD^"]);

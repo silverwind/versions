@@ -158,7 +158,12 @@ export async function resolveBaseVersion({base, gitless, lastTag, projectRoot, s
 
   if (!gitless) {
     const describeTag = await lastTag();
-    if (isSemver(describeTag)) return {baseVersion: stripV(describeTag), baseSource: "git describe", baseTag: describeTag};
+    if (isSemver(describeTag)) {
+      // describe picks among same-commit tags by date, not version
+      const commitTags = await tryExec("git", ["-c", "versionsort.suffix=-", "tag", "--list", "--points-at", `${describeTag}^{commit}`, "--sort=-v:refname"]);
+      const baseTag = commitTags?.split(reNewline).find(isSemver) ?? describeTag;
+      return {baseVersion: stripV(baseTag), baseSource: "git describe", baseTag};
+    }
 
     const tagList = await tryExec("git", ["tag", "--list", "--sort=-creatordate"]);
     const tag = tagList?.split(reNewline).find(isSemver);

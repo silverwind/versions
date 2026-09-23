@@ -5,7 +5,7 @@
 
 `versions` is language-agnostic release automation. Files are optional — the version can live in `package.json`, `pyproject.toml`, git tags, or only in the tag this tool creates.
 
-A typical run resolves the base version, increments it, updates given files, commits if anything actually changed, creates an annotated tag, and pushes `HEAD` and the tag to `origin` atomically. `--release` also opens the GitHub or Gitea release.
+A typical run resolves the base version, increments it, updates given files, creates a commit and an annotated tag, and pushes `HEAD` and the tag to `origin` atomically. `--release` also opens the GitHub or Gitea release.
 
 ## Usage
 
@@ -27,7 +27,7 @@ Tag-only, for repos whose version lives solely in git tags:
 npx versions patch
 ```
 
-With no files given, a matching undated `CHANGELOG.md` heading is still dated and committed. If nothing needs committing, the commit is skipped and only the tag is created.
+With no files given, a matching undated `CHANGELOG.md` heading is still dated and committed. An empty release commit is created if nothing needs committing. Use `--skip-empty` to skip that commit and only create the tag.
 
 Add `--release` to also create the forge release:
 
@@ -41,6 +41,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
 
   Options:
     -a, --all             Add all tracked changes to the commit
+    -e, --skip-empty      Skip the release commit when nothing needs committing, only tag
     -b, --base <version>  Base version. Default is from latest semver git tag, package.json, pyproject.toml, or 0.0.0
     -p, --prefix          Prefix tag name with a "v" character. Default is none
     -c, --command <cmd>   Run command after files are updated but before git commit and tag
@@ -63,7 +64,6 @@ usage: versions [options] patch|minor|major|prerelease [files...]
   The message and replacement strings accept tokens _VER_, _MAJOR_, _MINOR_, _PATCH_.
 
   Unless --gitless, at least one given file must change.
-  If nothing needs committing, the commit is skipped and only the tag is created.
 
   Examples:
     $ versions patch
