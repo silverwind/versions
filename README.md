@@ -14,7 +14,7 @@ pnpm exec versions patch package.json        # Node
 pnpm exec versions patch pyproject.toml      # Python
 ```
 
-Each run commits, creates an annotated tag and pushes both atomically. With nothing to commit, the release commit is empty unless `--skip-empty` is passed.
+Each run commits, creates an annotated tag and pushes both atomically. With nothing to commit, the release commit is empty unless `--skip-empty` is passed. Releasing to a branch other than the remote's default branch is refused unless `--any-branch` is passed.
 
 ## Options
 ```
@@ -39,6 +39,7 @@ usage: versions [options] patch|minor|major|prerelease [files...]
     -n, --no-push         Skip pushing HEAD and the tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
     -B, --branch <name>   Remote branch to push HEAD to. Default is the current branch
+    -A, --any-branch      Allow releasing to a branch other than the remote's default branch
     -V, --verbose         Print verbose output to stderr
     -v, --version         Print the version
     -h, --help            Print this help

@@ -971,13 +971,19 @@ test("--remote with --release uses that remote for forge detection", () => withT
   expect(err.output).not.toContain("could not detect a forge");
 }));
 
-test("--branch pushes specified branch", () => withTmpDir(async (tmpDir) => {
+test("releasing to a non-default branch requires --any-branch, with or without --dry and --no-push", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
 
   const {bareDir, opts} = await setupReleaseRepo(tmpDir);
   await exec("git", ["checkout", "-b", "release"], opts);
 
-  await exec("node", [distPath, "--branch", "release", "patch", "package.json"], opts);
+  const refusal = "release is not the default branch master of remote origin";
+  expect((await runFail(["--branch", "release", "patch", "package.json"], opts)).output).toContain(refusal);
+  await exec("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master"], opts);
+  for (const flag of ["--dry", "--no-push"]) {
+    expect((await runFail([flag, "patch", "package.json"], opts)).output).toContain(refusal);
+  }
+  await exec("node", [distPath, "--branch", "release", "--any-branch", "patch", "package.json"], opts);
 
   const {stdout: remoteBranches} = await exec("git", ["branch", "--list"], {cwd: bareDir});
   expect(remoteBranches).toContain("release");

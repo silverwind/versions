@@ -104,6 +104,7 @@ async function main(): Promise<void> {
       "no-push": {short: "n", type: "boolean"},
       remote: {short: "o", type: "string"},
       branch: {short: "B", type: "string"},
+      "any-branch": {short: "A", type: "boolean"},
       base: {short: "b", type: "string"},
       command: {short: "c", type: "string"},
       replace: {short: "r", type: "string", multiple: true},
@@ -159,6 +160,7 @@ async function main(): Promise<void> {
     -n, --no-push         Skip pushing HEAD and the tag
     -o, --remote <name>   Git remote to push to. Default is "origin"
     -B, --branch <name>   Remote branch to push HEAD to. Default is the current branch
+    -A, --any-branch      Allow releasing to a branch other than the remote's default branch
     -V, --verbose         Print verbose output to stderr
     -v, --version         Print the version
     -h, --help            Print this help
@@ -220,9 +222,13 @@ async function main(): Promise<void> {
     stopDir: repoRoot,
   });
   // --show-current is empty on detached HEAD, unlike rev-parse which fails on an unborn HEAD
-  const pushBranchP = willPush ?
+  const checkLocalHead = !willPush && !args.gitless && !args["any-branch"];
+  const pushBranchP = willPush || (checkLocalHead && gitDir) ?
     (async () => stringArg(args.branch) ?? (await exec("git", ["branch", "--show-current"])).stdout)() :
     Promise.resolve("");
+  const localHeadP = checkLocalHead ?
+    tryExec("git", ["symbolic-ref", "--quiet", `refs/remotes/${pushRemote}/HEAD`]) :
+    Promise.resolve(null);
   const identityOkP = (async () => !willCommit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
   const forgeP = (async () => {
     const repoInfo = wantRelease && willCommit ? await getRepoInfo(undefined, pushRemote) : null;
@@ -305,8 +311,8 @@ async function main(): Promise<void> {
   }
 
   // === VALIDATE === one await collects every probe, the checks below are pure
-  const [remoteState, {repoInfo, tokens, pingResult}, identityOk, mergeBaseOk] = await Promise.all([
-    remoteStateP, forgeP, identityOkP, mergeBaseOkP,
+  const [remoteState, {repoInfo, tokens, pingResult}, identityOk, mergeBaseOk, localHead] = await Promise.all([
+    remoteStateP, forgeP, identityOkP, mergeBaseOkP, localHeadP,
   ]);
 
   // manifest rewrites set the version outright, so the no-diff check below can never catch a wrong base
@@ -343,6 +349,12 @@ async function main(): Promise<void> {
         errors.push(`local HEAD is not a descendant of ${pushRemote}/${pushBranch} (${remoteState.branch.slice(0, 8)}); fetch and integrate before bumping`);
       }
     }
+  }
+  const defaultBranch = willPush ?
+    remoteState?.head?.replace("refs/heads/", "") :
+    localHead?.replace(`refs/remotes/${pushRemote}/`, "");
+  if (defaultBranch && defaultBranch !== pushBranch && !args["any-branch"]) {
+    errors.push(`${pushBranch || "detached HEAD"} is not the default branch ${defaultBranch} of remote ${pushRemote}; pass --any-branch to release to it`);
   }
   if (wantRelease && willCommit) {
     if (!repoInfo) {

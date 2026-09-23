@@ -532,23 +532,23 @@ export function writeResult(result: Result): void {
   }
 }
 
-type RemoteState = {branch: string | null; tag: string | null};
-
-const reWhitespace = /\s+/;
+type RemoteState = {branch: string | null; tag: string | null; head: string | null};
 
 // ls-remote needs the push URL, which can differ from the fetch URL it defaults to
 export async function probeRemote(pushRemote: string, branchRef: string, tagRef: string): Promise<RemoteState | null> {
   const pushUrl = await tryExec("git", ["remote", "get-url", "--push", pushRemote]);
   if (pushUrl === null) return null;
-  const refs = await tryExec("git", ["ls-remote", pushUrl, branchRef, tagRef]);
+  const refs = await tryExec("git", ["ls-remote", "--symref", pushUrl, "HEAD", branchRef, tagRef]);
   if (refs === null) return null;
-  let branch: string | null = null, tag: string | null = null;
+  let branch: string | null = null, tag: string | null = null, head: string | null = null;
   for (const line of refs.split(reNewline)) {
-    const [oid, ref] = line.split(reWhitespace);
-    if (ref === branchRef) branch = oid;
+    const [oid, ref] = line.split("\t");
+    if (oid.startsWith("ref: ")) {
+      if (ref === "HEAD") head = oid.slice("ref: ".length);
+    } else if (ref === branchRef) branch = oid;
     else if (ref === tagRef) tag = oid;
   }
-  return {branch, tag};
+  return {branch, tag, head};
 }
 
 // verify the forge before the push, so create-release after a landed push is unlikely to fail
