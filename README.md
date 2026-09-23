@@ -8,6 +8,7 @@ The current version comes from the latest git tag. Files given on the command li
 ## Usage
 
 ```bash
+pnpm i -D versions
 pnpm exec versions --release --prefix patch  # tag-only, e.g. a Go module
 pnpm exec versions patch package.json        # Node
 pnpm exec versions patch pyproject.toml      # Python
