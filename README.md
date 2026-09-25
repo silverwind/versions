@@ -3,7 +3,7 @@
 
 > Release automation: bump the version, commit, tag, push and create a GitHub or Gitea release
 
-The current version comes from the latest git tag. Files given on the command line get the new version written into them, release notes come from `CHANGELOG.md`.
+Files given on the command line get the new version written into them. The commit and annotated tag are pushed atomically.
 
 ## Usage
 
@@ -13,8 +13,6 @@ pnpm exec versions --release --prefix patch  # tag-only, e.g. a Go module
 pnpm exec versions patch package.json        # Node
 pnpm exec versions patch pyproject.toml      # Python
 ```
-
-Each run commits, creates an annotated tag and pushes both atomically. With nothing to commit, the release commit is empty unless `--skip-empty` is passed. Releasing to a branch other than the remote's default branch is refused unless `--any-branch` is passed.
 
 ## Options
 ```
@@ -57,15 +55,15 @@ usage: versions [options] patch|minor|major|prerelease [files...]
 
 ## Changelog
 
-The `CHANGELOG.md` entry for the new version becomes the commit message, tag annotation and release body. The file is looked up from the current directory up to the repository root, and headings like `# 1.2.3`, `## v1.2.3` or `## [1.2.3] - 2024-01-15` match. An undated heading, or one with a placeholder like `YYYY-MM-DD`, gets today's date and is committed with the release. Without a matching entry, a `git log` summary is used.
+The `CHANGELOG.md` entry for the new version becomes the commit message, tag annotation and release body. The file is looked up from the current directory up to the repository root, and headings like `# 1.2.3`, `## v1.2.3` or `## [1.2.3] - 2024-01-15` match. An undated heading, or one with a placeholder like `YYYY-MM-DD`, gets today's date and is committed with the release.
 
 ## Releases
 
-`--release` creates a GitHub or Gitea release for the pushed tag, detecting the forge from the remote URL. Its body is the tag annotation without the tag name and `--message` lines, or the tag name if nothing remains. It needs the push, so `--no-push` and `--gitless` are rejected.
+`--release` detects the forge from the remote URL and needs the push, so `--no-push` and `--gitless` are rejected. If the changelog is empty, the release body is the tag name.
 
 ### API tokens
 
-`versions --login <host>` stores a token read from stdin or a prompt, `versions --logout <host>` removes it.
+`--login` reads the token from stdin or a prompt.
 
 `VERSIONS_FORGE_TOKENS` holds comma-separated `host:token` pairs like `git.example.com:tok1,localhost:3000:tok2`, and a matching host uses only that token. The host must match the remote exactly, port included, so a ported instance needs an https remote. An `ssh://` remote's port is not part of the host. Otherwise these are tried in order:
 

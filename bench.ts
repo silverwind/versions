@@ -3,7 +3,7 @@ import {parseArgs} from "node:util";
 import {execFileSync, spawnSync} from "node:child_process";
 import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, resolve} from "node:path";
 import {env} from "node:process";
 
 const iterations = Number(env.BENCH_RUNS) || 30;
@@ -27,9 +27,7 @@ function setupRepo(dir: string): void {
   git(dir, ["config", "user.name", "bench"]);
   git(dir, ["config", "commit.gpgsign", "false"]);
   git(dir, ["config", "tag.gpgsign", "false"]);
-  for (let i = 0; i < 30; i++) {
-    writeFileSync(join(dir, `file${i}.txt`), `version 1.0.0 line ${i}\n`);
-  }
+  for (let i = 0; i < 30; i++) writeFileSync(join(dir, `file${i}.txt`), `version 1.0.0 line ${i}\n`);
   writeFileSync(join(dir, "package.json"), JSON.stringify({name: "bench", version: "1.0.0"}, null, 2));
   git(dir, ["add", "."]);
   git(dir, ["commit", "-q", "-m", "init"]);
@@ -44,9 +42,7 @@ function runOnce(binary: string, dir: string, files: string[]): number {
   const start = performance.now();
   const result = spawnSync("node", [binary, "patch", ...files, "--dry", "--no-push"], {cwd: dir, encoding: "utf8"});
   const ms = performance.now() - start;
-  if (result.status !== 0) {
-    throw new Error(`bench run failed (exit ${result.status})\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
-  }
+  if (result.status !== 0) throw new Error(`bench run failed (exit ${result.status})\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
   return ms;
 }
 
@@ -79,15 +75,7 @@ function benchCli(before: string, after: string): void {
   }
 }
 
-const {values} = parseArgs({
-  options: {
-    before: {type: "string"},
-    after: {type: "string"},
-  },
-});
+const {values} = parseArgs({options: {before: {type: "string"}, after: {type: "string"}}});
 
-if (values.before && values.after) {
-  benchCli(values.before, values.after);
-} else {
-  console.info("pass --before and --after paths to two built dist/index.js bundles");
-}
+if (values.before && values.after) benchCli(resolve(values.before), resolve(values.after));
+else console.info("pass --before and --after paths to two built dist/index.js bundles");

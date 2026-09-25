@@ -14,17 +14,11 @@ function tokensPath(): string {
 }
 
 async function readTokensFile(path: string): Promise<Tokens> {
-  let data: string;
   try {
-    data = await readFile(path, "utf8");
+    return JSON.parse(await readFile(path, "utf8"));
   } catch (err: any) {
     if (err.code === "ENOENT") return {};
-    throw err;
-  }
-  try {
-    return JSON.parse(data);
-  } catch (err: any) {
-    throw new Error(`Could not parse ${path}: ${err.message}`);
+    throw err instanceof SyntaxError ? new Error(`Could not parse ${path}: ${err.message}`) : err;
   }
 }
 

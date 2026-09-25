@@ -19,12 +19,12 @@ lint-fix: node_modules
 	pnpm exec tsgo
 
 .PHONY: test
-test: node_modules build
+test: build
 	pnpm exec vitest
 	bun test --timeout 180000 --only-failures --concurrent
 
 .PHONY: test-coverage
-test-coverage: node_modules build
+test-coverage: build
 	pnpm exec vitest --coverage
 
 .PHONY: bench
@@ -32,11 +32,10 @@ bench:
 	node bench.ts $(if $(BEFORE),--before $(BEFORE)) $(if $(AFTER),--after $(AFTER))
 
 .PHONY: build
-build: node_modules $(DIST_FILES)
+build: $(DIST_FILES)
 
 $(DIST_FILES): $(SOURCE_FILES) pnpm-lock.yaml package.json tsconfig.json tsdown.config.ts | node_modules
 	pnpm exec tsdown
-	chmod +x $(DIST_FILES)
 
 .PHONY: update
 update: update-js update-actions
@@ -49,11 +48,11 @@ update-js: node_modules
 	@touch node_modules
 
 .PHONY: publish
-publish: node_modules build
+publish: build
 	pnpm publish --no-git-checks
 
 .PHONY: patch minor major
-patch minor major: node_modules lint build test
+patch minor major: lint test
 	./dist/index.js -R $@ package.json
 
 .PHONY: update-actions

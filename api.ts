@@ -13,12 +13,10 @@ import {readTokens} from "./tokens.ts";
 const reEscapeChars = /[|\\{}()[\]^$+*?.-]/g;
 const reSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const rePrereleaseIdNum = /^([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*)\.(\d+)$/;
-const reDateGlobal = /(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)/g;
 const reDate = /(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)/;
 // scope to [project] / [tool.poetry], other sections may have unrelated `version` keys
 const reTomlVersionLine = /^(\s*version\s*=\s*["'])\d+\.\d+\.\d+(?:[^"'\d][^"']*)?(["'].*)$/;
 const pyprojectSections: readonly string[] = ["project", "tool.poetry"];
-const handledLockfiles = new Set(["package-lock.json", "uv.lock"]);
 const reLockfileName = /(?:^|[.-])lock/i;
 
 function stripV(str: string): string {
@@ -42,15 +40,11 @@ export function replaceTokens(str: string, newVersion: string): string {
     .replaceAll("_PATCH_", patch);
 }
 
-// checked against the prerelease group, as a bare isSemver would read a `+` as build metadata
-function isPrereleaseId(str: string): boolean {
-  return reSemver.exec(`0.0.0-${str}`)?.[4] === str;
-}
-
 export function incrementSemver(str: string, level: string, preid?: string): string {
   const match = reSemver.exec(stripV(str));
   if (!match) throw new Error(`Invalid semver: ${str}`);
-  if (preid && !isPrereleaseId(preid)) throw new Error(`Invalid prerelease identifier: ${preid}`);
+  // checked against the prerelease group, as a bare isSemver would read a `+` as build metadata
+  if (preid && reSemver.exec(`0.0.0-${preid}`)?.[4] !== preid) throw new Error(`Invalid prerelease identifier: ${preid}`);
   const [majStr, minStr, patStr, prerelease] = match.slice(1);
   const major = Number(majStr), minor = Number(minStr), patch = Number(patStr);
   const tail = preid ? `-${preid}.0` : "";
@@ -85,20 +79,15 @@ export function findUp(filename: string, dir: string, stopDir?: string): string 
 
 export function readVersionFile(filename: string, dir: string, stopDir?: string): string | null {
   const path = findUp(filename, dir, stopDir);
-  if (!path) return null;
   try {
-    return readDeclaredVersion(path, readFileSync(path, "utf8"));
+    return path && readDeclaredVersion(path, readFileSync(path, "utf8"));
   } catch {
     return null;
   }
 }
 
 function pyprojectGet(content: string, key: string): string | undefined {
-  for (const section of pyprojectSections) {
-    const version = tomlGetString(content, section, key);
-    if (version) return version;
-  }
-  return undefined;
+  return pyprojectSections.map(section => tomlGetString(content, section, key)).find(Boolean);
 }
 
 export function readDeclaredVersion(file: string, data: string): string | null {
@@ -125,32 +114,24 @@ const packageManagerLockfiles = new Map<string, readonly string[]>([
 // a packageManager pin binds the lockfile to the manifest, both belong in one commit
 export function findCompanionLockfile(file: string): string | null {
   if (basename(file) !== "package.json") return null;
-  let packageManager: unknown;
   try {
-    packageManager = JSON.parse(readFileSync(file, "utf8")).packageManager;
-  } catch {
-    return null;
-  }
-  if (typeof packageManager !== "string") return null;
-  const dir = dirname(file);
-  for (const name of packageManagerLockfiles.get(packageManager.split("@")[0]) ?? []) {
-    const path = join(dir, name);
-    if (existsSync(path)) return path;
-  }
+    const {packageManager} = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof packageManager !== "string") return null;
+    for (const name of packageManagerLockfiles.get(packageManager.split("@")[0]) ?? []) {
+      const path = join(dirname(file), name);
+      if (existsSync(path)) return path;
+    }
+  } catch {}
   return null;
 }
 
-type BaseVersion = {baseVersion: string, baseSource: string, baseTag?: string};
-
-type ResolveBaseVersionOpts = {
+export async function resolveBaseVersion({base, gitless, lastTag, projectRoot, stopDir}: {
   base?: string,
   gitless: boolean,
   lastTag: () => Promise<string>, // a thunk, so an explicit base never runs the slow `git describe`
   projectRoot: string,
   stopDir?: string,
-};
-
-export async function resolveBaseVersion({base, gitless, lastTag, projectRoot, stopDir}: ResolveBaseVersionOpts): Promise<BaseVersion> {
+}): Promise<{baseVersion: string, baseSource: string, baseTag?: string}> {
   if (base !== undefined) {
     if (!isSemver(base)) throw new Error(`Invalid base version: ${base}`);
     return {baseVersion: stripV(base), baseSource: "--base"};
@@ -165,8 +146,7 @@ export async function resolveBaseVersion({base, gitless, lastTag, projectRoot, s
       return {baseVersion: stripV(baseTag), baseSource: "git describe", baseTag};
     }
 
-    const tagList = await tryExec("git", ["tag", "--list", "--sort=-creatordate"]);
-    const tag = tagList?.split(reNewline).find(isSemver);
+    const tag = (await tryExec("git", ["tag", "--list", "--sort=-creatordate"]))?.split(reNewline).find(isSemver);
     if (tag) return {baseVersion: stripV(tag), baseSource: "git tag list", baseTag: tag};
   }
 
@@ -175,8 +155,7 @@ export async function resolveBaseVersion({base, gitless, lastTag, projectRoot, s
     if (version) return {baseVersion: version, baseSource: filename};
   }
 
-  if (!gitless) return {baseVersion: "0.0.0", baseSource: "default"};
-  return {baseVersion: "", baseSource: ""};
+  return gitless ? {baseVersion: "", baseSource: ""} : {baseVersion: "0.0.0", baseSource: "default"};
 }
 
 const reHeading = /^(#+)\s+(.*?)\s*$/;
@@ -184,61 +163,28 @@ const reHeading = /^(#+)\s+(.*?)\s*$/;
 const rePlaceholderDate = /[YMDX?]{2,4}[-/. ][YMDX?]{2,4}[-/. ][YMDX?]{2,4}/i;
 const reLinkDefinition = /^\[[^\]]+\]:\s/;
 
-function findVersionHeading(lines: string[], version: string): {index: number, level: number} | null {
-  // non-version-char boundaries, so "1.2.3" does not match "1.2.30" or "1.2.3-rc.1"
-  const re = new RegExp(`(?<![\\d.-])v?${esc(stripV(version))}(?![\\d.-])`, "i");
-  for (let i = 0; i < lines.length; i++) {
-    const m = reHeading.exec(lines[i]);
-    if (m && re.test(m[2])) return {index: i, level: m[1].length};
-  }
-  return null;
-}
-
-function extractEntry(lines: string[], head: {index: number, level: number}): string | null {
-  let end = lines.length;
-  for (let i = head.index + 1; i < lines.length; i++) {
-    const m = reHeading.exec(lines[i]);
-    if (m && m[1].length <= head.level) {
-      end = i;
-      break;
-    }
-  }
-  const entry = lines.slice(head.index + 1, end);
-  // Keep a Changelog trails link definitions below every section, the last entry would swallow them
-  while (entry.length && (reLinkDefinition.test(entry.at(-1)!) || !entry.at(-1)!.trim())) entry.pop();
-  return entry.join("\n").trim() || null;
-}
-
-export function readChangelogEntry(content: string, version: string): string | null {
-  const lines = content.split(reNewline);
-  const head = findVersionHeading(lines, version);
-  return head ? extractEntry(lines, head) : null;
-}
-
-function updateChangelogHeadingDateInLines(lines: string[], head: {index: number}, date: string, content: string): string | null {
-  const heading = lines[head.index];
-  if (rePlaceholderDate.test(heading)) {
-    lines[head.index] = heading.replace(rePlaceholderDate, date);
-  } else if (reDate.test(heading)) {
-    return null; // already dated
-  } else {
-    lines[head.index] = `${heading.trimEnd()} - ${date}`;
-  }
-  return lines.join(detectEol(content));
-}
-
-export function updateChangelogHeadingDate(content: string, version: string, date: string): string | null {
-  const lines = content.split(reNewline);
-  const head = findVersionHeading(lines, version);
-  return head ? updateChangelogHeadingDateInLines(lines, head, date, content) : null;
-}
-
 export function processChangelog(content: string, version: string, date: string): {entry: string, updated: string | null} | null {
   const lines = content.split(reNewline);
-  const head = findVersionHeading(lines, version);
-  if (!head) return null;
-  const entry = extractEntry(lines, head);
-  return entry ? {entry, updated: updateChangelogHeadingDateInLines(lines, head, date, content)} : null;
+  const headings = lines.map(line => reHeading.exec(line));
+  const reVersion = new RegExp(`(?<![\\d.-])${esc(stripV(version))}(?![\\d.-])`, "i");
+  const index = headings.findIndex(match => match && reVersion.test(match[2]));
+  if (index === -1) return null;
+  const level = headings[index]![1].length;
+  const end = headings.findIndex((match, i) => i > index && match && match[1].length <= level);
+  const entryLines = lines.slice(index + 1, end === -1 ? lines.length : end);
+  // Keep a Changelog trails link definitions below every section, the last entry would swallow them
+  while (entryLines.length && (reLinkDefinition.test(entryLines.at(-1)!) || !entryLines.at(-1)!.trim())) entryLines.pop();
+  const entry = entryLines.join("\n").trim();
+  if (!entry) return null;
+  const heading = lines[index];
+  if (rePlaceholderDate.test(heading)) {
+    lines[index] = heading.replace(rePlaceholderDate, date);
+  } else if (reDate.test(heading)) {
+    return {entry, updated: null};
+  } else {
+    lines[index] = `${heading.trimEnd()} - ${date}`;
+  }
+  return {entry, updated: lines.join(detectEol(content))};
 }
 
 export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Promise<Array<string>> {
@@ -249,23 +195,17 @@ export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Pr
   return files.filter(file => !ignoredFiles.has(file));
 }
 
-type GetFileChangesOpts = {
+export function getFileChanges({file, baseVersion, newVersion, replacements, date}: {
   file: string,
   baseVersion: string,
   newVersion: string,
   replacements?: Array<{re: RegExp, replacement: string}>,
   date?: string,
-};
-
-type FileChanges = {newData: string, oldData: string};
-
-export function getFileChanges({file, baseVersion, newVersion, replacements, date}: GetFileChangesOpts): FileChanges | null {
+}): {newData: string, oldData: string} | null {
   const fileName = basename(file);
 
   // unhandled lockfiles: blind search-and-replace would corrupt dependency versions
-  if (!handledLockfiles.has(fileName) && (reLockfileName.test(fileName) || fileName === "go.sum")) {
-    return null;
-  }
+  if (!["package-lock.json", "uv.lock"].includes(fileName) && (reLockfileName.test(fileName) || fileName === "go.sum")) return null;
 
   const oldData = readFileSync(file, "utf8");
 
@@ -280,8 +220,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
   } else if (fileName === "pyproject.toml") {
     newData = tomlReplaceFirst(oldData, pyprojectSections, reTomlVersionLine, `$1${newVersion}$2`);
   } else if (fileName === "uv.lock") {
-    const projStr = readFileSync(join(dirname(file), "pyproject.toml"), "utf8");
-    const name = pyprojectGet(projStr, "name");
+    const name = pyprojectGet(readFileSync(join(dirname(file), "pyproject.toml"), "utf8"), "name");
     if (!name) throw new Error(`Could not determine project name from pyproject.toml for ${file}`);
     const re = new RegExp(`(\\[\\[package\\]\\]\r?\nname = "${esc(name)}"\r?\nversion = ").+?(")`);
     newData = oldData.replace(re, `$1${newVersion}$2`);
@@ -289,14 +228,8 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     newData = oldData.replaceAll(baseVersion, newVersion);
   }
 
-  if (date) {
-    newData = newData.replace(reDateGlobal, date);
-  }
-
-  for (const replacement of replacements ?? []) {
-    newData = newData.replace(replacement.re, replacement.replacement);
-  }
-
+  if (date) newData = newData.replace(new RegExp(reDate, "g"), date);
+  for (const {re, replacement} of replacements ?? []) newData = newData.replace(re, replacement);
   return {newData, oldData};
 }
 
@@ -311,16 +244,8 @@ export function write(file: string, content: string): void {
   writeFileSync(file, content);
 }
 
-export function joinStrings(strings: Array<string | undefined>, separator: string): string {
-  return strings.filter(Boolean).join(separator).trim();
-}
-
 export const githubTokenEnvNames = ["VERSIONS_GITHUB_API_TOKEN", "GITHUB_API_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"];
 export const giteaTokenEnvNames = ["VERSIONS_GITEA_API_TOKEN", "GITEA_API_TOKEN", "GITEA_AUTH_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN"];
-
-function envTokens(names: string[]): string[] {
-  return names.map(name => env[name]).filter(Boolean) as string[];
-}
 
 function urlHost(url = ""): string {
   try {
@@ -339,13 +264,12 @@ function pairToken(host: string): string | null {
   return null;
 }
 
-const probeTimeout = 5000;
 const reExtraheader = /^http\.(\S+)\/\.extraheader AUTHORIZATION:\s*basic\s+(\S+)$/i;
 
 // actions/checkout leaves the CI token in `http.<origin>/.extraheader`, base64 of
 // `x-access-token:<token>`. `--local` misses it, the credentials file arrives via includeIf.
 async function extraheaderToken(host: string, cwd?: string): Promise<string | null> {
-  const config = await tryExec("git", ["config", "--get-regexp", "^http\\..*\\.extraheader$"], {cwd, timeout: probeTimeout});
+  const config = await tryExec("git", ["config", "--get-regexp", "^http\\..*\\.extraheader$"], {cwd, timeout: 5000});
   for (const line of config?.split(reNewline) ?? []) {
     const match = reExtraheader.exec(line);
     if (!match || urlHost(match[1]) !== host) continue;
@@ -366,20 +290,15 @@ export async function getForgeTokens(repoInfo: RepoInfo, cwd?: string): Promise<
   if (pair) return [pair];
 
   const stored = (await readTokens())[repoInfo.host];
-  const tokens = repoInfo.host === "github.com" ? envTokens(githubTokenEnvNames) :
-    repoInfo.host === urlHost(env.GITEA_URL) ? envTokens(giteaTokenEnvNames) : [];
+  const tokens = (repoInfo.host === "github.com" ? githubTokenEnvNames :
+    repoInfo.host === urlHost(env.GITEA_URL) ? giteaTokenEnvNames : []).map(name => env[name]);
 
   // appended, not preferred, so a read-only configured token cannot lock out a working one
   const header = await extraheaderToken(repoInfo.host, cwd);
   return Array.from(new Set([stored, ...tokens, header].filter(Boolean) as string[]));
 }
 
-export type RepoInfo = {
-  owner: string;
-  repo: string;
-  host: string;
-  type: "github" | "gitea";
-};
+export type RepoInfo = {owner: string; repo: string; host: string; type: "github" | "gitea"};
 
 // the scp-style form cannot express a port, so a ported instance needs an https remote
 const reHttpsRemote = /^https:\/\/(?:[^@/]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?\/?$/;
@@ -389,24 +308,21 @@ const reIpv6Brackets = /^\[|\]$/g;
 
 // parsed rather than matched, so the port is validated and an optional user and IPv6 literals work
 function parseSshUrl(url: string): string[] | null {
-  let parsed: URL;
   try {
-    parsed = new URL(url);
+    const {hostname, pathname} = new URL(url);
+    const [owner, ...rest] = pathname.replace(reGitSuffix, "").split("/").filter(Boolean);
+    const repo = rest.join("/");
+    // the ssh port is transport-only and the API may sit elsewhere, so it stays out of the host
+    return owner && repo ? [hostname.replace(reIpv6Brackets, ""), owner, repo] : null;
   } catch {
     return null;
   }
-  const [owner, ...rest] = parsed.pathname.replace(reGitSuffix, "").split("/").filter(Boolean);
-  const repo = rest.join("/");
-  // the ssh port is transport-only and the API may sit elsewhere, so it stays out of the host
-  return owner && repo ? [parsed.hostname.replace(reIpv6Brackets, ""), owner, repo] : null;
 }
 
 export async function getRepoInfo(cwd?: string, remote: string = "origin"): Promise<RepoInfo | null> {
   const url = await tryExec("git", ["remote", "get-url", remote], {cwd});
   if (!url) return null;
-  const match = url.startsWith("ssh://") ?
-    parseSshUrl(url) :
-    (reHttpsRemote.exec(url) ?? reSshRemote.exec(url))?.slice(1);
+  const match = url.startsWith("ssh://") ? parseSshUrl(url) : (reHttpsRemote.exec(url) ?? reSshRemote.exec(url))?.slice(1);
   if (!match) return null;
   const host = match[0].toLowerCase(); // DNS is case-insensitive, the path segments are not
   return {owner: match[1], repo: match[2], host, type: host === "github.com" ? "github" : "gitea"};
@@ -450,11 +366,7 @@ async function ensureOk(response: Response, label: string, allow404 = false): Pr
 
 const rejectedTokens = new Set<string>();
 
-async function withTokens<T>(
-  repoInfo: RepoInfo,
-  tokens: string[],
-  attempt: (authHeader: string) => Promise<T>,
-): Promise<T> {
+async function withTokens<T>(repoInfo: RepoInfo, tokens: string[], attempt: (authHeader: string) => Promise<T>): Promise<T> {
   let lastError: Error | undefined;
   for (const token of tokens) {
     if (rejectedTokens.has(token)) continue;
@@ -501,13 +413,7 @@ async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName:
 export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, body: string, tokens: string[]): Promise<void> {
   const apiUrl = `${forgeApiBase(repoInfo)}/releases`;
   const label = "Failed to create release";
-  const releaseBody = JSON.stringify({
-    tag_name: tagName,
-    name: tagName,
-    body,
-    draft: false,
-    prerelease: tagName.includes("-"),
-  });
+  const releaseBody = JSON.stringify({tag_name: tagName, name: tagName, body, draft: false, prerelease: tagName.includes("-")});
 
   const post = (authHeader: string) => forgeFetch("POST", apiUrl, authHeader, label, releaseBody);
 
@@ -559,9 +465,7 @@ export async function pingForge(repoInfo: RepoInfo, tokens: string[]): Promise<s
     await withTokens(repoInfo, tokens, async (authHeader) => {
       const response = await forgeFetch("GET", url, authHeader, label);
       // both forges 404 rather than 403 on a private repo the token cannot read, so retry like 401/403
-      if (response.status === 404) {
-        throw new AuthRetryable(`404 (token may lack access to ${repoInfo.owner}/${repoInfo.repo})`);
-      }
+      if (response.status === 404) throw new AuthRetryable(`404 (token may lack access to ${repoInfo.owner}/${repoInfo.repo})`);
       await ensureOk(response, label);
       // installation tokens report every permission false, so only a `pull: true` body is worth gating on
       // https://github.com/orgs/community/discussions/73397

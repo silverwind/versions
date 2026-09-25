@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 import {
   findUp, resolveBaseVersion, incrementSemver, replaceTokens, getFileChanges, readDeclaredVersion,
-  findCompanionLockfile,
-  processChangelog, removeIgnoredFiles, joinStrings,
-  write, writeResult, getRepoInfo, getForgeTokens, forgeName, probeRemote,
-  pingForge, createForgeRelease, verifyToken,
+  findCompanionLockfile, processChangelog, removeIgnoredFiles, write, writeResult, getRepoInfo, getForgeTokens,
+  forgeName, probeRemote, pingForge, createForgeRelease, verifyToken,
 } from "./api.ts";
 import {removeToken, storeToken} from "./tokens.ts";
 import {SubprocessError, exec, logVerbose, setVerbose, tryExec} from "./utils.ts";
@@ -13,23 +11,9 @@ import {dirname, relative} from "node:path";
 import {cwd, exit, stdin, stdout, stderr} from "node:process";
 import {readFileSync} from "node:fs";
 import {text} from "node:stream/consumers";
-import type {Readable} from "node:stream";
-import type {ReadStream} from "node:tty";
 import pkg from "./package.json" with {type: "json"};
 
 const reReplaceString = /^s#([^#]+)#([^#]*)#(.*)$/; // an empty replacement deletes, as in sed
-const commands = new Set(["patch", "minor", "major", "prerelease"]);
-
-function end(err?: unknown): void {
-  if (!err) return exit(0);
-  if (err instanceof Error) {
-    if (err.stack) logVerbose(err.stack);
-    console.error(err instanceof SubprocessError ? `${err.message}\n${err.output}` : err.message);
-  } else {
-    console.error(err);
-  }
-  exit(1);
-}
 
 // parseArgs `strict: false` lets a bare `-r`/`-m` through as `true`
 function stringArg(value: unknown): string | undefined {
@@ -45,7 +29,7 @@ function normalizeHost(value: unknown, option: string): string {
   return new URL(value.includes("://") ? value : `https://${value}`).host;
 }
 
-function readHidden(stdin: ReadStream, prompt: string): Promise<string> {
+function readHidden(prompt: string): Promise<string> {
   stdin.setEncoding("utf8");
   stdin.setRawMode(true);
   stderr.write(prompt);
@@ -72,9 +56,8 @@ function readHidden(stdin: ReadStream, prompt: string): Promise<string> {
   });
 }
 
-async function readToken(stdin: Readable | ReadStream, host: string): Promise<string> {
-  const raw = "isTTY" in stdin && stdin.isTTY ? await readHidden(stdin, `token for ${host}: `) : await text(stdin);
-  const token = raw.trim();
+async function readToken(host: string): Promise<string> {
+  const token = (stdin.isTTY ? await readHidden(`token for ${host}: `) : await text(stdin)).trim();
   if (!token) throw new Error(`token for ${host} is empty`);
   if (/[\s\p{C}]/u.test(token)) throw new Error(`token for ${host} contains invalid characters`);
   return token;
@@ -82,9 +65,7 @@ async function readToken(stdin: Readable | ReadStream, host: string): Promise<st
 
 async function main(): Promise<void> {
   // exit() discards queued writes on a non-blocking stream, losing diagnostics under CI pipes
-  for (const stream of [stdout, stderr]) {
-    (stream as any)._handle?.setBlocking?.(true);
-  }
+  for (const stream of [stdout, stderr]) (stream as any)._handle?.setBlocking?.(true);
 
   const {values: args, positionals} = parseArgs({
     strict: false,
@@ -118,28 +99,23 @@ async function main(): Promise<void> {
 
   setVerbose(Boolean(args.verbose));
 
-  if (args.version) {
-    console.info(pkg.version);
-    end();
-  }
+  if (args.version) return console.info(pkg.version);
 
   if (args.login !== undefined) {
     const host = normalizeHost(args.login, "login");
-    const token = await readToken(stdin, host);
+    const token = await readToken(host);
     const login = await verifyToken(host, token);
     await storeToken(host, token);
-    console.info(`stored token for ${host} (${login})`);
-    end();
+    return console.info(`stored token for ${host} (${login})`);
   }
   if (args.logout !== undefined) {
     const host = normalizeHost(args.logout, "logout");
     if (!await removeToken(host)) throw new Error(`no stored token for ${host}`);
-    console.info(`removed token for ${host}`);
-    end();
+    return console.info(`removed token for ${host}`);
   }
 
   if (!level || args.help) {
-    console.info(`usage: versions [options] patch|minor|major|prerelease [files...]
+    return console.info(`usage: versions [options] patch|minor|major|prerelease [files...]
 
   Options:
     -a, --all             Add all tracked changes to the commit
@@ -174,22 +150,12 @@ async function main(): Promise<void> {
     $ versions patch package.json
     $ versions prerelease --preid=alpha package.json
     $ versions -c 'npm run build' -m 'Release _VER_' minor file.css`);
-    end();
   }
 
-  if (!commands.has(level)) {
-    throw new Error(`invalid level: ${level}`);
-  }
-
-  if (level === "prerelease" && !args.preid) {
-    throw new Error("prerelease requires --preid option");
-  }
-  if (args.gitless && args.release) {
-    throw new Error("--gitless and --release are mutually exclusive");
-  }
-  if (args["no-push"] && args.release) {
-    throw new Error("--no-push and --release are mutually exclusive");
-  }
+  if (!["patch", "minor", "major", "prerelease"].includes(level)) throw new Error(`invalid level: ${level}`);
+  if (level === "prerelease" && !args.preid) throw new Error("prerelease requires --preid option");
+  if (args.gitless && args.release) throw new Error("--gitless and --release are mutually exclusive");
+  if (args["no-push"] && args.release) throw new Error("--no-push and --release are mutually exclusive");
 
   // === GATHER === pure reads, no side effects
   if (args.notes !== undefined && typeof args.notes !== "string") throw new Error("Missing value for --notes");
@@ -201,24 +167,22 @@ async function main(): Promise<void> {
   const gitDir = findUp(".git", pwd);
   // bound version-file lookup at the repo root so a stray parent manifest can't set the base
   const repoRoot = gitDir ? dirname(gitDir) : undefined;
-  const projectRoot = pwd;
   const pushRemote = stringArg(args.remote) ?? "origin";
 
   files = Array.from(new Set(files.map(file => relative(pwd, file)))); // so `foo` and `./foo` dedupe
 
-  const wantRelease = Boolean(args.release);
   const willCommit = !args.gitless && !args.dry;
   const willPush = willCommit && !args["no-push"];
+  const willRelease = willCommit && Boolean(args.release);
 
-  let lastTagP: Promise<string> | undefined;
+  let lastTagP: Promise<string | null> | undefined;
   // memoized: --base needs it only for the changelog fallback, --gitless/--dry never ask at all
-  const lastTag = (): Promise<string> =>
-    lastTagP ??= (async () => await tryExec("git", ["describe", "--tags", "--abbrev=0"]) ?? "")();
+  const lastTag = async () => await (lastTagP ??= tryExec("git", ["describe", "--tags", "--abbrev=0"])) ?? "";
   const baseVersionP = resolveBaseVersion({
     base: stringArg(args.base),
     gitless: Boolean(args.gitless),
     lastTag,
-    projectRoot,
+    projectRoot: pwd,
     stopDir: repoRoot,
   });
   // --show-current is empty on detached HEAD, unlike rev-parse which fails on an unborn HEAD
@@ -231,20 +195,19 @@ async function main(): Promise<void> {
     Promise.resolve(null);
   const identityOkP = (async () => !willCommit || await tryExec("git", ["var", "GIT_AUTHOR_IDENT"]) !== null)();
   const forgeP = (async () => {
-    const repoInfo = wantRelease && willCommit ? await getRepoInfo(undefined, pushRemote) : null;
+    const repoInfo = willRelease ? await getRepoInfo(undefined, pushRemote) : null;
     const tokens = repoInfo ? await getForgeTokens(repoInfo) : [];
     const pingResult = repoInfo && tokens.length ? await pingForge(repoInfo, tokens) : null;
     return {repoInfo, tokens, pingResult};
   })();
+  Promise.allSettled([forgeP]); // marks an early rejection like a malformed tokens.json handled, the validation await rethrows it
 
   // not deferred to the errors[] list: incrementSemver needs a base and branchRef needs a branch
   const [{baseVersion, baseSource, baseTag}, pushBranch] = await Promise.all([baseVersionP, pushBranchP]);
   if (args.gitless && !baseVersion) {
     throw new Error(`--gitless requires --base to be set or a version in package.json or pyproject.toml`);
   }
-  if (willPush && !pushBranch) {
-    throw new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push.");
-  }
+  if (willPush && !pushBranch) throw new Error("Cannot push from detached HEAD. Pass --branch <name> or --no-push.");
   logVerbose(`base version ${baseVersion} from ${baseSource}`);
 
   const newVersion = incrementSemver(baseVersion, level, stringArg(args.preid));
@@ -272,7 +235,7 @@ async function main(): Promise<void> {
     return !state?.branch || await tryExec("git", ["merge-base", "--is-ancestor", state.branch, "HEAD"]) !== null;
   })();
 
-  const changelogPath = findUp("CHANGELOG.md", projectRoot, repoRoot);
+  const changelogPath = findUp("CHANGELOG.md", pwd, repoRoot);
   const changelogInfo = (() => {
     if (!changelogPath) return null;
     try {
@@ -299,15 +262,15 @@ async function main(): Promise<void> {
     return [file, lockfile];
   })));
 
-  type FileChange = {path: string; oldData: string; newData: string; changed: boolean; specified: boolean};
-  const fileChanges: FileChange[] = [];
-  for (const file of files) {
+  const fileChanges = files.flatMap(file => {
     const changes = getFileChanges({file, baseVersion, newVersion, replacements, date: args.date ? today : ""});
-    if (!changes) {
-      logVerbose(`skipping ${file} (unhandled lockfile)`);
-      continue;
-    }
-    fileChanges.push({path: file, ...changes, changed: changes.newData !== changes.oldData, specified: specifiedFiles.has(file)});
+    if (changes) return [{path: file, ...changes}];
+    logVerbose(`skipping ${file} (unhandled lockfile)`);
+    return [];
+  });
+  const writes = fileChanges.filter(change => change.newData !== change.oldData);
+  if (changelogInfo?.updated) {
+    writes.push({path: changelogRel!, oldData: changelogInfo.original, newData: changelogInfo.updated});
   }
 
   // === VALIDATE === one await collects every probe, the checks below are pure
@@ -329,26 +292,19 @@ async function main(): Promise<void> {
   const errors: string[] = [];
 
   // no files is a tag-only release, a lockfile is not a bump, and --gitless has no commit to be empty
-  if (!args.gitless && specifiedFiles.size > 0 && fileChanges.every(change => !change.changed || !change.specified)) {
+  if (!args.gitless && specifiedFiles.size > 0 && writes.every(update => !specifiedFiles.has(update.path))) {
     errors.push(`bumping ${baseVersion} → ${newVersion} would not change any of the specified files; the base version is likely wrong`);
   }
-  if (namedChangelogUnused) {
-    errors.push(`${changelogRel} has no entry for ${newVersion}`);
-  }
+  if (namedChangelogUnused) errors.push(`${changelogRel} has no entry for ${newVersion}`);
   if (!identityOk) {
     errors.push("git author identity unavailable; configure user.name + user.email or set GIT_AUTHOR_NAME + GIT_AUTHOR_EMAIL");
   }
-  if (willPush) {
-    if (!remoteState) {
-      errors.push(`could not query remote ${pushRemote} (not configured or unreachable)`);
-    } else {
-      if (remoteState.tag) {
-        errors.push(`tag ${tagName} already exists on remote ${pushRemote} at ${remoteState.tag.slice(0, 8)}; delete it or choose a different version`);
-      }
-      if (remoteState.branch && !mergeBaseOk) {
-        errors.push(`local HEAD is not a descendant of ${pushRemote}/${pushBranch} (${remoteState.branch.slice(0, 8)}); fetch and integrate before bumping`);
-      }
-    }
+  if (willPush && !remoteState) errors.push(`could not query remote ${pushRemote} (not configured or unreachable)`);
+  if (remoteState?.tag) {
+    errors.push(`tag ${tagName} already exists on remote ${pushRemote} at ${remoteState.tag.slice(0, 8)}; delete it or choose a different version`);
+  }
+  if (remoteState?.branch && !mergeBaseOk) {
+    errors.push(`local HEAD is not a descendant of ${pushRemote}/${pushBranch} (${remoteState.branch.slice(0, 8)}); fetch and integrate before bumping`);
   }
   const defaultBranch = willPush ?
     remoteState?.head?.replace("refs/heads/", "") :
@@ -356,7 +312,7 @@ async function main(): Promise<void> {
   if (defaultBranch && defaultBranch !== pushBranch && !args["any-branch"]) {
     errors.push(`${pushBranch || "detached HEAD"} is not the default branch ${defaultBranch} of remote ${pushRemote}; pass --any-branch to release to it`);
   }
-  if (wantRelease && willCommit) {
+  if (willRelease) {
     if (!repoInfo) {
       errors.push("--release: could not detect a forge from the git remote URL");
     } else if (!tokens.length) {
@@ -371,12 +327,7 @@ async function main(): Promise<void> {
     exit(1);
   }
 
-  const writes: Array<Pick<FileChange, "path" | "oldData" | "newData">> = fileChanges.filter(change => change.changed);
-  if (changelogInfo?.updated) {
-    writes.push({path: changelogRel!, oldData: changelogInfo.original, newData: changelogInfo.updated});
-  }
-
-  const shouldCommit = async (hasChanges: boolean): Promise<boolean> =>
+  const shouldCommit = async (hasChanges: boolean) =>
     !args["skip-empty"] || hasChanges ||
     await tryExec("git", args.all ? ["diff", "--quiet", "HEAD"] : ["diff", "--cached", "--quiet"]) === null;
 
@@ -395,9 +346,7 @@ async function main(): Promise<void> {
     tryExec("git", ["rev-parse", "--verify", tagRef]),
   ]) : [null, null];
 
-  // rollback is pre-push only, a landed atomic push stays
   const rollbacks: Array<() => Promise<void> | void> = [];
-  let pushed = false;
 
   try {
     rollbacks.push(() => {
@@ -409,14 +358,9 @@ async function main(): Promise<void> {
       write(update.path, update.newData);
     }
 
-    if (typeof args.command === "string") {
-      writeResult(await exec(args.command, [], {shell: true}));
-    }
+    if (typeof args.command === "string") writeResult(await exec(args.command, [], {shell: true}));
 
-    if (args.gitless) {
-      logVerbose("gitless, skipping commit and tag");
-      return;
-    }
+    if (args.gitless) return logVerbose("gitless, skipping commit and tag");
 
     const allFiles = changelogInfo?.updated ? [...files, changelogRel!] : files;
     const [filesToAdd, changelogBody] = await Promise.all([
@@ -435,7 +379,7 @@ async function main(): Promise<void> {
         return await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], "--pretty=format:* %s (%aN)"]) || undefined;
       })(),
     ]);
-    const message = joinStrings([tagName, ...msgs, changelogBody], "\n\n");
+    const message = [tagName, ...msgs, changelogBody].filter(Boolean).join("\n\n").trim();
     const commitArgs = args.all ?
       ["commit", "-a", "--allow-empty", "-F", "-"] :
       filesToAdd.length ?
@@ -464,27 +408,24 @@ async function main(): Promise<void> {
 
     // --atomic: both refs update or neither, so no orphan tag
     writeResult(await exec("git", ["push", "--atomic", pushRemote, `HEAD:${branchRef}`, tagRef]));
-    pushed = true;
+    rollbacks.length = 0; // a landed atomic push stays
 
-    if (wantRelease) {
-      logVerbose(`creating ${forgeName(repoInfo!)} release for ${tagName} (${tokens.length} token${tokens.length === 1 ? "" : "s"} to try)`);
-      try {
-        await createForgeRelease(repoInfo!, tagName, changelogBody || tagName, tokens);
-      } catch (err: any) {
-        // the tag is pushed and shared, so recover forward instead of rewriting remote history
-        console.error(`Tag ${tagName} was pushed to ${pushRemote} but release creation failed: ${err.message}`);
-        console.error(`To finish the release, create it manually on ${forgeName(repoInfo!)} for the existing tag (e.g. via the web UI, \`gh release create ${tagName}\`, or \`tea release create --tag ${tagName}\`). Rerunning versions for this version would be rejected because the tag already exists on the remote.`);
-        throw err;
-      }
+    if (!willRelease) return;
+    logVerbose(`creating ${forgeName(repoInfo!)} release for ${tagName} (${tokens.length} token${tokens.length === 1 ? "" : "s"} to try)`);
+    try {
+      await createForgeRelease(repoInfo!, tagName, changelogBody || tagName, tokens);
+    } catch (err: any) {
+      // the tag is pushed and shared, so recover forward instead of rewriting remote history
+      console.error(`Tag ${tagName} was pushed to ${pushRemote} but release creation failed: ${err.message}`);
+      console.error(`To finish the release, create it manually on ${forgeName(repoInfo!)} for the existing tag (e.g. via the web UI, \`gh release create ${tagName}\`, or \`tea release create --tag ${tagName}\`). Rerunning versions for this version would be rejected because the tag already exists on the remote.`);
+      throw err;
     }
   } catch (err) {
-    if (!pushed) {
-      for (const rollback of rollbacks.reverse()) {
-        try {
-          await rollback();
-        } catch (cleanupErr: any) {
-          console.error(`rollback failed: ${cleanupErr.message}`);
-        }
+    for (const rollback of rollbacks.reverse()) {
+      try {
+        await rollback();
+      } catch (cleanupErr: any) {
+        console.error(`rollback failed: ${cleanupErr.message}`);
       }
     }
     throw err;
@@ -493,7 +434,13 @@ async function main(): Promise<void> {
 
 try {
   await main();
-  end();
 } catch (err) {
-  end(err);
+  if (err instanceof Error) {
+    if (err.stack) logVerbose(err.stack);
+    console.error(err instanceof SubprocessError ? `${err.message}\n${err.output}` : err.message);
+  } else {
+    console.error(err);
+  }
+  exit(1);
 }
+exit(0);

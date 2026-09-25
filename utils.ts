@@ -8,14 +8,11 @@ export function setVerbose(value: boolean): void {
   verbose = value;
 }
 
-function timestamp(): string {
-  const date = new Date();
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 23).replace("T", " ");
-}
-
 export function logVerbose(message: string): void {
   if (!verbose) return;
-  console.error(`${timestamp()} ${message}`);
+  const date = new Date();
+  date.setTime(date.getTime() - date.getTimezoneOffset() * 60000);
+  console.error(`${date.toISOString().slice(0, 23).replace("T", " ")} ${message}`);
 }
 
 function quoteArg(arg: string): string {
@@ -47,10 +44,9 @@ type ExecOptions = {
 };
 
 export const reNewline = /\r?\n/;
-const reUrlCredential = /(\/\/)[^/\s@]+@/g;
 
 function redactCredentials(message: string): string {
-  return message.replace(reUrlCredential, "$1***@");
+  return message.replace(/(\/\/)[^/\s@]+@/g, "$1***@");
 }
 // anchored so a bracketed element of a multi-line array is not read as a table header
 const reTomlSection = /^\[\[?([^[\]]+)\]\]?\s*(?:#.*)?$/;
@@ -59,47 +55,39 @@ export function detectEol(content: string): string {
   return reNewline.exec(content)?.[0] ?? "\n";
 }
 
-type TomlVisitor = (line: string, lineIndex: number, lines: string[], section: string) => boolean | void;
-
-function visitTomlSection(content: string, sections: readonly string[], visit: TomlVisitor): string[] {
-  const lines = content.split(reNewline);
+function* tomlSectionLines(lines: string[], sections: readonly string[]): Generator<[number, string]> {
   let section: string | null = null;
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed || trimmed[0] === "#") continue;
     const header = trimmed[0] === "[" ? reTomlSection.exec(trimmed) : null;
-    if (header) {
-      section = header[1].trim();
-      continue;
-    }
-    if (section && sections.includes(section) && visit(lines[i], i, lines, section)) break;
+    if (header) section = header[1].trim();
+    else if (section && sections.includes(section)) yield [i, section];
   }
-  return lines;
 }
 
 export function tomlGetString(content: string, section: string, key: string): string | undefined {
   const keyRe = new RegExp(`^${key}\\s*=\\s*["']([^"']+)["']`);
-  let value: string | undefined;
-  visitTomlSection(content, [section], line => {
-    value = keyRe.exec(line.trim())?.[1];
-    return value !== undefined;
-  });
-  return value;
+  const lines = content.split(reNewline);
+  for (const [i] of tomlSectionLines(lines, [section])) {
+    const value = keyRe.exec(lines[i].trim())?.[1];
+    if (value !== undefined) return value;
+  }
+  return undefined;
 }
 
 // first match per section, as a pyproject may carry the version in both
 export function tomlReplaceFirst(content: string, sections: readonly string[], lineRe: RegExp, replacement: string): string {
+  const lines = content.split(reNewline);
   const done = new Set<string>();
-  const lines = visitTomlSection(content, sections, (line, i, ls, section) => {
-    if (done.has(section) || !lineRe.test(line)) return;
-    ls[i] = line.replace(lineRe, replacement);
+  for (const [i, section] of tomlSectionLines(lines, sections)) {
+    if (done.has(section) || !lineRe.test(lines[i])) continue;
+    lines[i] = lines[i].replace(lineRe, replacement);
     done.add(section);
-    return done.size === sections.length;
-  });
+    if (done.size === sections.length) break;
+  }
   return done.size ? lines.join(detectEol(content)) : content;
 }
-
-const reJsonWhitespace = /[ \t\n\r]/;
 
 // replaces the top-level "version" byte-for-byte, so formatting and minification survive
 export function replaceJsonVersion(data: string, newVersion: string): string {
@@ -115,18 +103,12 @@ export function replaceJsonVersion(data: string, newVersion: string): string {
       } else if (char === '"') {
         inString = false;
         if (depth === 1 && rootIsObject && pos === stringStart + 8 && data.startsWith("version", stringStart + 1)) {
-          let valuePos = pos + 1;
-          while (valuePos < data.length && reJsonWhitespace.test(data[valuePos])) valuePos++;
-          if (data[valuePos] !== ":") continue;
-          valuePos++;
-          while (valuePos < data.length && reJsonWhitespace.test(data[valuePos])) valuePos++;
-          if (data[valuePos] !== '"') continue;
-          const valueStart = valuePos + 1;
+          const reJsonValueStart = /[ \t\n\r]*:[ \t\n\r]*"/y;
+          reJsonValueStart.lastIndex = pos + 1;
+          if (!reJsonValueStart.test(data)) continue;
+          const valueStart = reJsonValueStart.lastIndex;
           let valueEnd = valueStart;
-          while (valueEnd < data.length && data[valueEnd] !== '"') {
-            if (data[valueEnd] === "\\") valueEnd++;
-            valueEnd++;
-          }
+          while (valueEnd < data.length && data[valueEnd] !== '"') valueEnd += data[valueEnd] === "\\" ? 2 : 1;
           return `${data.slice(0, valueStart)}${newVersion}${data.slice(valueEnd)}`;
         }
       }
