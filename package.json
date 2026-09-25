@@ -3,7 +3,10 @@
   "version": "15.5.0",
   "description": "Release automation: bump the version, commit, tag, push and create a GitHub or Gitea release",
   "author": "silverwind <me@silverwind.io>",
-  "repository": "silverwind/versions",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/silverwind/versions.git"
+  },
   "license": "BSD-2-Clause",
   "keywords": [
     "version",
