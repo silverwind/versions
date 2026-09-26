@@ -38,11 +38,11 @@ bench: node_modules
 .PHONY: build
 build: node_modules $(DIST_FILES)
 
-$(DIST_FILES): $(SOURCE_FILES) pnpm-lock.yaml package.json tsconfig.json tsdown.config.ts
+$(DIST_FILES): $(SOURCE_FILES) pnpm-lock.yaml package.json tsconfig.json tsdown.config.ts | node_modules
 	pnpm exec tsdown
 
 .PHONY: publish
-publish: node_modules
+publish: node_modules build
 	pnpm publish --no-git-checks
 
 .PHONY: update
