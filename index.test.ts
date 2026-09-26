@@ -97,7 +97,8 @@ async function setupTaggedRepo(tmpDir: string) {
 }
 
 async function setupReleaseRepo(tmpDir: string) {
-  const [opts, bareDir] = await Promise.all([setupTaggedRepo(tmpDir), createBareRemote(tmpDir)]);
+  const opts = await setupTaggedRepo(tmpDir);
+  const bareDir = await createBareRemote(tmpDir);
   await exec("git", ["remote", "add", "origin", "https://gitea.invalid/o/r.git"], opts);
   await exec("git", ["remote", "set-url", "--push", "origin", bareDir], opts);
   await exec("git", ["push", "origin", "master"], opts);
