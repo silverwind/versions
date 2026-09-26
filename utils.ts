@@ -48,6 +48,7 @@ export const reNewline = /\r?\n/;
 function redactCredentials(message: string): string {
   return message.replace(/(\/\/)[^/\s@]+@/g, "$1***@");
 }
+
 // anchored so a bracketed element of a multi-line array is not read as a table header
 const reTomlSection = /^\[\[?([^[\]]+)\]\]?\s*(?:#.*)?$/;
 

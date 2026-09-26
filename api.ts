@@ -190,7 +190,7 @@ export async function removeIgnoredFiles(files: Array<string>, cwd?: string): Pr
   // check-ignore exits 1 when nothing is ignored and 128 on error, both meaning "keep everything"
   const ignored = await tryExec("git", ["check-ignore", "--", ...files], {cwd});
   if (!ignored) return files;
-  const ignoredFiles = new Set<string>(ignored.split(reNewline));
+  const ignoredFiles = new Set(ignored.split(reNewline));
   return files.filter(file => !ignoredFiles.has(file));
 }
 
@@ -318,7 +318,7 @@ function parseSshUrl(url: string): string[] | null {
   }
 }
 
-export async function getRepoInfo(cwd?: string, remote: string = "origin"): Promise<RepoInfo | null> {
+export async function getRepoInfo(cwd?: string, remote = "origin"): Promise<RepoInfo | null> {
   const url = await tryExec("git", ["remote", "get-url", remote], {cwd});
   if (!url) return null;
   const match = url.startsWith("ssh://") ? parseSshUrl(url) : (reHttpsRemote.exec(url) ?? reSshRemote.exec(url))?.slice(1);
@@ -380,7 +380,7 @@ async function withTokens<T>(repoInfo: RepoInfo, tokens: string[], attempt: (aut
           console.error(`stored token for ${repoInfo.host} was rejected, run "versions --login ${repoInfo.host}" to replace it`);
         }
       }
-      logVerbose(`auth failed, trying next token`);
+      logVerbose("auth failed, trying next token");
     }
   }
   throw lastError ?? new Error("No tokens provided");
@@ -420,9 +420,8 @@ export async function createForgeRelease(repoInfo: RepoInfo, tagName: string, bo
     let response = await post(authHeader);
 
     // a stale draft for the same tag blocks creation, Gitea 409 and GitHub 422
-    if (response.status === 409 || response.status === 422) {
-      const cleaned = await deleteMatchingDrafts(apiUrl, authHeader, tagName);
-      if (cleaned) response = await post(authHeader);
+    if ((response.status === 409 || response.status === 422) && await deleteMatchingDrafts(apiUrl, authHeader, tagName)) {
+      response = await post(authHeader);
     }
 
     await ensureOk(response, label);
