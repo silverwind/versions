@@ -786,7 +786,7 @@ test("readVersionFile reads package.json and pyproject.toml versions, as rewritt
   expect(read("pyproject.toml", `[tool.poetry]\nversion = "2.0.0"\n[project]\nversion = "3.0.0"\n`)).toEqual("3.0.0");
 }));
 
-test("getFileChanges bumps only the own version of each manifest, dates and replacements in generic files, and skips unhandled lockfiles", () => withTmpDir(async (tmpDir) => {
+test("getFileChanges bumps only the own version of each manifest, standalone versions, dates and replacements in generic files, and skips unhandled lockfiles", () => withTmpDir(async (tmpDir) => {
   const change = async (name: string, content: string, opts?: Partial<Parameters<typeof getFileChanges>[0]>) => {
     const file = join(tmpDir, name);
     await writeFile(file, content);
@@ -802,9 +802,9 @@ test("getFileChanges bumps only the own version of each manifest, dates and repl
   expect(await change("pyproject.toml", pyproject("1.0.0"))).toEqual(pyproject("2.0.0"));
   const uvLock = (version: string) => `[[package]]\nname = "dep"\nversion = "1.0.0"\n\n[[package]]\nname = "test"\nversion = "${version}"\n`;
   expect(await change("uv.lock", uvLock("1.0.0"))).toEqual(uvLock("2.0.0"));
-  expect(await change("version.txt", "version 1.0.0 released 2020-01-01 FOO", {
+  expect(await change("version.txt", "version 1.0.0 needs 11.0.0 released 2020-01-01 FOO", {
     date: "2025-06-15", replacements: [{re: /FOO/, replacement: "BAR"}],
-  })).toEqual("version 2.0.0 released 2025-06-15 BAR");
+  })).toEqual("version 2.0.0 needs 11.0.0 released 2025-06-15 BAR");
   expect(getFileChanges({file: join(tmpDir, "yarn.lock"), baseVersion: "1.0.0", newVersion: "2.0.0"})).toBeNull();
 }));
 

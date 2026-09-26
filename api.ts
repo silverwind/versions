@@ -224,7 +224,7 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     const re = new RegExp(`(\\[\\[package\\]\\]\r?\nname = "${esc(name)}"\r?\nversion = ").+?(")`);
     newData = oldData.replace(re, `$1${newVersion}$2`);
   } else {
-    newData = oldData.replaceAll(baseVersion, newVersion);
+    newData = oldData.replace(new RegExp(`(?<!\\d)${esc(baseVersion)}(?!\\d)`, "g"), newVersion);
   }
 
   if (date) newData = newData.replace(new RegExp(reDate, "g"), date);
