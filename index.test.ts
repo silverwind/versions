@@ -56,25 +56,13 @@ afterEach(() => {
   }
 });
 
-async function createBareRemote(tmpDir: string): Promise<string> {
-  const bareDir = join(tmpDir, "remote.git");
-  await exec("git", ["init", "--bare", "-q", bareDir], {env: {...process.env, ...getIsolatedGitEnv(tmpDir)}});
-  return bareDir;
-}
-
-function getIsolatedGitEnv(tmpDir: string) {
-  const isolatedHome = join(tmpDir, ".home");
-  return {
-    HOME: isolatedHome, GIT_CONFIG_GLOBAL: join(isolatedHome, ".gitconfig"), GIT_CONFIG_NOSYSTEM: "1",
-    GIT_AUTHOR_NAME: "Test User", GIT_AUTHOR_EMAIL: "test@test.com",
-    GIT_COMMITTER_NAME: "Test User", GIT_COMMITTER_EMAIL: "test@test.com",
-  };
-}
-
 async function initGitRepo(tmpDir: string) {
-  const env = getIsolatedGitEnv(tmpDir);
-  const opts = {cwd: tmpDir, env: {...process.env, ...env}};
-  await mkdir(env.HOME, {recursive: true});
+  const home = join(tmpDir, ".home");
+  const opts = {cwd: tmpDir, env: {
+    ...process.env, HOME: home, GIT_CONFIG_GLOBAL: join(home, ".gitconfig"), GIT_CONFIG_NOSYSTEM: "1",
+    GIT_AUTHOR_NAME: "Test User", GIT_AUTHOR_EMAIL: "test@test.com", GIT_COMMITTER_NAME: "Test User", GIT_COMMITTER_EMAIL: "test@test.com",
+  }};
+  await mkdir(home, {recursive: true});
   await exec("git", ["init", "-q"], opts);
   return opts;
 }
@@ -98,7 +86,8 @@ async function setupTaggedRepo(tmpDir: string) {
 
 async function setupReleaseRepo(tmpDir: string) {
   const opts = await setupTaggedRepo(tmpDir);
-  const bareDir = await createBareRemote(tmpDir);
+  const bareDir = join(tmpDir, "remote.git");
+  await exec("git", ["init", "--bare", "-q", bareDir], opts);
   await exec("git", ["remote", "add", "origin", "https://gitea.invalid/o/r.git"], opts);
   await exec("git", ["remote", "set-url", "--push", "origin", bareDir], opts);
   await exec("git", ["push", "origin", "master"], opts);
@@ -119,13 +108,23 @@ test("version", async () => {
   expect((await exec("node", [distPath, "-v"])).stdout).toEqual(pkg.version);
 });
 
-test("semver", () => {
-  expect(isSemver("1.0.0")).toEqual(true);
-  expect(isSemver("1.0.0-pre-1.0.0")).toEqual(true);
-  expect(isSemver("1.2.3-0123")).toEqual(false);
+test("isSemver, and incrementSemver levels, prerelease, preid and errors", () => {
+  expect(["1.0.0", "1.0.0-pre-1.0.0", "1.2.3-0123"].map(version => isSemver(version))).toEqual([true, true, false]);
   for (const base of ["10.10.10", "10.10.10-pre-1.0.0"]) {
     expect(["patch", "minor", "major"].map(level => incrementSemver(base, level))).toEqual(["10.10.11", "10.11.0", "11.0.0"]);
   }
+  expect(incrementSemver("1.0.0", "prerelease", "alpha")).toEqual("1.0.1-alpha.0");
+  expect(incrementSemver("1.0.1-beta.0", "prerelease", "beta")).toEqual("1.0.1-beta.1");
+  expect(incrementSemver("2.0.0-alpha.5", "prerelease", "rc")).toEqual("2.0.0-rc.0");
+  expect(incrementSemver("1.2.3-rc.1.2", "prerelease", "rc")).toEqual("1.2.3-rc.1.3");
+  expect(incrementSemver("1.2.3-alpha.beta.0", "prerelease", "alpha")).toEqual("1.2.3-alpha.beta.1");
+  expect(incrementSemver("1.2.3-alphax.1", "prerelease", "alpha")).toEqual("1.2.3-alpha.0");
+  expect(incrementSemver("1.0.0", "patch", "alpha")).toEqual("1.0.1-alpha.0");
+  expect(incrementSemver("1.0.0", "minor", "beta")).toEqual("1.1.0-beta.0");
+  expect(incrementSemver("1.0.0", "major", "rc")).toEqual("2.0.0-rc.0");
+  expect(() => incrementSemver("1.0.0", "prerelease")).toThrow("prerelease requires --preid option");
+  expect(() => incrementSemver("invalid", "patch")).toThrow("Invalid semver");
+  expect(() => incrementSemver("1.0.0", "unknown")).toThrow("Invalid semver level");
 });
 
 test("--date --gitless bumps each level, and a file passed twice only once", () => withTmpDir(async (tmpDir) => {
@@ -391,9 +390,8 @@ describe("forge requests", {concurrent: false}, () => {
 });
 
 test.each(["--gitless", "--no-push"])("%s and --release are mutually exclusive", async (flag) => {
-  const err = await runFail([flag, "--release", "--base", "1.0.0", "patch"]);
-  expect(err.exitCode).toEqual(1);
-  expect(err.output).toContain(`${flag} and --release are mutually exclusive`);
+  expect(await runFail([flag, "--release", "--base", "1.0.0", "patch"]))
+    .toMatchObject({exitCode: 1, output: expect.stringContaining(`${flag} and --release are mutually exclusive`)});
 });
 
 test("validate aborts before any mutation on forge ping, remote tag and non-descendant errors, and rejects a malformed tokens.json and detached HEAD", () => withTmpDir(async (tmpDir) => {
@@ -422,9 +420,8 @@ test("validate aborts before any mutation on forge ping, remote tag and non-desc
     .toMatch(/^Could not parse \S+tokens\.json: /);
 
   await exec("git", ["checkout", "--detach"], opts);
-  const err = await runFail(["--release", "patch", "package.json"], tokenOpts);
-  expect(err.exitCode).toEqual(1);
-  expect(err.output).toContain("Cannot push from detached HEAD");
+  expect(await runFail(["--release", "patch", "package.json"], tokenOpts))
+    .toMatchObject({exitCode: 1, output: expect.stringContaining("Cannot push from detached HEAD")});
 }));
 
 test("rollback - -c failure, also with --gitless, and push failure restore files, commit, prior annotated tag and the user's index", () => withTmpDir(async (tmpDir) => {
@@ -540,21 +537,6 @@ test("releasing to a non-default branch requires --any-branch, with or without -
   expect((await exec("git", ["branch", "--list"], {cwd: bareDir})).stdout).toContain("release");
 }));
 
-test("incrementSemver prerelease, preid and errors", () => {
-  expect(incrementSemver("1.0.0", "prerelease", "alpha")).toEqual("1.0.1-alpha.0");
-  expect(incrementSemver("1.0.1-beta.0", "prerelease", "beta")).toEqual("1.0.1-beta.1");
-  expect(incrementSemver("2.0.0-alpha.5", "prerelease", "rc")).toEqual("2.0.0-rc.0");
-  expect(incrementSemver("1.2.3-rc.1.2", "prerelease", "rc")).toEqual("1.2.3-rc.1.3");
-  expect(incrementSemver("1.2.3-alpha.beta.0", "prerelease", "alpha")).toEqual("1.2.3-alpha.beta.1");
-  expect(incrementSemver("1.2.3-alphax.1", "prerelease", "alpha")).toEqual("1.2.3-alpha.0");
-  expect(incrementSemver("1.0.0", "patch", "alpha")).toEqual("1.0.1-alpha.0");
-  expect(incrementSemver("1.0.0", "minor", "beta")).toEqual("1.1.0-beta.0");
-  expect(incrementSemver("1.0.0", "major", "rc")).toEqual("2.0.0-rc.0");
-  expect(() => incrementSemver("1.0.0", "prerelease")).toThrow("prerelease requires --preid option");
-  expect(() => incrementSemver("invalid", "patch")).toThrow("Invalid semver");
-  expect(() => incrementSemver("1.0.0", "unknown")).toThrow("Invalid semver level");
-});
-
 test("replaceTokens, with prerelease and build parts in _VER_ alone", () => {
   expect(replaceTokens("v_MAJOR_._MINOR_._PATCH_", "2.3.4")).toEqual("v2.3.4");
   expect(replaceTokens("_VER_ _MAJOR_ _MINOR_ _PATCH_", "10.20.30")).toEqual("10.20.30 10 20 30");
@@ -588,8 +570,8 @@ test("login and logout dispatch without a release level", () => withTmpDir(async
   const path = join(tmpDir, "versions", "tokens.json");
   await mkdir(join(tmpDir, "versions"), {recursive: true});
   await writeFile(path, JSON.stringify({"gitea.example.com:3000": "token"}));
-  const {stdout} = await exec("node", [distPath, "--logout", "https://GITEA.example.com:3000/path"], {env});
-  expect(stdout).toEqual("removed token for gitea.example.com:3000");
+  expect((await exec("node", [distPath, "--logout", "https://GITEA.example.com:3000/path"], {env})).stdout)
+    .toEqual("removed token for gitea.example.com:3000");
   expect(JSON.parse(await readFile(path, "utf8"))).toEqual({});
 }));
 
@@ -672,8 +654,8 @@ test("--replace with tokens, empty replacements and invalid flags, and --command
   expect(await readFile(join(tmpDir, "testfile.txt"), "utf8")).toEqual("version 1.0.1\ncopyright 1.0.1\ntail");
   expect(await readFile(join(tmpDir, "marker.txt"), "utf8")).toContain("hello");
 
-  const err = await runFail([...base, "-r", "s#a#b#q", "patch", "testfile.txt"], {cwd: tmpDir});
-  expect(err.output).toContain("Invalid replace string: s#a#b#q: Invalid flags");
+  expect((await runFail([...base, "-r", "s#a#b#q", "patch", "testfile.txt"], {cwd: tmpDir})).output)
+    .toContain("Invalid replace string: s#a#b#q: Invalid flags");
 }));
 
 test("a named package-lock.json is bumped, go.sum and other lockfiles are skipped", () => withTmpDir(async (tmpDir) => {
@@ -852,15 +834,11 @@ describe("token env", {concurrent: false}, () => {
   }));
 });
 
-test("getRepoInfo parses the origin remote, null without one", () => withTmpDir(async (tmpDir) => {
+test("getRepoInfo parses the origin remote, null without one, and removeIgnoredFiles drops gitignored files", () => withTmpDir(async (tmpDir) => {
   const opts = await initGitRepo(tmpDir);
   expect(await getRepoInfo(tmpDir)).toBeNull();
   await exec("git", ["remote", "add", "origin", "git@github.com:o/r.git"], opts);
   expect(await getRepoInfo(tmpDir)).toEqual({owner: "o", repo: "r", host: "github.com", type: "github"});
-}));
-
-test("removeIgnoredFiles", () => withTmpDir(async (tmpDir) => {
-  await initGitRepo(tmpDir);
   await writeFile(join(tmpDir, ".gitignore"), "ignored.txt\n");
   expect(await removeIgnoredFiles(["kept.txt", "ignored.txt"], tmpDir)).toEqual(["kept.txt"]);
 }));
