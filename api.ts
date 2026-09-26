@@ -165,12 +165,11 @@ const reLinkDefinition = /^\[[^\]]+\]:\s/;
 
 export function processChangelog(content: string, version: string, date: string): {entry: string, updated: string | null} | null {
   const lines = content.split(reNewline);
-  const headings = lines.map(line => reHeading.exec(line));
   const reVersion = new RegExp(`(?<![\\d.-])${esc(stripV(version))}(?![\\d.-])`, "i");
-  const index = headings.findIndex(match => match && reVersion.test(match[2]));
+  const index = lines.findIndex(line => reVersion.test(reHeading.exec(line)?.[2] ?? ""));
   if (index === -1) return null;
-  const level = headings[index]![1].length;
-  const end = headings.findIndex((match, i) => i > index && match && match[1].length <= level);
+  const level = reHeading.exec(lines[index])![1].length;
+  const end = lines.findIndex((line, i) => i > index && (reHeading.exec(line)?.[1].length ?? Infinity) <= level);
   const entryLines = lines.slice(index + 1, end === -1 ? lines.length : end);
   // Keep a Changelog trails link definitions below every section, the last entry would swallow them
   while (entryLines.length && (reLinkDefinition.test(entryLines.at(-1)!) || !entryLines.at(-1)!.trim())) entryLines.pop();

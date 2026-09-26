@@ -88,14 +88,19 @@ async function withTmpDir(fn: (tmpDir: string) => Promise<void>): Promise<void> 
   }
 }
 
-async function setupReleaseRepo(tmpDir: string) {
-  const [opts, bareDir] = await Promise.all([initGitRepo(tmpDir), createBareRemote(tmpDir)]);
+async function setupTaggedRepo(tmpDir: string) {
+  const opts = await initGitRepo(tmpDir);
   await exec("git", ["add", "."], opts);
   await exec("git", ["commit", "-m", "Initial commit"], opts);
+  await exec("git", ["tag", "1.0.0"], opts);
+  return opts;
+}
+
+async function setupReleaseRepo(tmpDir: string) {
+  const [opts, bareDir] = await Promise.all([setupTaggedRepo(tmpDir), createBareRemote(tmpDir)]);
   await exec("git", ["remote", "add", "origin", "https://gitea.invalid/o/r.git"], opts);
   await exec("git", ["remote", "set-url", "--push", "origin", bareDir], opts);
   await exec("git", ["push", "origin", "master"], opts);
-  await exec("git", ["tag", "1.0.0"], opts);
   return {bareDir, opts};
 }
 
@@ -181,7 +186,7 @@ test("base version is the highest same-second tag on the described commit", () =
 
 test("warns only when a manifest disagrees with a detected base version", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), pkgJson("9.9.9"));
-  const {opts} = await setupReleaseRepo(tmpDir);
+  const opts = await setupTaggedRepo(tmpDir);
   expect((await exec("node", [distPath, "-D", "patch", "package.json"], opts)).stderr)
     .toContain("warning: package.json declares 9.9.9 but the base version is 1.0.0");
   expect((await exec("node", [distPath, "-D", "--base=7.0.0", "patch", "package.json"], opts)).stderr).not.toContain("warning:");
@@ -639,7 +644,7 @@ test("--skip-empty tags HEAD without a commit when nothing needs committing, and
 test("--skip-empty still commits a changelog date, staged changes and --all changes", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1\n- entry\n");
   await writeFile(join(tmpDir, "notes.txt"), "base\n");
-  const {opts} = await setupReleaseRepo(tmpDir);
+  const opts = await setupTaggedRepo(tmpDir);
 
   await exec("node", [distPath, "--skip-empty", "--no-push", "patch"], opts);
   expect((await exec("git", ["show", "--name-only", "--format=", "HEAD"], opts)).stdout).toEqual("CHANGELOG.md");
@@ -686,7 +691,7 @@ test.each([
   const manifest = (dep: string) => JSON.stringify({version: "1.0.0", packageManager: `${pm}@11.0.0`, devDependencies: {timerel: dep}});
   await writeFile(join(tmpDir, "package.json"), manifest("5.8.7"));
   await writeFile(join(tmpDir, lockfile), lock("1.0.0", "5.8.7"));
-  const {opts} = await setupReleaseRepo(tmpDir);
+  const opts = await setupTaggedRepo(tmpDir);
   await writeFile(join(tmpDir, "package.json"), manifest("5.8.8"));
   await writeFile(join(tmpDir, lockfile), lock("1.0.0", "5.8.8"));
 
@@ -727,7 +732,7 @@ test("commit and tag messages drop an empty --message, take --message tokens and
   const changelogPath = join(tmpDir, "CHANGELOG.md");
   await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
   await writeFile(changelogPath, `# Changelog\n\n## [1.0.2] - 2024-01-15\n- existing entry\n\n## [1.0.1]\n### Added\n- Fixed thing X\n- Added thing Y\n\n## 1.0.0\nold stuff\n`);
-  const {opts} = await setupReleaseRepo(tmpDir);
+  const opts = await setupTaggedRepo(tmpDir);
   await exec("git", ["config", "commit.cleanup", "verbatim"], opts);
 
   await exec("node", [distPath, "--no-push", "-m", "", "-m", "Release _VER_", "patch", "package.json"], opts);
@@ -747,7 +752,7 @@ test("commit and tag messages drop an empty --message, take --message tokens and
 test("a CHANGELOG.md-only bump is not read as a wrong base version", () => withTmpDir(async (tmpDir) => {
   await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
   await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## 1.0.1\n- entry\n\n## 1.0.0\nold\n`);
-  const {opts} = await setupReleaseRepo(tmpDir);
+  const opts = await setupTaggedRepo(tmpDir);
   await exec("node", [distPath, "--no-push", "patch", "CHANGELOG.md"], opts);
   expect(await readFile(join(tmpDir, "CHANGELOG.md"), "utf8")).toContain(`## 1.0.1 - ${new Date().toISOString().substring(0, 10)}`);
   expect((await exec("git", ["show", "--name-only", "--format=", "HEAD"], opts)).stdout.trim()).toEqual("CHANGELOG.md");
@@ -757,7 +762,7 @@ test("-N reads notes from stdin or a file over CHANGELOG.md for commit and tag",
   await writeFile(join(tmpDir, "package.json"), pkgJson("1.0.0"));
   await writeFile(join(tmpDir, "CHANGELOG.md"), "# Changelog\n\n## [1.0.1]\n- from changelog\n");
   await writeFile(join(tmpDir, "notes.md"), "- from notes file\n");
-  const {opts} = await setupReleaseRepo(tmpDir);
+  const opts = await setupTaggedRepo(tmpDir);
   await exec("node", [distPath, "--no-push", "-N", "-", "patch", "package.json"], {...opts, stdin: "- from stdin\n"});
   await expectReleaseMessage(opts, "1.0.1", "1.0.1\n\n- from stdin");
   await exec("node", [distPath, "--no-push", "-N", "notes.md", "patch", "package.json"], opts);
