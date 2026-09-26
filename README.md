@@ -7,8 +7,8 @@ Files given on the command line get the new version written into them. The commi
 
 ## Usage
 
-```bash
-pnpm i -D versions
+```sh
+pnpm add -D versions
 pnpm exec versions --release --prefix patch  # tag-only, e.g. a Go module
 pnpm exec versions patch package.json        # Node
 pnpm exec versions patch pyproject.toml      # Python
