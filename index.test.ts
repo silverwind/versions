@@ -250,6 +250,8 @@ old
   expect(processChangelog("## 1.0.0\n\n[pr]: https://e.com/1\n\n- see [pr]\n\n[1.0.0]: https://e.com/c\n", "1.0.0", today)!.entry)
     .toEqual("[pr]: https://e.com/1\n\n- see [pr]");
   expect(processChangelog("# 1.0.0\n\nbody\n", "1.0.0", today)!.entry).toEqual("body");
+  const fenced = "```sh\n# install\nnpm i\n```\n~~~\n## 0.9.0\n~~~";
+  expect(processChangelog(`\`\`\`md\n## 1.0.0\n\`\`\`\n## 1.0.0\n${fenced}\n## 0.9.0\nold\n`, "1.0.0", today)!.entry).toEqual(fenced);
   expect(processChangelog("## 1.0.0-rc.1\n\nrc\n## 1.0.0\n\nrelease\n", "1.0.0", today)!.entry).toEqual("release");
   expect(processChangelog("## 1.0.0\n\nrelease\n## 1.0.0-rc.1\n\nrc\n", "1.0.0-rc.1", today)!.entry).toEqual("rc");
   expect(processChangelog(md, "9.9.9", today)).toBeNull();
@@ -482,8 +484,8 @@ test("push goes to origin by default, nowhere with --no-push, and to --remote, w
   expect(await bareGit(["tag", "--list"])).toContain("1.0.3");
 }));
 
-test("-R -p patch with no files commits the changelog entry, pushes and creates the release", () => withTmpDir(async (tmpDir) => {
-  const entry = "### Fixed\n- existing entry";
+test("-R -p patch with no files commits the changelog entry with its fenced code, pushes and creates the release", () => withTmpDir(async (tmpDir) => {
+  const entry = "### Fixed\n- existing entry\n\n```sh\n# install\nnpm i\n```";
   await writeFile(join(tmpDir, "CHANGELOG.md"), `# Changelog\n\n## 1.0.1 - 2024-01-15\n${entry}\n`);
   const {bareDir, opts} = await setupReleaseRepo(tmpDir);
   const certPath = fileURLToPath(new URL("fixtures/https/cert.pem", import.meta.url));

@@ -162,14 +162,24 @@ const reHeading = /^(#+)\s+(.*?)\s*$/;
 // YYYY-MM-DD, xxxx-xx-xx, ????-??-??, DD-MM-YYYY, YYYY/MM/DD
 const rePlaceholderDate = /[YMDX?]{2,4}[-/. ][YMDX?]{2,4}[-/. ][YMDX?]{2,4}/i;
 const reLinkDefinition = /^\[[^\]]+\]:\s/;
+const reFence = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 export function processChangelog(content: string, version: string, date: string): {entry: string, updated: string | null} | null {
   const lines = content.split(reNewline);
   const reVersion = new RegExp(`(?<![\\d.-])${esc(stripV(version))}(?![\\d.-])`, "i");
-  const index = lines.findIndex(line => reVersion.test(reHeading.exec(line)?.[2] ?? ""));
+  let fence = ""; // shared by both scans below, which visit lines in order
+  const unfencedHeading = (line: string) => {
+    const fenceMatch = reFence.exec(line);
+    if (!fenceMatch) return fence ? null : reHeading.exec(line);
+    const [marker, info] = fenceMatch.slice(1);
+    if (!fence) fence = marker;
+    else if (marker[0] === fence[0] && marker.length >= fence.length && !info.trim()) fence = "";
+    return null;
+  };
+  const index = lines.findIndex(line => reVersion.test(unfencedHeading(line)?.[2] ?? ""));
   if (index === -1) return null;
   const level = reHeading.exec(lines[index])![1].length;
-  const end = lines.findIndex((line, i) => i > index && (reHeading.exec(line)?.[1].length ?? Infinity) <= level);
+  const end = lines.findIndex((line, i) => i > index && (unfencedHeading(line)?.[1].length ?? Infinity) <= level);
   const entryLines = lines.slice(index + 1, end === -1 ? lines.length : end);
   // Keep a Changelog trails link definitions below every section, the last entry would swallow them
   while (entryLines.length && (reLinkDefinition.test(entryLines.at(-1)!) || !entryLines.at(-1)!.trim())) entryLines.pop();
