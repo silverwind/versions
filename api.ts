@@ -412,8 +412,7 @@ async function deleteMatchingDrafts(apiUrl: string, authHeader: string, tagName:
   const drafts = releases.filter(release => release.draft && release.tag_name === tagName);
   for (const draft of drafts) {
     const label = `Failed to delete draft release ${draft.id}`;
-    const deleteResponse = await forgeFetch("DELETE", `${apiUrl}/${draft.id}`, authHeader, label);
-    await ensureOk(deleteResponse, label, true);
+    await ensureOk(await forgeFetch("DELETE", `${apiUrl}/${draft.id}`, authHeader, label), label, true);
     console.info(`Deleted stale draft release for ${tagName}`);
   }
   return drafts.length > 0;
