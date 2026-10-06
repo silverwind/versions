@@ -257,14 +257,14 @@ async function main(): Promise<void> {
 
   files = Array.from(new Set(files.flatMap(file => {
     const lockfile = findCompanionLockfile(file);
-    if (!lockfile) return [file];
+    if (!lockfile) return file;
     logVerbose(`including ${lockfile}`);
     return [file, lockfile];
   })));
 
   const fileChanges = files.flatMap(file => {
     const changes = getFileChanges({file, baseVersion, newVersion, replacements, date: args.date ? today : ""});
-    if (changes) return [{path: file, ...changes}];
+    if (changes) return {path: file, ...changes};
     logVerbose(`skipping ${file} (unhandled lockfile)`);
     return [];
   });

@@ -78,12 +78,12 @@ export function tomlGetString(content: string, section: string, key: string): st
 }
 
 // first match per section, as a pyproject may carry the version in both
-export function tomlReplaceFirst(content: string, sections: readonly string[], lineRe: RegExp, replacement: string): string {
+export function tomlReplaceFirst(content: string, sections: readonly string[], lineRe: RegExp, value: string): string {
   const lines = content.split(reNewline);
   const done = new Set<string>();
   for (const [i, section] of tomlSectionLines(lines, sections)) {
     if (done.has(section) || !lineRe.test(lines[i])) continue;
-    lines[i] = lines[i].replace(lineRe, replacement);
+    lines[i] = lines[i].replace(lineRe, (_, pre, post) => `${pre}${value}${post}`);
     done.add(section);
     if (done.size === sections.length) break;
   }

@@ -34,10 +34,10 @@ export function isSemver(str: string): boolean {
 export function replaceTokens(str: string, newVersion: string): string {
   const [major, minor, patch] = reSemver.exec(stripV(newVersion))!.slice(1);
   return str
-    .replaceAll("_VER_", newVersion)
-    .replaceAll("_MAJOR_", major)
-    .replaceAll("_MINOR_", minor)
-    .replaceAll("_PATCH_", patch);
+    .replaceAll("_VER_", () => newVersion)
+    .replaceAll("_MAJOR_", () => major)
+    .replaceAll("_MINOR_", () => minor)
+    .replaceAll("_PATCH_", () => patch);
 }
 
 export function incrementSemver(str: string, level: string, preid?: string): string {
@@ -187,7 +187,7 @@ export function processChangelog(content: string, version: string, date: string)
   if (!entry) return null;
   const heading = lines[index];
   if (rePlaceholderDate.test(heading)) {
-    lines[index] = heading.replace(rePlaceholderDate, date);
+    lines[index] = heading.replace(rePlaceholderDate, () => date);
   } else if (reDate.test(heading)) {
     return {entry, updated: null};
   } else {
@@ -227,18 +227,18 @@ export function getFileChanges({file, baseVersion, newVersion, replacements, dat
     if (lockFile.packages?.[""]?.version) lockFile.packages[""].version = newVersion; // v2 and v3
     newData = `${JSON.stringify(lockFile, null, 2)}\n`;
   } else if (fileName === "pyproject.toml") {
-    newData = tomlReplaceFirst(oldData, pyprojectSections, reTomlVersionLine, `$1${newVersion}$2`);
+    newData = tomlReplaceFirst(oldData, pyprojectSections, reTomlVersionLine, newVersion);
   } else if (fileName === "uv.lock") {
     const name = pyprojectGet(readFileSync(join(dirname(file), "pyproject.toml"), "utf8"), "name");
     if (!name) throw new Error(`Could not determine project name from pyproject.toml for ${file}`);
     const re = new RegExp(`(\\[\\[package\\]\\]\r?\nname = "${esc(name)}"\r?\nversion = ").+?(")`);
-    newData = oldData.replace(re, `$1${newVersion}$2`);
+    newData = oldData.replace(re, (_, pre, post) => `${pre}${newVersion}${post}`);
   } else {
-    newData = oldData.replace(new RegExp(`(?<!\\d)${esc(baseVersion)}(?!\\d)`, "g"), newVersion);
+    newData = oldData.replace(new RegExp(`(?<!\\d)${esc(baseVersion)}(?!\\d)`, "g"), () => newVersion);
   }
 
-  if (date) newData = newData.replace(new RegExp(reDate, "g"), date);
-  for (const {re, replacement} of replacements ?? []) newData = newData.replace(re, replacement);
+  if (date) newData = newData.replace(new RegExp(reDate, "g"), () => date);
+  for (const {re, replacement} of replacements ?? []) newData = newData.replace(re, replacement); // eslint-disable-line unicorn/no-unsafe-string-replacement -- user replacements support $1 backrefs
   return {newData, oldData};
 }
 
