@@ -807,7 +807,7 @@ async function withTokenEnv(env: Record<string, string>, fn: () => Promise<void>
 const giteaHost = (host: string): RepoInfo => ({...giteaInfo, host});
 
 describe("token env", {concurrent: false}, () => {
-  serialTest("getForgeTokens puts a stored token before deduplicated env tokens, which bind to github.com and the GITEA_URL host", () => withTokenEnv({
+  serialTest("getForgeTokens prefers stored tokens, deduplicates host-bound env tokens and ignores inherited stored keys", () => withTokenEnv({
     GH_TOKEN: "gh-tok", GITEA_AUTH_TOKEN: "gitea-tok", GITEA_TOKEN: "gitea-tok", GITEA_URL: "https://gitea.example.com",
   }, async () => {
     await storeToken("gitea.example.com", "stored-token");
@@ -815,6 +815,12 @@ describe("token env", {concurrent: false}, () => {
     expect(await getForgeTokens(giteaInfo)).toEqual(["stored-token", "gitea-tok"]);
     expect(await getForgeTokens(giteaHost("other.example.com"))).toEqual([]);
     await removeToken("gitea.example.com");
+    for (const host of ["__proto__", "constructor", "prototype", "toString", "hasOwnProperty", "valueOf"]) {
+      expect(await getForgeTokens(giteaHost(host))).toEqual([]);
+      await storeToken(host, "stored-token");
+      expect(await getForgeTokens(giteaHost(host))).toEqual(["stored-token"]);
+      await removeToken(host);
+    }
   }));
 
   serialTest("getForgeTokens matches a VERSIONS_FORGE_TOKENS host carrying a port over env tokens, the bare host does not claim it", () => withTokenEnv({

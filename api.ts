@@ -298,7 +298,8 @@ export async function getForgeTokens(repoInfo: RepoInfo, cwd?: string): Promise<
   const pair = pairToken(repoInfo.host);
   if (pair) return [pair];
 
-  const stored = (await readTokens())[repoInfo.host];
+  const storedTokens = await readTokens();
+  const stored = Object.hasOwn(storedTokens, repoInfo.host) ? storedTokens[repoInfo.host] : undefined;
   const tokens = (repoInfo.host === "github.com" ? githubTokenEnvNames :
     repoInfo.host === urlHost(env.GITEA_URL) ? giteaTokenEnvNames : []).map(name => env[name]);
 
