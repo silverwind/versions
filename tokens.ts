@@ -37,11 +37,11 @@ async function writeTokens(tokens: Tokens): Promise<void> {
 }
 
 export async function storeToken(host: string, token: string): Promise<void> {
-  await writeTokens({...await readTokens(), [host]: token});
+  await writeTokens({...(await readTokens()), [host]: token});
 }
 
 export async function removeToken(host: string): Promise<boolean> {
-  const tokens = {...await readTokens()};
+  const tokens = {...(await readTokens())};
   if (!Object.hasOwn(tokens, host)) return false;
   delete tokens[host];
   await writeTokens(tokens);

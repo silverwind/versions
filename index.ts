@@ -376,7 +376,7 @@ async function main(): Promise<void> {
         }
         // the tag is created further down, so priorLocalTagOid still reflects a pre-existing one
         const since = priorLocalTagOid ? tagName : baseTag ?? await lastTag();
-        return await tryExec("git", ["log", ...since ? [`${since}..HEAD`] : [], "--pretty=format:* %s (%aN)"]) || undefined;
+        return await tryExec("git", ["log", ...(since ? [`${since}..HEAD`] : []), "--pretty=format:* %s (%aN)"]) || undefined;
       })(),
     ]);
     const message = [tagName, ...msgs, changelogBody].filter(Boolean).join("\n\n").trim();
